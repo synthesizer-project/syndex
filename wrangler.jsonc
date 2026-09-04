@@ -3,9 +3,12 @@
   "name": "synthesizer-data-api",
   "main": "src/worker/index.js",
   "compatibility_date": "2026-09-04",
-  // The branded hostname is the only public entrypoint: workers.dev is
-  // disabled so there is never a second URL for the same catalogue.
-  "workers_dev": false,
+  // workers.dev stays enabled as a second entrypoint while
+  // data.synthesizer-project.org is young: security products routinely block
+  // or TLS-intercept newly registered domains, and the downloader falls back
+  // to this hostname when the branded one cannot be reached. Disable it once
+  // the domain has aged out of those categories.
+  "workers_dev": true,
   "routes": [
     {
       "pattern": "data.synthesizer-project.org",

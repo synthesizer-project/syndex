@@ -35,8 +35,8 @@ Not yet deployed:
 - Catalogue website.
 
 Do not perform a real upload yet. The next milestone is reviewing a dry run for
-the five existing test-data objects, then applying the D1 migration and
-publishing that pilot.
+the nine CI pilot objects described in [`docs/test-data-pilot.json`](docs/test-data-pilot.json),
+then applying the D1 migration and publishing that pilot.
 
 ## Architecture
 

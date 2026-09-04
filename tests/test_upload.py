@@ -260,6 +260,42 @@ def test_dust_extinction_curve_grid_type_detected(tmp_path):
     assert plan["grid"]["emission_type"] == "dust_attenuation"
 
 
+def test_dust_grids_are_a_separate_data_type_and_prefix(tmp_path):
+    dust_path = tmp_path / "dust.hdf5"
+    make_dust_extinction_grid(dust_path)
+    stellar_path = tmp_path / "grid.hdf5"
+    make_grid(stellar_path)
+    metadata = {
+        "defaults": {},
+        "files": {
+            "grid.hdf5": {"grid": {"grid_type": "sps", "emission_type": "incident"}}
+        },
+    }
+    sources = upload.discover_files([tmp_path])
+
+    plans, errors = upload.build_plans(sources, metadata, {})
+
+    assert not errors
+    by_name = {plan["file"]["filename"]: plan for plan in plans}
+    dust = by_name["dust.hdf5"]
+    stellar = by_name["grid.hdf5"]
+    assert dust["dataset"]["data_type"] == "dust_grid"
+    assert dust["file"]["r2_path"].startswith("dust-grid/")
+    assert dust["grid"]["axes"], "dust grids still populate grid_axes"
+    assert stellar["dataset"]["data_type"] == "grid"
+    assert stellar["file"]["r2_path"].startswith("grid/")
+
+
+def test_test_dust_grid_prefix_stays_under_test_data(tmp_path):
+    path = tmp_path / "dust.hdf5"
+    make_dust_extinction_grid(path)
+    source = upload.SourceFile(path, path.name)
+
+    plan = upload.build_plan(source, {"is_test": True}, {})
+
+    assert plan["file"]["r2_path"].startswith("test-data/dust-grid/")
+
+
 def test_photometric_imager_extraction(tmp_path):
     path = tmp_path / "instrument.hdf5"
     make_photometric_imager(path)

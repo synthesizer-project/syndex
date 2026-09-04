@@ -22,21 +22,28 @@ grid and a CAMELS snapshot are both HDF5 files but have `data_type = grid` and
 ## R2 Layout
 
 ```text
-{meaningful hierarchy}/{sha256}/{filename}
+{prefix}/{sha256}/{filename}
 ```
 
-Examples:
+`prefix` defaults to the dataset's `data_type` with underscores replaced by
+hyphens, below `test-data/` when `is_test` is set. Examples:
 
 ```text
-grids/sps/bpass/incident/{sha256}/bpass-2.2.1-bin_chabrier03-0.1,300.0.hdf5
-grids/sps/bpass/photoionised/{sha256}/bpass-2.2.1-bin_chabrier03-0.1,300.0_cloudy-c23.01-sps.hdf5
-instruments/jwst/{sha256}/JWST_NIRCam.hdf5
-test-data/camels/{sha256}/camels_snap.hdf5
+dust-grid/{sha256}/draine_li_dust_emission_grid_MW_3p1.hdf5
+instrument/{sha256}/Euclid_NISP.hdf5
+test-data/grid/{sha256}/qsosed-test_cloudy-c23.01-agn-test.hdf5
+test-data/simulation-data/{sha256}/camels_snap.hdf5
 ```
 
+A publication may override `prefix` with an explicit `r2_prefix`, but the
+default is deliberately flat. Scientific classification lives in D1
+(`data_type`, `grid_type`, `emission_type`, `instrument_type`), so a deeper
+path hierarchy would duplicate that metadata by hand for every published file
+and drift from it. Path hierarchy is administrative rather than authoritative
+classification.
+
 Published objects are never overwritten. Changed bytes produce a new digest
-and path. `filename` preserves the basename presented to users; path hierarchy
-is administrative rather than authoritative classification.
+and path. `filename` preserves the basename presented to users.
 
 ## Relationships
 
@@ -91,8 +98,18 @@ CREATE TABLE datasets (
 ```
 
 `name` is catalogue identity, not a filename. Expected initial `data_type`
-values include `grid`, `instrument`, `simulation_data`, `generation_data`, and
-`synference_data`. `is_test` is independent of data type and marks reduced or
+values include `grid`, `dust_grid`, `instrument`, `simulation_data`,
+`generation_data`, `synference_data`, and `cache` for mechanical CI
+dependencies such as the SVO filter response archive.
+
+`dust_grid` is a distinct type, not a flavour of `grid`. Dust grids describe
+dust attenuation curves and dust emission spectra rather than stellar or AGN
+emission, so they are classified, prefixed, listed, and filtered separately
+throughout: `data_type = dust_grid`, an R2 prefix of `dust-grid/`, and
+`emission_type` of `dust_attenuation` or `dust_emission`. Both `grid` and
+`dust_grid` still populate `grid_metadata` and `grid_axes`, because the
+underlying HDF5 layout is shared. `data_type` is detected structurally: any
+file whose resolved `grid_type` is `dust` is published as `dust_grid`. `is_test` is independent of data type and marks reduced or
 synthetic fixtures not intended for scientific production. A production
 instrument used by CI remains `is_test = 0`. Current release and scientific
 recommendation are separate decisions.
@@ -120,9 +137,15 @@ CREATE TABLE releases (
 
 Numeric ID, SHA-256, and publication date identify a release. Historical
 releases remain available after the current release changes.
-`provenance_json` records information such as original Box path and URL,
-generation tool, and source creation date. It is retained for detail responses
-but is not intended for filtering.
+
+`provenance_json` records how the published bytes came to exist: the HDF5
+root attributes the file reports about itself (`date_created`,
+`synthesizer_version`, `synthesizer_grids_version`) under an `hdf5` key, plus
+any curated `source` describing the underlying scientific data. It is
+retained for detail responses but is not intended for filtering. Download
+locations are deliberately not recorded: the R2 path and SHA-256 already
+identify the bytes, and a source URL for a service being retired would be
+dead metadata on every release.
 
 ## Grid Metadata
 
@@ -148,7 +171,8 @@ CREATE TABLE grid_metadata (
 );
 ```
 
-Expected `grid_type` values include `sps`, `agn`, and `dust`. Initial
+Expected `grid_type` values include `sps`, `agn`, and `dust`; `dust` always
+accompanies `data_type = dust_grid`. Initial
 `emission_type` values include `incident`, `photoionised`, `dust_emission`, and
 `dust_attenuation`; inventory validation may refine this vocabulary.
 

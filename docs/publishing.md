@@ -18,8 +18,8 @@ For every file, `syndicate-upload`:
 2. Recognizes Synthesizer grids from their HDF5 structure.
 3. Combines command-line defaults with per-file metadata.
 4. Extracts grid axes, spectra names, line IDs, wavelength coverage, model
-   metadata, photoionisation metadata, and provenance without loading spectra or
-   luminosity arrays.
+   metadata, photoionisation metadata, and the file's self-reported generation
+   attributes without loading spectra or luminosity arrays.
 5. Calculates file size and SHA-256.
 6. Builds and validates the complete catalogue record in memory.
 7. Uploads the file to its content-addressed R2 path.
@@ -53,13 +53,17 @@ Physical format and semantic data type are different:
 | File | Detected format | Catalogue `data_type` |
 |---|---|---|
 | Synthesizer grid | `hdf5` | `grid` |
+| Synthesizer dust grid | `hdf5` | `dust_grid` |
 | CAMELS snapshot | `hdf5` | `simulation_data` |
 | Instrument definition | `hdf5` | `instrument` |
 | SC-SAM history | `dat` | `simulation_data` |
 
 The command detects HDF5, FITS, NPZ/ZIP, and gzip from content, with extension
-fallback for plain files. It assigns `data_type = grid` only when HDF5 structure
-matches a Synthesizer grid. Other semantic types cannot be inferred safely and
+fallback for plain files. It assigns a grid `data_type` only when HDF5
+structure matches a Synthesizer grid: `dust_grid` when the resolved `grid_type`
+is `dust`, otherwise `grid`. Dust grids are deliberately a separate catalogue
+type rather than a flavour of `grid`, so they also take a separate
+`dust-grid/` R2 prefix. Other semantic types cannot be inferred safely and
 must be supplied by command-line default or per-file metadata.
 
 Directories may contain mixed formats and semantic types. A homogeneous batch
@@ -110,8 +114,7 @@ Metadata is JSON with optional batch `defaults` and per-file `files` entries:
       },
       "set_current": true,
       "provenance": {
-        "source": "Box",
-        "source_path": "test_data/test_grid.hdf5"
+        "source": "BPASS 2.2.1 binary models, Chabrier (2003) IMF"
       }
     },
     "camels_snap.hdf5": {
@@ -141,7 +144,7 @@ Supported catalogue fields:
 | `name` | Stable lowercase dataset identifier | Slug of filename stem |
 | `display_name` | Human-readable catalogue name | Filename stem |
 | `description` | Human-readable explanation | `null` |
-| `data_type` | `grid`, `instrument`, `simulation_data`, etc. | Recognized grids only |
+| `data_type` | `grid`, `dust_grid`, `instrument`, `simulation_data`, etc. | Recognized grids only |
 | `is_test` | Fixture not intended for scientific production | `false` |
 | `is_recommended` | Scientifically recommended dataset | `false` |
 | `licence` | Licence identifier or text | `null` |
@@ -151,11 +154,12 @@ Supported catalogue fields:
 | `published_at` | Publication timestamp | Current UTC time |
 | `synthesizer_min_version` | Earliest compatible release | `null` |
 | `synthesizer_max_version` | Latest compatible release | `null` |
-| `provenance` | Source path, URL, generator, or related context | `{}` |
+| `provenance` | Origin of the underlying scientific data | `{}` |
 | `set_current` | Select release as current | `false` |
 
 Grid files also require `grid.grid_type` and `grid.emission_type`, either
-supplied explicitly or detected. `grid_type: dust` is detected whenever the
+supplied explicitly or detected. A resolved `grid_type` of `dust` publishes the
+file as `data_type = dust_grid`. `grid_type: dust` is detected whenever the
 filename contains "dust" (a reliable Synthesizer naming convention) or the
 file uses the `extinction_curves` HDF5 layout. `emission_type` is detected as
 `dust_attenuation` for the `extinction_curves` layout and `dust_emission` for
@@ -181,15 +185,22 @@ used in tests remain `is_test = false`.
 
 Real publication requires:
 
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for R2 S3 access.
-- `CLOUDFLARE_API_TOKEN` with D1 write access.
+- `SYNTHESIZER_R2_ACCESS_KEY_ID` and `SYNTHESIZER_R2_SECRET_ACCESS_KEY` for R2
+  S3 access. Ambient `AWS_*` credentials are deliberately not used, so an
+  unrelated AWS profile can never silently become the upload identity.
+- `SYNTHESIZER_D1_API_TOKEN` with D1 write access.
+
+Every variable is namespaced to this project and read only under that exact
+name. Generic `AWS_*` and `CLOUDFLARE_*` variables are deliberately ignored, so
+credentials or an account id belonging to unrelated infrastructure can never
+silently become the publication identity.
 
 Do not pass secrets as command arguments or commit them to files. Optional
 configuration variables are:
 
 | Variable | Purpose |
 |---|---|
-| `CLOUDFLARE_ACCOUNT_ID` | Override Cloudflare account |
+| `SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID` | Override Cloudflare account |
 | `SYNTHESIZER_R2_BUCKET` | Override `synthesizer-data` |
 | `SYNTHESIZER_D1_DATABASE_ID` | Override production D1 ID |
 | `SYNTHESIZER_DATA_API_URL` | Enable final public API verification |

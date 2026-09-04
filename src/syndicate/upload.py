@@ -21,6 +21,12 @@ from typing import Any
 import h5py
 import numpy as np
 
+# Dust grids are a separate catalogue type rather than a flavour of "grid":
+# they carry attenuation curves or dust emission spectra instead of stellar or
+# AGN spectra, so they are classified, prefixed, and filtered separately. Both
+# types still populate grid_metadata and grid_axes.
+GRID_DATA_TYPES = ("grid", "dust_grid")
+
 DEFAULT_ACCOUNT_ID = "e86ac0bb0bee64457c144e84d67966ef"
 DEFAULT_BUCKET = "synthesizer-data"
 DEFAULT_DATABASE_ID = "6504c716-2065-4b31-8618-453ac12a1144"
@@ -733,7 +739,12 @@ def build_plan(
     config = _merge(defaults, file_override)
     physical_format = detect_format(source.path)
     extracted_grid = extract_hdf5(source.path) if physical_format == "hdf5" else None
-    data_type = config.get("data_type") or ("grid" if extracted_grid else None)
+    detected_data_type = None
+    if extracted_grid is not None:
+        detected_data_type = (
+            "dust_grid" if extracted_grid.get("grid_type") == "dust" else "grid"
+        )
+    data_type = config.get("data_type") or detected_data_type
     if not data_type:
         raise UploadError(f"{source.key}: data_type is required for non-grid files")
     if not re.fullmatch(r"[a-z][a-z0-9_]*", data_type):
@@ -745,7 +756,7 @@ def build_plan(
         raise UploadError(f"{source.key}: invalid dataset name {dataset_name!r}")
 
     grid = None
-    if data_type == "grid":
+    if data_type in GRID_DATA_TYPES:
         if extracted_grid is None:
             raise UploadError(
                 f"{source.key}: file is not a recognized Synthesizer grid"
@@ -859,19 +870,29 @@ def _make_s3_client(account_id: str):
         account_id: Cloudflare account identifier.
 
     Returns:
-        Configured boto3 S3 client using environment credentials.
+        Configured boto3 S3 client using the explicit SYNTHESIZER_R2_*
+        credentials.
 
     Raises:
-        UploadError: If boto3 is unavailable.
+        UploadError: If boto3 is unavailable or credentials are missing.
     """
     try:
         import boto3
     except ImportError as exc:
         raise UploadError("boto3 is required for publication") from exc
+    access_key = os.getenv("SYNTHESIZER_R2_ACCESS_KEY_ID")
+    secret_key = os.getenv("SYNTHESIZER_R2_SECRET_ACCESS_KEY")
+    if not access_key or not secret_key:
+        raise UploadError(
+            "R2 credentials are required (set SYNTHESIZER_R2_ACCESS_KEY_ID "
+            "and SYNTHESIZER_R2_SECRET_ACCESS_KEY)"
+        )
     return boto3.client(
         "s3",
         endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
         region_name="auto",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
     )
 
 
@@ -1216,7 +1237,8 @@ def _parser() -> argparse.ArgumentParser:
         "--set-current", action=argparse.BooleanOptionalAction, default=None
     )
     parser.add_argument(
-        "--account-id", default=os.getenv("CLOUDFLARE_ACCOUNT_ID", DEFAULT_ACCOUNT_ID)
+        "--account-id",
+        default=os.getenv("SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID", DEFAULT_ACCOUNT_ID),
     )
     parser.add_argument(
         "--bucket", default=os.getenv("SYNTHESIZER_R2_BUCKET", DEFAULT_BUCKET)
@@ -1270,9 +1292,9 @@ def run(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return 0
 
-    token = os.getenv("CLOUDFLARE_API_TOKEN")
+    token = os.getenv("SYNTHESIZER_D1_API_TOKEN")
     if not token:
-        print("error: CLOUDFLARE_API_TOKEN is required", file=sys.stderr)
+        print("error: SYNTHESIZER_D1_API_TOKEN is required", file=sys.stderr)
         return 2
     try:
         s3_client = _make_s3_client(args.account_id)

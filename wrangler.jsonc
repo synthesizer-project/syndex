@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "synthesizer-data-api",
+  "compatibility_date": "2026-09-04",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "synthesizer-database",
+      "database_id": "6504c716-2065-4b31-8618-453ac12a1144",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "synthesizer-data"
+    }
+  ]
+}

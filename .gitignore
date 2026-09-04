@@ -1,0 +1,8 @@
+.dev.vars
+.pytest_cache/
+.venv/
+.wrangler/
+__pycache__/
+dist/
+node_modules/
+*.egg-info/

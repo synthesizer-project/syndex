@@ -1,4 +1,7 @@
-# Data Service Plan
+# Architecture and Delivery Plan
+
+This document records agreed design decisions and unfinished work. For current
+commands and operational warnings, see [publishing.md](publishing.md).
 
 ## Goal
 
@@ -91,10 +94,10 @@ second persisted representation.
 
 ## Delivery Order
 
-1. Finalize schema vocabulary and extracted metadata.
-2. Add local D1 migrations and read-only Worker.
-3. Add HDF5 inspection and transactional publication tooling.
-4. Publish the existing test-data pilot set.
+1. **In progress:** finalize schema vocabulary using pilot metadata.
+2. **Partial:** local D1 migration exists; read-only Worker remains to build.
+3. **Implemented locally:** HDF5 inspection and transactional publication CLI.
+4. **Next:** dry-run and publish the existing test-data pilot set.
 5. Integrate test paths in `synthesizer-download`.
 6. Migrate remaining categories incrementally and update their downloader paths.
 7. Compare catalogues and retain Box through a transition period.

@@ -3,6 +3,22 @@
 R2 stores immutable files. D1 is the authoritative catalogue containing file
 locations, release history, complete extracted metadata, and publication state.
 
+The executable schema lives in [`migrations/0001_initial.sql`](../migrations/0001_initial.sql).
+SQL below explains that migration and must be updated with it.
+
+## Concepts
+
+- A **file** is one immutable sequence of bytes in R2, identified by SHA-256.
+- A **dataset** is a stable catalogue identity presented to users.
+- A **release** connects one version of a dataset to one immutable file.
+- **Grid metadata** describes scientific properties specific to grid releases.
+- **Grid axes** retain ordered values separately so common ranges can be
+  filtered without decoding JSON.
+
+Physical format is independent of semantic type. For example, a Synthesizer
+grid and a CAMELS snapshot are both HDF5 files but have `data_type = grid` and
+`data_type = simulation_data`, respectively.
+
 ## R2 Layout
 
 ```text

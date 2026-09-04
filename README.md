@@ -94,10 +94,14 @@ Run local checks:
 
 ```bash
 uv run --extra test pytest
+node tests/worker_routes.mjs
 uvx ruff check .
 uvx ruff format --check .
 wrangler d1 migrations apply synthesizer-database --local
 ```
+
+`tests/worker_routes.mjs` exercises the API's routing and response shaping
+against stubbed bindings, so it needs neither dependencies nor network access.
 
 See [publishing guide](docs/publishing.md) before preparing metadata or using
 the command without `--dry-run`.
@@ -109,7 +113,8 @@ docs/                    architecture, schema, API, and publishing guides
 migrations/              ordered D1 schema migrations
 src/syndicate/upload.py  inspection and publication CLI
 src/worker/index.js      read-only catalogue and download API
-tests/                   local tests with mocked cloud operations
+tests/                   local tests with mocked cloud operations, for both
+                         the CLI and the API
 wrangler.jsonc           Worker entrypoint and resource bindings
 ```
 

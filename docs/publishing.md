@@ -3,12 +3,9 @@
 This guide is for maintainers publishing files to Syndicate. Read it before
 running `syndicate-upload` without `--dry-run`.
 
-## Current Limitation
-
-Dry runs are ready. Real publication is implemented but must wait until the
-initial migration in `migrations/0001_initial.sql` has been reviewed and applied
-to remote D1. Public API verification also remains unavailable until the Worker
-is deployed.
+The remote database has the initial schema applied and the catalogue API is
+deployed, so publication and its final API verification both work. Dry-run
+first regardless: publication writes immutable objects.
 
 ## How Publication Works
 
@@ -203,12 +200,21 @@ configuration variables are:
 | `SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID` | Override Cloudflare account |
 | `SYNTHESIZER_R2_BUCKET` | Override `synthesizer-data` |
 | `SYNTHESIZER_D1_DATABASE_ID` | Override production D1 ID |
-| `SYNTHESIZER_DATA_API_URL` | Enable final public API verification |
+| `SYNTHESIZER_DATA_API_URL` | Enable final public API verification, normally `https://data.synthesizer-project.org` |
 
 After reviewing dry-run output, remove `--dry-run`:
 
 ```bash
 uv run syndicate-upload PATH --metadata metadata.json
+```
+
+Verification through the deployed API stays opt-in, because a transient API
+error after R2 and D1 have both been written would otherwise report a sound
+publication as a failure. Enable it when you want the extra check:
+
+```bash
+SYNTHESIZER_DATA_API_URL=https://data.synthesizer-project.org \
+    uv run syndicate-upload PATH --metadata metadata.json
 ```
 
 Existing R2 objects are reused only when size and stored SHA-256 match. Existing

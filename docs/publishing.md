@@ -236,9 +236,10 @@ download via `synthesizer-download`:
 - Euclid NISP instrument cache file.
 - SVO filter-cache archive.
 
-The reviewed batch metadata is stored in
-[`test-data-pilot.json`](test-data-pilot.json). It can match files supplied
-from different local directories because each entry uses the unique basename.
+The batch metadata for this set is operational input rather than
+documentation, so it is not kept in the repository. Keying each entry by its
+unique basename lets one such file match sources staged from different local
+directories.
 
 These cover grid, simulation-data, instrument, and reference-data semantics.
 Existing downloader aliases produce three installed grid names from two grid

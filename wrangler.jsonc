@@ -1,7 +1,21 @@
 {
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
   "name": "synthesizer-data-api",
+  "main": "src/worker/index.js",
   "compatibility_date": "2026-09-04",
+  // The branded hostname is the only public entrypoint: workers.dev is
+  // disabled so there is never a second URL for the same catalogue.
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "data.synthesizer-project.org",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 }
+  },
   "d1_databases": [
     {
       "binding": "DB",

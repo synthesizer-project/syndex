@@ -73,35 +73,45 @@ D1 is changed. A D1 failure can leave an unreferenced R2 object but can never
 leave D1 pointing to a missing object. Retrying completes registration, and a
 later reconciliation command can report orphaned objects.
 
-## Initial API
+## API
 
-The exact routes remain provisional. Required read operations are:
+Implemented, and documented in [api.md](api.md):
 
 ```text
 GET /v1/datasets
 GET /v1/datasets/{name}
+GET /v1/releases/{id}/download
+```
+
+Deferred until the catalogue website needs them, since they serve browsing
+rather than downloading:
+
+```text
 GET /v1/datasets/{name}/releases
 GET /v1/releases/{id}
-GET /v1/releases/{id}/download
 GET /v1/facets
 ```
 
 Responses support catalogue filtering, cursor pagination, CORS, ETags, and
-appropriate cache headers. Files stream from R2. The Worker never parses HDF5.
-The release detail response assembles the complete stored metadata from D1, so
-clients receive the useful output a manifest would have provided without a
-second persisted representation.
+appropriate cache headers. Files stream from R2 through the Worker, keeping the
+bucket private. The Worker never parses HDF5. The dataset detail response
+assembles the complete stored metadata from D1, so clients receive the useful
+output a manifest would have provided without a second persisted
+representation.
 
 ## Delivery Order
 
-1. **In progress:** finalize schema vocabulary using pilot metadata.
-2. **Partial:** local D1 migration exists; read-only Worker remains to build.
-3. **Implemented locally:** HDF5 inspection and transactional publication CLI.
-4. **Next:** dry-run and publish the existing test-data pilot set.
-5. Integrate test paths in `synthesizer-download`.
-6. Migrate remaining categories incrementally and update their downloader paths.
-7. Compare catalogues and retain Box through a transition period.
-8. Build the catalogue website against the stable API.
+1. **Done:** schema vocabulary settled against the pilot, including
+   `dust_grid` as a type distinct from `grid`.
+2. **Done:** D1 migration applied locally and to the remote database.
+3. **Done:** HDF5 inspection and transactional publication CLI.
+4. **Done:** test-data pilot published; nine objects in R2 and nine datasets in
+   D1, each with a current release.
+5. **Done:** read-only Worker deployed at `data.synthesizer-project.org`.
+6. **Next:** integrate test paths in `synthesizer-download`.
+7. Migrate remaining categories incrementally and update their downloader paths.
+8. Compare catalogues and retain Box through a transition period.
+9. Build the catalogue website against the stable API.
 
 ## Cost and Operational Constraints
 

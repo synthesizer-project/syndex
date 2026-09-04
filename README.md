@@ -16,27 +16,28 @@ user's Synthesizer environment.
 Implemented:
 
 - Content-addressed batch uploader with a network-free dry-run mode.
-- Automatic physical format detection and Synthesizer-grid inspection.
-- D1 schema migration and local migration validation.
-- Cloudflare bindings for the production R2 bucket and D1 database.
+- Automatic physical format detection, Synthesizer-grid inspection, and
+  instrument inspection.
+- D1 schema migration, applied locally and remotely.
+- Read-only catalogue and download API, described in
+  [`docs/api.md`](docs/api.md).
 - Tests for mixed batches, metadata precedence, upload verification, and D1
   registration.
 
-Provisioned:
+Live:
 
-- Private R2 Standard bucket `synthesizer-data` in Western Europe.
-- D1 database `synthesizer-database` in Western Europe.
+- Catalogue API at `https://data.synthesizer-project.org`.
+- Private R2 Standard bucket `synthesizer-data` in Western Europe, holding the
+  nine CI pilot objects.
+- D1 database `synthesizer-database` in Western Europe, holding their
+  catalogue records.
 
-Not yet deployed:
+Not yet built:
 
-- D1 schema on the remote database.
-- Worker API at `data.synthesizer-project.org`.
-- Any catalogue records or R2 data objects.
 - Catalogue website.
 
-Do not perform a real upload yet. The next milestone is reviewing a dry run for
-the nine CI pilot objects described in [`docs/test-data-pilot.json`](docs/test-data-pilot.json),
-then applying the D1 migration and publishing that pilot.
+The next milestone is resolving downloads through the API in
+`synthesizer-download` instead of Box links.
 
 ## Architecture
 
@@ -104,11 +105,12 @@ the command without `--dry-run`.
 ## Repository Layout
 
 ```text
-docs/                    architecture, schema, and publishing guides
+docs/                    architecture, schema, API, and publishing guides
 migrations/              ordered D1 schema migrations
 src/syndicate/upload.py  inspection and publication CLI
+src/worker/index.js      read-only catalogue and download API
 tests/                   local tests with mocked cloud operations
-wrangler.jsonc           Worker resource bindings
+wrangler.jsonc           Worker entrypoint and resource bindings
 ```
 
 ## Repository Boundaries
@@ -121,7 +123,8 @@ wrangler.jsonc           Worker resource bindings
 
 ## Further Reading
 
-- [`docs/plan.md`](docs/plan.md): decisions, phases, and proposed API.
+- [`docs/plan.md`](docs/plan.md): decisions, phases, and delivery order.
+- [`docs/api.md`](docs/api.md): endpoints, response shapes, and caching.
 - [`docs/schema.md`](docs/schema.md): R2 layout and D1 data model.
 - [`docs/publishing.md`](docs/publishing.md): dry runs, metadata, credentials,
   upload safety, and Box migration.

@@ -178,6 +178,26 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
         spectra_group = hdf[spectra_group_name]
         available_spectra = sorted(key for key in spectra_group if key != "wavelength")
 
+        # The extinction-curve layout is unambiguous: every Synthesizer grid
+        # using this key is a dust attenuation-curve grid. A plain "spectra"
+        # group is structurally ambiguous (an unprocessed SPS incident grid
+        # looks identical to a dust emission grid), but every dust grid
+        # filename contains "dust" by Synthesizer convention, so filename is
+        # used as the fallback signal there. Anything else still requires
+        # explicit grid_type/emission_type rather than a guess.
+        is_dust_filename = "dust" in path.stem.lower()
+        detected_grid_type = (
+            "dust"
+            if spectra_group_name == "extinction_curves" or is_dust_filename
+            else None
+        )
+        if spectra_group_name == "extinction_curves":
+            detected_emission_type = "dust_attenuation"
+        elif detected_grid_type == "dust":
+            detected_emission_type = "dust_emission"
+        else:
+            detected_emission_type = None
+
         wavelength = {}
         if "wavelength" in spectra_group:
             wavelength_dataset = spectra_group["wavelength"]
@@ -197,7 +217,7 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             if key in hdf.attrs:
                 root_metadata[key] = _json_value(hdf.attrs[key])
 
-        return {
+        result = {
             "axes": axes,
             "available_spectra": available_spectra,
             "available_lines": available_lines,
@@ -208,6 +228,326 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             ),
             "root_metadata": root_metadata,
         }
+        if detected_grid_type is not None:
+            result["grid_type"] = detected_grid_type
+        if detected_emission_type is not None:
+            result["emission_type"] = detected_emission_type
+        return result
+
+
+def extract_instrument_hdf5(path: Path) -> dict[str, Any] | None:
+    """Extract Synthesizer instrument cache metadata structurally.
+
+    This mirrors :func:`extract_hdf5` for grids: it reads the instrument
+    serialisation layout written by Synthesizer, without importing
+    Synthesizer or constructing real instrument objects. It covers all four
+    concrete instrument classes and their capability flags, derived directly
+    from ``synthesizer.instruments``:
+
+    - ``photometric`` (:class:`PhotometricInstrument`): integrated photometry
+      only. Attributes: filters, depth, depth_app_radius, snrs.
+    - ``photometric_imager`` (:class:`PhotometricImager`): photometric plus
+      imaging. Attributes: the above, plus resolution, psfs (per filter),
+      psf_resample_factor, noise_maps (per filter), noise_source_maps (per
+      filter).
+    - ``spectroscopic`` (:class:`SpectroscopicInstrument`): one-dimensional
+      spectroscopy. Attributes: lam, depth, depth_app_radius, snrs,
+      noise_maps (single array), resolving_power (constant values only).
+    - ``ifu`` (:class:`IntegratedFieldUnit`): resolved spectroscopy.
+      Attributes: lam, resolution, psfs (single array), psf_resample_factor,
+      noise_source_maps, depth, depth_app_radius, snrs, resolving_power
+      (constant values only).
+
+    Two on-disk layouts exist and are both handled:
+
+    - The generic layout written by ``InstrumentBase.to_hdf5``/
+      ``InstrumentCollection.write_instruments``, which tags every group with
+      an explicit ``instrument_type`` attribute matching the four types
+      above, and a ``Header`` group (skipped) alongside one group per member
+      for collections.
+    - The lighter-weight layout used by Synthesizer's premade instrument
+      cache files, which has no ``instrument_type`` attribute and only ever
+      contains ``Filters``, optionally ``Resolution``, and optionally
+      ``PSFs`` (verified against every currently downloadable premade cache
+      file) — always a ``photometric_imager`` in practice.
+
+    Capability flags mirror ``InstrumentBase``'s properties exactly
+    (``can_do_photometry``, ``can_do_imaging``, etc.) computed from which
+    optional attributes are present, the same way the real classes compute
+    them. Two IFU/spectroscopic capability flags
+    (``can_do_noisy_spectroscopy``, ``can_do_psf_spectroscopy``,
+    ``can_do_noisy_resolved_spectroscopy``) are hardcoded ``False`` in
+    Synthesizer today regardless of stored data, because that functionality
+    is not implemented yet; this extractor reports the same hardcoded values
+    rather than inferring them from data presence.
+
+    Large arrays (PSFs, noise maps) are never read into metadata: only their
+    presence, per-key shape, and units are recorded, the same way grid
+    spectra arrays are never read by :func:`extract_hdf5`.
+
+    Args:
+        path: HDF5 file to inspect.
+
+    Returns:
+        Extracted instrument metadata, or ``None`` when the file does not
+        match a recognized instrument layout.
+
+    Raises:
+        OSError: If an HDF5 file cannot be opened or read.
+    """
+    if not h5py.is_hdf5(path):
+        return None
+
+    with h5py.File(path, "r") as hdf:
+        instrument = _extract_instrument_group(hdf)
+        if instrument is not None:
+            return instrument
+
+        # No single-instrument layout at the root. This is expected for a
+        # collection cache file: a "Header" group (skipped) plus one group
+        # per member instrument.
+        members = {}
+        for key, value in hdf.items():
+            if key == "Header" or not isinstance(value, h5py.Group):
+                continue
+            member = _extract_instrument_group(value)
+            if member is not None:
+                members[str(key)] = member
+        if not members:
+            return None
+        return {
+            "instrument_type": "collection",
+            "label": _json_value(hdf.attrs.get("label")),
+            "members": members,
+        }
+
+
+def _extract_array_summary(dataset: h5py.Dataset) -> dict[str, Any]:
+    """Summarize a bulk array dataset without reading its values.
+
+    Args:
+        dataset: HDF5 dataset to summarize.
+
+    Returns:
+        Shape and units, never the array contents.
+    """
+    return {
+        "shape": list(dataset.shape),
+        "units": _json_value(dataset.attrs.get("units")),
+    }
+
+
+def _walk_leaf_datasets(group: h5py.Group) -> dict[str, h5py.Dataset]:
+    """Collect every dataset in a group, keyed by full relative path.
+
+    Filter codes such as ``"JWST/NIRCam.F070W"`` contain a slash, which h5py
+    treats as a path separator when used as a dataset name: writing a
+    dataset called ``"JWST/NIRCam.F070W"`` actually creates a group
+    ``"JWST"`` containing a dataset ``"NIRCam.F070W"``. A plain one-level
+    ``.items()`` walk over such a group would therefore miss real per-filter
+    entries (or crash trying to read a group as an array), so every per-key
+    group in the instrument layout is walked recursively here instead.
+
+    Args:
+        group: HDF5 group to walk.
+
+    Returns:
+        Mapping of full slash-joined key to leaf dataset.
+    """
+    leaves: dict[str, h5py.Dataset] = {}
+    group.visititems(
+        lambda key, obj: (
+            leaves.__setitem__(key, obj) if isinstance(obj, h5py.Dataset) else None
+        )
+    )
+    return leaves
+
+
+def _extract_scalar_or_dict(group: h5py.Group, name: str) -> dict[str, Any] | None:
+    """Extract a Depth/SNRs-style attribute that may be scalar or per-key.
+
+    These are always small (one float, or one float per filter/region), so
+    values are safe to include directly, unlike PSF/noise arrays.
+
+    Args:
+        group: HDF5 group potentially containing the named entry.
+        name: Entry name, e.g. ``"Depth"`` or ``"SNRs"``.
+
+    Returns:
+        Extracted value, or ``None`` if the entry is absent.
+    """
+    if name not in group:
+        return None
+    entry = group[name]
+    if isinstance(entry, h5py.Group):
+        return {
+            "kind": "per_key",
+            "values": {
+                key: {
+                    "value": _json_value(dataset[...]),
+                    "units": _json_value(dataset.attrs.get("units")),
+                }
+                for key, dataset in _walk_leaf_datasets(entry).items()
+            },
+        }
+    return {
+        "kind": "scalar",
+        "value": _json_value(entry[...]),
+        "units": _json_value(entry.attrs.get("units")),
+    }
+
+
+def _extract_array_or_dict(group: h5py.Group, name: str) -> dict[str, Any] | None:
+    """Extract a PSFs/NoiseMaps-style attribute without reading bulk arrays.
+
+    Args:
+        group: HDF5 group potentially containing the named entry.
+        name: Entry name, e.g. ``"PSFs"`` or ``"NoiseMaps"``.
+
+    Returns:
+        Presence and shape summary, or ``None`` if the entry is absent.
+    """
+    if name not in group:
+        return None
+    entry = group[name]
+    if isinstance(entry, h5py.Group):
+        return {
+            "kind": "per_key",
+            "keys": {
+                key: _extract_array_summary(dataset)
+                for key, dataset in _walk_leaf_datasets(entry).items()
+            },
+        }
+    return {"kind": "single", **_extract_array_summary(entry)}
+
+
+def _extract_instrument_group(group: h5py.Group) -> dict[str, Any] | None:
+    """Extract one instrument's structural metadata from an HDF5 group.
+
+    Args:
+        group: HDF5 group or file potentially containing one serialized
+            instrument.
+
+    Returns:
+        Extracted instrument metadata, or ``None`` if the group matches no
+        recognized single-instrument layout (expected at the root of a
+        collection cache file).
+    """
+    tagged_type = _json_value(group.attrs.get("instrument_type"))
+    has_filters = "Filters" in group and isinstance(group["Filters"], h5py.Group)
+    has_wavelength = "Wavelength" in group and not isinstance(
+        group["Wavelength"], h5py.Group
+    )
+    has_resolution = "Resolution" in group
+
+    if tagged_type is None:
+        # The lightweight premade cache layout has no instrument_type
+        # attribute and is always a photometric imager in practice (verified
+        # against every currently downloadable premade cache file).
+        if has_filters:
+            tagged_type = "photometric_imager" if has_resolution else "photometric"
+        elif has_wavelength:
+            tagged_type = "ifu" if has_resolution else "spectroscopic"
+        else:
+            return None
+
+    label = _json_value(group.attrs.get("label"))
+    is_photometric = tagged_type in ("photometric", "photometric_imager")
+    is_imager = tagged_type == "photometric_imager"
+    is_spectroscopic_family = tagged_type in ("spectroscopic", "ifu")
+    is_ifu = tagged_type == "ifu"
+
+    filter_codes: list[Any] = []
+    wavelength: dict[str, Any] = {}
+    if is_photometric and has_filters:
+        header = group["Filters"]["Header"]
+        filter_codes = [_json_value(code) for code in header.attrs["filter_codes"]]
+        wavelengths = header["Wavelengths"][...]
+        wavelength = {
+            "minimum": float(np.min(wavelengths)),
+            "maximum": float(np.max(wavelengths)),
+            "units": _json_value(header.attrs.get("Wavelength_units")),
+        }
+    elif is_spectroscopic_family and has_wavelength:
+        wavelength_dataset = group["Wavelength"]
+        wavelengths = wavelength_dataset[...]
+        wavelength = {
+            "minimum": float(np.min(wavelengths)),
+            "maximum": float(np.max(wavelengths)),
+            "units": _json_value(wavelength_dataset.attrs.get("units")),
+        }
+
+    resolution = None
+    if (is_imager or is_ifu) and has_resolution:
+        resolution = {
+            "value": float(group["Resolution"][...]),
+            "units": _json_value(group["Resolution"].attrs.get("units")),
+        }
+
+    resolving_power = None
+    if is_spectroscopic_family and "resolving_power" in group.attrs:
+        resolving_power = float(group.attrs["resolving_power"])
+
+    depth = _extract_scalar_or_dict(group, "Depth")
+    depth_app_radius = None
+    if "DepthApertureRadius" in group:
+        depth_app_radius = {
+            "value": _json_value(group["DepthApertureRadius"][...]),
+            "units": _json_value(group["DepthApertureRadius"].attrs.get("units")),
+        }
+    snrs = _extract_scalar_or_dict(group, "SNRs")
+
+    psfs = _extract_array_or_dict(group, "PSFs") if (is_imager or is_ifu) else None
+    psf_resample_factor = None
+    if (is_imager or is_ifu) and "PSFResampleFactor" in group:
+        psf_resample_factor = int(group["PSFResampleFactor"][...])
+
+    noise_maps = _extract_array_or_dict(group, "NoiseMaps")
+    noise_source_maps = (
+        _extract_array_or_dict(group, "NoiseSourceMaps")
+        if (is_imager or is_ifu)
+        else None
+    )
+
+    # Capability flags mirror InstrumentBase's properties exactly, computed
+    # from which optional attributes are present. can_do_noisy_spectroscopy,
+    # can_do_psf_spectroscopy, and can_do_noisy_resolved_spectroscopy are
+    # hardcoded False in Synthesizer today (not implemented yet), regardless
+    # of stored data, so they are reported as False here too rather than
+    # inferred.
+    capabilities = {
+        "can_do_photometry": is_photometric,
+        "can_do_imaging": is_imager,
+        "can_do_psf_imaging": is_imager and psfs is not None,
+        "can_do_noisy_imaging": is_imager
+        and (
+            noise_maps is not None
+            or noise_source_maps is not None
+            or (snrs is not None and depth is not None)
+        ),
+        "can_do_spectroscopy": tagged_type == "spectroscopic",
+        "can_do_noisy_spectroscopy": False,
+        "can_do_resolved_spectroscopy": is_ifu,
+        "can_do_psf_spectroscopy": False,
+        "can_do_noisy_resolved_spectroscopy": False,
+    }
+
+    return {
+        "instrument_type": tagged_type,
+        "label": label,
+        "capabilities": capabilities,
+        "filter_codes": filter_codes,
+        "wavelength": wavelength,
+        "resolution": resolution,
+        "resolving_power": resolving_power,
+        "depth": depth,
+        "depth_app_radius": depth_app_radius,
+        "snrs": snrs,
+        "psfs": psfs,
+        "psf_resample_factor": psf_resample_factor,
+        "noise_maps": noise_maps,
+        "noise_source_maps": noise_source_maps,
+    }
 
 
 def sha256_file(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str:
@@ -413,10 +753,24 @@ def build_plan(
         explicit_grid = config.get("grid", {})
         if not isinstance(explicit_grid, dict):
             raise UploadError(f"{source.key}: grid metadata must be an object")
-        for field in ("grid_type", "emission_type"):
-            if not explicit_grid.get(field):
-                raise UploadError(f"{source.key}: grid.{field} is required")
         grid = _merge(extracted_grid, explicit_grid)
+        for field in ("grid_type", "emission_type"):
+            if not grid.get(field):
+                raise UploadError(f"{source.key}: grid.{field} is required")
+
+    instrument = None
+    if data_type == "instrument":
+        extracted_instrument = (
+            extract_instrument_hdf5(source.path) if physical_format == "hdf5" else None
+        )
+        if extracted_instrument is None:
+            raise UploadError(
+                f"{source.key}: file is not a recognized Synthesizer instrument cache"
+            )
+        explicit_instrument = config.get("instrument", {})
+        if not isinstance(explicit_instrument, dict):
+            raise UploadError(f"{source.key}: instrument metadata must be an object")
+        instrument = _merge(extracted_instrument, explicit_instrument)
 
     default_prefix = (
         f"test-data/{data_type.replace('_', '-')}"
@@ -464,6 +818,7 @@ def build_plan(
             "set_current": bool(config.get("set_current", False)),
         },
         "grid": grid,
+        "instrument": instrument,
     }
     _json_dump(plan)
     return plan
@@ -675,6 +1030,49 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
                     ],
                 }
             )
+
+    instrument = plan["instrument"]
+    if instrument is not None:
+        wavelength = instrument.get("wavelength", {})
+        resolution = instrument.get("resolution") or {}
+        depth_app_radius = instrument.get("depth_app_radius") or {}
+        statements.append(
+            {
+                "sql": "INSERT INTO instruments (release_id, instrument_type, label, capabilities_json, filter_codes_json, wavelength_min, wavelength_max, wavelength_units, resolution, resolution_units, resolving_power, depth_json, depth_app_radius, depth_app_radius_units, snrs_json, psfs_json, psf_resample_factor, noise_maps_json, noise_source_maps_json, members_json) SELECT releases.release_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM releases JOIN files ON files.file_id = releases.file_id WHERE files.sha256 = ? ON CONFLICT(release_id) DO UPDATE SET instrument_type = excluded.instrument_type, label = excluded.label, capabilities_json = excluded.capabilities_json, filter_codes_json = excluded.filter_codes_json, wavelength_min = excluded.wavelength_min, wavelength_max = excluded.wavelength_max, wavelength_units = excluded.wavelength_units, resolution = excluded.resolution, resolution_units = excluded.resolution_units, resolving_power = excluded.resolving_power, depth_json = excluded.depth_json, depth_app_radius = excluded.depth_app_radius, depth_app_radius_units = excluded.depth_app_radius_units, snrs_json = excluded.snrs_json, psfs_json = excluded.psfs_json, psf_resample_factor = excluded.psf_resample_factor, noise_maps_json = excluded.noise_maps_json, noise_source_maps_json = excluded.noise_source_maps_json, members_json = excluded.members_json",
+                "params": [
+                    instrument["instrument_type"],
+                    instrument.get("label"),
+                    _json_dump(instrument.get("capabilities", {})),
+                    _json_dump(instrument.get("filter_codes", [])),
+                    wavelength.get("minimum"),
+                    wavelength.get("maximum"),
+                    wavelength.get("units"),
+                    resolution.get("value"),
+                    resolution.get("units"),
+                    instrument.get("resolving_power"),
+                    _json_dump(instrument["depth"])
+                    if instrument.get("depth") is not None
+                    else None,
+                    depth_app_radius.get("value"),
+                    depth_app_radius.get("units"),
+                    _json_dump(instrument["snrs"])
+                    if instrument.get("snrs") is not None
+                    else None,
+                    _json_dump(instrument["psfs"])
+                    if instrument.get("psfs") is not None
+                    else None,
+                    instrument.get("psf_resample_factor"),
+                    _json_dump(instrument["noise_maps"])
+                    if instrument.get("noise_maps") is not None
+                    else None,
+                    _json_dump(instrument["noise_source_maps"])
+                    if instrument.get("noise_source_maps") is not None
+                    else None,
+                    _json_dump(instrument.get("members", {})),
+                    file_info["sha256"],
+                ],
+            }
+        )
 
     if release["set_current"]:
         statements.append(

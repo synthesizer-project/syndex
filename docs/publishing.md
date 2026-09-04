@@ -154,10 +154,24 @@ Supported catalogue fields:
 | `provenance` | Source path, URL, generator, or related context | `{}` |
 | `set_current` | Select release as current | `false` |
 
-Grid files also require explicit `grid.grid_type` and `grid.emission_type`.
-Science-specific classification is never guessed from filenames. Other grid
-fields may provide model names, versions, photoionisation details, and an
-`incident_release_id`.
+Grid files also require `grid.grid_type` and `grid.emission_type`, either
+supplied explicitly or detected. `grid_type: dust` is detected whenever the
+filename contains "dust" (a reliable Synthesizer naming convention) or the
+file uses the `extinction_curves` HDF5 layout. `emission_type` is detected as
+`dust_attenuation` for the `extinction_curves` layout and `dust_emission` for
+any other dust grid. Every other grid_type/emission_type combination looks
+structurally identical between models (for example, an unprocessed SPS
+incident grid and a dust emission grid both store a bare `spectra` group with
+no filename signal to rely on), so science-specific classification is never
+guessed there. Other grid fields may provide model names, versions,
+photoionisation details, and an `incident_release_id`.
+
+Instrument files (`data_type: instrument`) are classified into one of the
+four real Synthesizer instrument types (`photometric`, `photometric_imager`,
+`spectroscopic`, `ifu`) or a `collection` of them, with capability flags,
+filters, wavelength coverage, resolution, depth/SNR, and PSF/noise-map
+presence extracted structurally — see [`schema.md`](schema.md#instruments)
+for the full field-by-field mapping to Synthesizer's instrument classes.
 
 `is_test` means reduced or synthetic fixture data not intended for scientific
 production. It does not mean “downloaded by CI”; production instrument files
@@ -198,18 +212,29 @@ non-zero.
 
 ## Test-Data Pilot
 
-First migration target is the five objects in Synthesizer's current `TestData`
-category:
+First migration target is every distinct object the CI workflows currently
+download via `synthesizer-download`:
 
 - BPASS stellar test grid.
 - QSOSED AGN test grid.
 - CAMELS snapshot.
 - CAMELS subhalo catalogue.
 - SC-SAM history.
+- Draine & Li dust emission grid.
+- Draine & Li dust extinction-curve grid.
+- Euclid NISP instrument cache file.
+- SVO filter-cache archive.
 
-These cover grid and simulation-data semantics. Existing downloader aliases
-produce three installed grid names from two grid objects, giving the pilot a
-useful alias and deduplication test.
+The reviewed batch metadata is stored in
+[`test-data-pilot.json`](test-data-pilot.json). It can match files supplied
+from different local directories because each entry uses the unique basename.
+
+These cover grid, simulation-data, instrument, and reference-data semantics.
+Existing downloader aliases produce three installed grid names from two grid
+objects, giving the pilot a useful alias and deduplication test. Only the
+BPASS and QSOSED grids are reduced fixtures (`is_test: true`); the dust grids,
+instrument cache file, and SVO archive are production data reused by CI and
+are marked `is_test: false`.
 
 Before uploading, review every derived name, path, classification, axis, model
 field, line list, wavelength range, and checksum. Also measure serialized D1

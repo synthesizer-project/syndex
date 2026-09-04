@@ -67,7 +67,35 @@ CREATE TABLE grid_axes (
     UNIQUE (release_id, axis_index)
 );
 
+CREATE TABLE instruments (
+    release_id INTEGER PRIMARY KEY REFERENCES releases(release_id),
+    instrument_type TEXT NOT NULL
+        CHECK (instrument_type IN (
+            'photometric', 'photometric_imager', 'spectroscopic', 'ifu',
+            'collection'
+        )),
+    label TEXT,
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    filter_codes_json TEXT NOT NULL DEFAULT '[]',
+    wavelength_min REAL,
+    wavelength_max REAL,
+    wavelength_units TEXT,
+    resolution REAL,
+    resolution_units TEXT,
+    resolving_power REAL,
+    depth_json TEXT,
+    depth_app_radius REAL,
+    depth_app_radius_units TEXT,
+    snrs_json TEXT,
+    psfs_json TEXT,
+    psf_resample_factor INTEGER,
+    noise_maps_json TEXT,
+    noise_source_maps_json TEXT,
+    members_json TEXT NOT NULL DEFAULT '{}'
+);
+
 CREATE INDEX releases_dataset_id ON releases(dataset_id);
 CREATE INDEX grid_metadata_classification
     ON grid_metadata(grid_type, emission_type);
 CREATE INDEX datasets_classification ON datasets(data_type, is_test);
+CREATE INDEX instruments_instrument_type ON instruments(instrument_type);

@@ -180,6 +180,88 @@ CREATE TABLE grid_axes (
 support filtering without decoding JSON; `values_json` retains complete axis
 values for detailed API responses and metadata plots.
 
+## Instruments
+
+One row per instrument release, populated for `data_type = instrument`:
+
+```sql
+CREATE TABLE instruments (
+    release_id INTEGER PRIMARY KEY REFERENCES releases(release_id),
+    instrument_type TEXT NOT NULL
+        CHECK (instrument_type IN (
+            'photometric', 'photometric_imager', 'spectroscopic', 'ifu',
+            'collection'
+        )),
+    label TEXT,
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    filter_codes_json TEXT NOT NULL DEFAULT '[]',
+    wavelength_min REAL,
+    wavelength_max REAL,
+    wavelength_units TEXT,
+    resolution REAL,
+    resolution_units TEXT,
+    resolving_power REAL,
+    depth_json TEXT,
+    depth_app_radius REAL,
+    depth_app_radius_units TEXT,
+    snrs_json TEXT,
+    psfs_json TEXT,
+    psf_resample_factor INTEGER,
+    noise_maps_json TEXT,
+    noise_source_maps_json TEXT,
+    members_json TEXT NOT NULL DEFAULT '{}'
+);
+```
+
+Metadata is extracted structurally from the Synthesizer instrument
+serialisation layout, the same way grid metadata is extracted from grid
+files, without importing Synthesizer or constructing real instrument
+objects. The four concrete `instrument_type` values and every field they can
+carry are taken directly from `synthesizer.instruments`
+(`PhotometricInstrument`, `PhotometricImager`, `SpectroscopicInstrument`,
+`IntegratedFieldUnit`):
+
+| `instrument_type` | Synthesizer class | Carries |
+|---|---|---|
+| `photometric` | `PhotometricInstrument` | filters, depth, depth_app_radius, snrs |
+| `photometric_imager` | `PhotometricImager` | the above, plus resolution, psfs (per filter), psf_resample_factor, noise_maps (per filter), noise_source_maps (per filter) |
+| `spectroscopic` | `SpectroscopicInstrument` | wavelength coverage, depth, depth_app_radius, snrs, noise_maps (single array), resolving_power |
+| `ifu` | `IntegratedFieldUnit` | wavelength coverage, resolution, psfs (single array), psf_resample_factor, noise_source_maps, depth, depth_app_radius, snrs, resolving_power |
+| `collection` | `InstrumentCollection` | `members_json`: the same extracted metadata for every contained instrument |
+
+`resolving_power` (R = lambda / delta_lambda) is only meaningful for
+`spectroscopic`/`ifu` instruments and only when Synthesizer was given a
+constant value; a wavelength-dependent resolving power is a Python callable
+and cannot be serialised to HDF5, so it is `NULL` here too (this is a real
+Synthesizer limitation, not a Syndicate one — added as an explicit column now
+so a future Synthesizer release that supports non-constant resolving powers
+differently, or new instrument classes that expose it, has somewhere to land
+without another migration).
+
+`capabilities_json` mirrors `InstrumentBase`'s capability properties exactly
+(`can_do_photometry`, `can_do_imaging`, `can_do_psf_imaging`, etc.), computed
+from which optional fields are present the same way the real classes compute
+them. Three flags (`can_do_noisy_spectroscopy`, `can_do_psf_spectroscopy`,
+`can_do_noisy_resolved_spectroscopy`) are hardcoded `false` because that
+functionality is not implemented in Synthesizer yet, regardless of stored
+data — the extractor reports the same hardcoded values rather than inferring
+them.
+
+Depth/SNRs may be a single scalar or one value per filter/region (stored as
+`{"kind": "scalar", ...}` or `{"kind": "per_key", "values": {...}}`); values
+are small floats and safe to store directly. PSFs/noise maps are large bulk
+arrays and are never read into metadata — only presence, per-key shape, and
+units are recorded (`{"kind": "single"|"per_key", ...}`), the same way grid
+spectra arrays are never read into `grid_metadata`.
+
+Two on-disk layouts exist and are both handled: the generic layout (an
+explicit `instrument_type` HDF5 attribute, used by
+`InstrumentCollection.write_instruments` and hand-saved instruments) and the
+lighter-weight layout used by Synthesizer's premade instrument cache files
+(no `instrument_type` attribute; verified structurally against every
+currently downloadable premade cache file to always be a
+`photometric_imager` — filters, optionally resolution, optionally PSFs).
+
 ## Deferred Normalization
 
 Aliases and download groups remain in `synthesizer-download`. Spectra, lines,

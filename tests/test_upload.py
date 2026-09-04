@@ -28,6 +28,130 @@ def make_grid(path: Path) -> None:
         model.attrs["name"] = "test-model"
 
 
+def make_dust_extinction_grid(path: Path) -> None:
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["dtg"]
+        axes = hdf.create_group("axes")
+        dtg = axes.create_dataset("dtg", data=[1e-3, 1e-2])
+        dtg.attrs["Units"] = "dimensionless"
+        extinction = hdf.create_group("extinction_curves")
+        wavelength = extinction.create_dataset("wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["Units"] = "angstrom"
+        extinction.create_dataset("silicate", data=np.ones(2))
+
+
+def make_photometric_imager(path: Path) -> None:
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["label"] = "TestImager"
+        filters = hdf.create_group("Filters")
+        header = filters.create_group("Header")
+        header.attrs["filter_codes"] = ["Test/A", "Test/B"]
+        header.attrs["Wavelength_units"] = "angstrom"
+        header.create_dataset("Wavelengths", data=[1000.0, 2000.0, 3000.0])
+        resolution = hdf.create_dataset("Resolution", data=0.1)
+        resolution.attrs["units"] = "arcsec"
+
+
+def make_instrument_collection(path: Path) -> None:
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["label"] = "TestCollection"
+        for name in ("A", "B"):
+            member = hdf.create_group(name)
+            member.attrs["label"] = name
+            wavelength = member.create_dataset("Wavelength", data=[1000.0, 2000.0])
+            wavelength.attrs["units"] = "angstrom"
+
+
+def make_photometric_imager_full(path: Path) -> None:
+    """Build the real generic to_hdf5 layout with Depth/SNRs/PSFs/noise.
+
+    Filter codes deliberately contain "/" (the real Synthesizer convention,
+    e.g. "Test/A") so tests exercise h5py's implicit path-splitting nesting.
+    """
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["label"] = "TestImagerFull"
+        hdf.attrs["instrument_type"] = "photometric_imager"
+        filters = hdf.create_group("Filters")
+        header = filters.create_group("Header")
+        header.attrs["filter_codes"] = ["Test/A", "Test/B"]
+        header.attrs["Wavelength_units"] = "angstrom"
+        header.create_dataset("Wavelengths", data=[1000.0, 2000.0, 3000.0])
+        resolution = hdf.create_dataset("Resolution", data=0.1)
+        resolution.attrs["units"] = "arcsec"
+
+        depth_group = hdf.create_group("Depth")
+        for code, value in (("Test/A", 28.0), ("Test/B", 29.0)):
+            ds = depth_group.create_dataset(code, data=value)
+            ds.attrs["units"] = "AB_mag"
+
+        snrs = hdf.create_dataset("SNRs", data=10.0)
+        snrs.attrs["units"] = "dimensionless"
+
+        psfs_group = hdf.create_group("PSFs")
+        for code in ("Test/A", "Test/B"):
+            ds = psfs_group.create_dataset(code, data=np.ones((4, 4)))
+            ds.attrs["units"] = "dimensionless"
+
+        resample = hdf.create_dataset("PSFResampleFactor", data=2)
+        resample.attrs["units"] = "dimensionless"
+
+        noise_group = hdf.create_group("NoiseMaps")
+        for code in ("Test/A", "Test/B"):
+            ds = noise_group.create_dataset(code, data=np.ones((4, 4)))
+            ds.attrs["units"] = "nJy"
+
+
+def make_spectroscopic_full(path: Path) -> None:
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["label"] = "TestSpectrograph"
+        hdf.attrs["instrument_type"] = "spectroscopic"
+        hdf.attrs["resolving_power"] = 1000.0
+        wavelength = hdf.create_dataset("Wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["units"] = "angstrom"
+        depth = hdf.create_dataset("Depth", data=25.0)
+        depth.attrs["units"] = "AB_mag"
+        snrs = hdf.create_dataset("SNRs", data=5.0)
+        snrs.attrs["units"] = "dimensionless"
+
+
+def make_ifu_full(path: Path) -> None:
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["label"] = "TestIFU"
+        hdf.attrs["instrument_type"] = "ifu"
+        hdf.attrs["resolving_power"] = 500.0
+        wavelength = hdf.create_dataset("Wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["units"] = "angstrom"
+        resolution = hdf.create_dataset("Resolution", data=0.05)
+        resolution.attrs["units"] = "arcsec"
+        psfs = hdf.create_dataset("PSFs", data=np.ones((4, 4, 2)))
+        psfs.attrs["units"] = "dimensionless"
+
+
+def make_real_collection(path: Path) -> None:
+    """Build the real InstrumentCollection.write_instruments layout."""
+    with h5py.File(path, "w") as hdf:
+        head = hdf.create_group("Header")
+        head.attrs["synthesizer_version"] = "0.0.0"
+        head.attrs["ninstruments"] = 2
+
+        imager = hdf.create_group("TestImagerFull")
+        imager.attrs["label"] = "TestImagerFull"
+        imager.attrs["instrument_type"] = "photometric_imager"
+        filters = imager.create_group("Filters")
+        header = filters.create_group("Header")
+        header.attrs["filter_codes"] = ["Test/A"]
+        header.attrs["Wavelength_units"] = "angstrom"
+        header.create_dataset("Wavelengths", data=[1000.0, 2000.0])
+        resolution = imager.create_dataset("Resolution", data=0.1)
+        resolution.attrs["units"] = "arcsec"
+
+        spec = hdf.create_group("TestSpectrograph")
+        spec.attrs["label"] = "TestSpectrograph"
+        spec.attrs["instrument_type"] = "spectroscopic"
+        wavelength = spec.create_dataset("Wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["units"] = "angstrom"
+
+
 def test_mixed_directory_detection_and_metadata(tmp_path):
     grid_path = tmp_path / "grid.hdf5"
     make_grid(grid_path)
@@ -123,6 +247,135 @@ def test_prevalidation_failure_aborts_before_cloud(tmp_path, monkeypatch):
     )
 
     assert upload.run([str(path)]) == 2
+
+
+def test_dust_extinction_curve_grid_type_detected(tmp_path):
+    path = tmp_path / "dust.hdf5"
+    make_dust_extinction_grid(path)
+    source = upload.SourceFile(path, path.name)
+
+    plan = upload.build_plan(source, {}, {})
+
+    assert plan["grid"]["grid_type"] == "dust"
+    assert plan["grid"]["emission_type"] == "dust_attenuation"
+
+
+def test_photometric_imager_extraction(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_photometric_imager(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["instrument_type"] == "photometric_imager"
+    assert result["filter_codes"] == ["Test/A", "Test/B"]
+    assert result["wavelength"]["minimum"] == 1000.0
+    assert result["wavelength"]["maximum"] == 3000.0
+    assert result["resolution"] == {"value": 0.1, "units": "arcsec"}
+
+
+def test_photometric_imager_full_extraction(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_photometric_imager_full(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["capabilities"] == {
+        "can_do_photometry": True,
+        "can_do_imaging": True,
+        "can_do_psf_imaging": True,
+        "can_do_noisy_imaging": True,
+        "can_do_spectroscopy": False,
+        "can_do_noisy_spectroscopy": False,
+        "can_do_resolved_spectroscopy": False,
+        "can_do_psf_spectroscopy": False,
+        "can_do_noisy_resolved_spectroscopy": False,
+    }
+    assert result["depth"] == {
+        "kind": "per_key",
+        "values": {
+            "Test/A": {"value": 28.0, "units": "AB_mag"},
+            "Test/B": {"value": 29.0, "units": "AB_mag"},
+        },
+    }
+    assert result["snrs"] == {"kind": "scalar", "value": 10.0, "units": "dimensionless"}
+    assert result["psfs"]["kind"] == "per_key"
+    assert set(result["psfs"]["keys"]) == {"Test/A", "Test/B"}
+    assert result["psfs"]["keys"]["Test/A"] == {
+        "shape": [4, 4],
+        "units": "dimensionless",
+    }
+    assert result["psf_resample_factor"] == 2
+    assert set(result["noise_maps"]["keys"]) == {"Test/A", "Test/B"}
+    assert result["noise_maps"]["keys"]["Test/A"]["shape"] == [4, 4]
+
+
+def test_spectroscopic_full_extraction(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_spectroscopic_full(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["instrument_type"] == "spectroscopic"
+    assert result["capabilities"]["can_do_spectroscopy"] is True
+    assert result["capabilities"]["can_do_imaging"] is False
+    assert result["resolution"] is None
+    assert result["resolving_power"] == 1000.0
+    assert result["depth"] == {"kind": "scalar", "value": 25.0, "units": "AB_mag"}
+    assert result["snrs"] == {"kind": "scalar", "value": 5.0, "units": "dimensionless"}
+
+
+def test_ifu_full_extraction(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_ifu_full(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["instrument_type"] == "ifu"
+    assert result["capabilities"]["can_do_resolved_spectroscopy"] is True
+    assert result["capabilities"]["can_do_imaging"] is False
+    assert result["resolution"] == {"value": 0.05, "units": "arcsec"}
+    assert result["resolving_power"] == 500.0
+    assert result["psfs"] == {
+        "kind": "single",
+        "shape": [4, 4, 2],
+        "units": "dimensionless",
+    }
+
+
+def test_real_collection_layout_extraction(tmp_path):
+    path = tmp_path / "collection.hdf5"
+    make_real_collection(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["instrument_type"] == "collection"
+    assert set(result["members"]) == {"TestImagerFull", "TestSpectrograph"}
+    assert result["members"]["TestImagerFull"]["instrument_type"] == (
+        "photometric_imager"
+    )
+    assert result["members"]["TestSpectrograph"]["instrument_type"] == ("spectroscopic")
+
+
+def test_instrument_collection_extraction(tmp_path):
+    path = tmp_path / "collection.hdf5"
+    make_instrument_collection(path)
+
+    result = upload.extract_instrument_hdf5(path)
+
+    assert result["instrument_type"] == "collection"
+    assert set(result["members"]) == {"A", "B"}
+    assert result["members"]["A"]["instrument_type"] == "spectroscopic"
+
+
+def test_build_plan_instrument(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_photometric_imager(path)
+    source = upload.SourceFile(path, path.name)
+
+    plan = upload.build_plan(source, {"data_type": "instrument"}, {})
+
+    assert plan["instrument"]["instrument_type"] == "photometric_imager"
+    assert plan["grid"] is None
 
 
 def test_unsafe_prefix_rejected(tmp_path):
@@ -259,6 +512,56 @@ def test_d1_batch_matches_migration_and_is_idempotent(tmp_path):
     assert database.execute(
         "SELECT current_release_id IS NOT NULL FROM datasets"
     ).fetchone() == (1,)
+
+
+def test_instrument_d1_batch_matches_migration(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_photometric_imager_full(path)
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {"data_type": "instrument", "is_test": True, "set_current": True},
+        {},
+    )
+    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
+    database = sqlite3.connect(":memory:")
+    database.executescript(migration.read_text())
+
+    for _ in range(2):
+        with database:
+            for statement in upload.d1_statements(plan):
+                database.execute(statement["sql"], statement["params"])
+
+    row = database.execute(
+        "SELECT instrument_type, label, psf_resample_factor, depth_json, "
+        "psfs_json, resolving_power FROM instruments"
+    ).fetchone()
+    assert row[0] == "photometric_imager"
+    assert row[1] == "TestImagerFull"
+    assert row[2] == 2
+    assert json.loads(row[3])["kind"] == "per_key"
+    assert json.loads(row[4])["kind"] == "per_key"
+    assert row[5] is None
+
+
+def test_spectroscopic_resolving_power_d1_batch_matches_migration(tmp_path):
+    path = tmp_path / "instrument.hdf5"
+    make_spectroscopic_full(path)
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {"data_type": "instrument", "is_test": True, "set_current": True},
+        {},
+    )
+    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
+    database = sqlite3.connect(":memory:")
+    database.executescript(migration.read_text())
+
+    for statement in upload.d1_statements(plan):
+        database.execute(statement["sql"], statement["params"])
+
+    row = database.execute(
+        "SELECT instrument_type, resolving_power FROM instruments"
+    ).fetchone()
+    assert row == ("spectroscopic", 1000.0)
 
 
 def test_same_file_cannot_move_between_datasets(tmp_path):

@@ -237,6 +237,58 @@ async function getDataset(db, name, origin) {
 }
 
 /**
+ * Interpret a Range header against a known object size.
+ *
+ * Only single byte ranges are honoured. A multi-range or malformed header is
+ * treated as absent, which the HTTP specification permits and which keeps the
+ * response a plain 200 rather than a multipart body no client here asks for.
+ *
+ * @param {string | null} header The request's Range header.
+ * @param {number} size Total size of the object in bytes.
+ * @returns {{offset: number, length: number} | "unsatisfiable" | null}
+ *     The resolved range, the string "unsatisfiable" when it falls outside
+ *     the object, or null when the whole object should be served.
+ */
+function parseRange(header, size) {
+  if (header === null) {
+    return null;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (match === null) {
+    return null;
+  }
+
+  const [, startText, endText] = match;
+  if (startText === "" && endText === "") {
+    return null;
+  }
+
+  // "bytes=-N" asks for the final N bytes.
+  if (startText === "") {
+    const suffix = Number(endText);
+    if (suffix === 0) {
+      return "unsatisfiable";
+    }
+    const length = Math.min(suffix, size);
+    return { offset: size - length, length };
+  }
+
+  const offset = Number(startText);
+  if (offset >= size) {
+    return "unsatisfiable";
+  }
+
+  // An absent or oversized end means "to the last byte".
+  const end = endText === "" ? size - 1 : Math.min(Number(endText), size - 1);
+  if (end < offset) {
+    return "unsatisfiable";
+  }
+
+  return { offset, length: end - offset + 1 };
+}
+
+/**
  * Stream one release's file bytes from R2.
  *
  * The bucket stays private: bytes are proxied rather than redirected to a
@@ -265,10 +317,31 @@ async function downloadRelease(env, request, releaseId) {
     return error(404, `No release with id ${releaseId}`);
   }
 
+  // Ranged reads let an interrupted download resume instead of restarting,
+  // which matters for multi-gigabyte grids. The size comes from D1, so an
+  // impossible range is rejected without touching R2 at all.
+  const range = parseRange(request.headers.get("range"), row.size_bytes);
+  if (range === "unsatisfiable") {
+    return new Response(
+      JSON.stringify({ error: "Requested range is outside the file" }),
+      {
+        status: 416,
+        headers: {
+          ...JSON_HEADERS,
+          "content-range": `bytes */${row.size_bytes}`,
+          "accept-ranges": "bytes",
+        },
+      },
+    );
+  }
+
   const object =
     request.method === "HEAD"
       ? await env.FILES.head(row.r2_path)
-      : await env.FILES.get(row.r2_path, { onlyIf: request.headers });
+      : await env.FILES.get(row.r2_path, {
+          onlyIf: request.headers,
+          ...(range === null ? {} : { range }),
+        });
 
   if (object === null) {
     // D1 references an object R2 does not hold. Publication uploads and
@@ -285,6 +358,7 @@ async function downloadRelease(env, request, releaseId) {
 
   const headers = new Headers({
     "access-control-allow-origin": "*",
+    "accept-ranges": "bytes",
     "cache-control": "public, max-age=31536000, immutable",
     "content-disposition": `attachment; filename="${row.filename}"`,
     "x-syndicate-sha256": row.sha256,
@@ -302,6 +376,16 @@ async function downloadRelease(env, request, releaseId) {
       status: object.body === undefined && request.method !== "HEAD" ? 304 : 200,
       headers,
     });
+  }
+
+  // A ranged read is a partial response, and must say which bytes it holds.
+  if (range !== null) {
+    headers.set(
+      "content-range",
+      `bytes ${range.offset}-${range.offset + range.length - 1}/${row.size_bytes}`,
+    );
+    headers.set("content-length", String(range.length));
+    return new Response(object.body, { status: 206, headers });
   }
 
   return new Response(object.body, { headers });

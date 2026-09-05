@@ -183,9 +183,27 @@ Response headers:
 | `Content-Disposition` | `attachment` with the catalogue filename |
 | `X-Syndicate-SHA256` | Expected SHA-256, so a client can verify without a second request |
 | `Cache-Control` | `public, max-age=31536000, immutable` |
+| `Accept-Ranges` | `bytes`, advertising resumable downloads |
 
 `HEAD` returns the same headers with no body, which is enough to check size
 and digest before committing to a large transfer.
+
+A `Range` header serves part of the file, so an interrupted transfer resumes
+instead of restarting. That matters for production grids, which run to
+gigabytes.
+
+| Request | Response |
+|---|---|
+| `Range: bytes=1000-1003` | `206` with `Content-Range: bytes 1000-1003/<size>` |
+| `Range: bytes=1000-` | `206` covering the rest of the file, as a resume sends |
+| `Range: bytes=-1000` | `206` with the final 1000 bytes |
+| `Range: bytes=<size>-` | `416` with `Content-Range: bytes */<size>` |
+| Multiple ranges | `200` with the whole file; multipart responses are not served |
+
+Ranges are validated against the size held in D1, so an impossible range is
+refused without reading R2. A client resuming a download should confirm the
+digest of the assembled file, since the API cannot tell whether the bytes
+already on disk came from this release.
 
 Downloading is a two-step operation: resolve the dataset to learn its release
 id and expected digest, then fetch the bytes. Clients own verification, in
@@ -199,7 +217,6 @@ installation.
 serve catalogue browsing rather than downloading, so they are deferred until
 the website needs them.
 
-HTTP range requests are also not implemented, so an interrupted download
-restarts. Files are streamed whole today because `synthesizer-download`
-streams whole files; resumable transfers are the first thing to add when
-that changes.
+Multipart range responses are not served: a request for several ranges at
+once receives the whole file instead. No client here needs them, and a
+download resuming from one offset only ever asks for one range.

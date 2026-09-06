@@ -223,21 +223,57 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             if key in hdf.attrs:
                 root_metadata[key] = _json_value(hdf.attrs[key])
 
+        model_parameters = _group_metadata(hdf["Model"]) if "Model" in hdf else {}
+        photoionisation_parameters = (
+            _group_metadata(hdf["CloudyParams"]) if "CloudyParams" in hdf else {}
+        )
+
+        # Syncretize records what a grid is, so classification is read rather
+        # than guessed. A stellar population grid names its SPS model, an AGN
+        # grid declares its type, and any grid processed through a
+        # photoionisation code carries that code's parameters. Only when the
+        # file says nothing does classification fall back to explicit
+        # metadata.
+        if detected_grid_type is None:
+            if model_parameters.get("type") == "agn":
+                detected_grid_type = "agn"
+            elif isinstance(model_parameters.get("sps_name"), str):
+                detected_grid_type = "sps"
+        if detected_emission_type is None and detected_grid_type in (
+            "sps",
+            "agn",
+        ):
+            detected_emission_type = (
+                "photoionised" if photoionisation_parameters else "incident"
+            )
+
         result = {
             "axes": axes,
             "available_spectra": available_spectra,
             "available_lines": available_lines,
             "wavelength": wavelength,
-            "model_parameters": _group_metadata(hdf["Model"]) if "Model" in hdf else {},
-            "photoionisation_parameters": (
-                _group_metadata(hdf["CloudyParams"]) if "CloudyParams" in hdf else {}
-            ),
+            "model_parameters": model_parameters,
+            "photoionisation_parameters": photoionisation_parameters,
             "root_metadata": root_metadata,
         }
         if detected_grid_type is not None:
             result["grid_type"] = detected_grid_type
         if detected_emission_type is not None:
             result["emission_type"] = detected_emission_type
+
+        # The model's identity is recorded in the same place, so lift it into
+        # the catalogue columns rather than leaving it buried in JSON.
+        model_name = model_parameters.get("sps_name") or model_parameters.get("family")
+        if isinstance(model_name, str) and model_name:
+            result["model_name"] = model_name
+        model_version = model_parameters.get("sps_version")
+        if isinstance(model_version, str) and model_version:
+            result["model_version"] = model_version
+        cloudy_version = photoionisation_parameters.get("cloudy_version")
+        if isinstance(cloudy_version, str) and cloudy_version:
+            result["photoionisation_code"] = "Cloudy"
+            result["photoionisation_code_version"] = cloudy_version
+
         return result
 
 

@@ -138,6 +138,16 @@ CREATE TABLE releases (
 Numeric ID, SHA-256, and publication date identify a release. Historical
 releases remain available after the current release changes.
 
+`synthesizer_min_version` and `synthesizer_max_version` bound the Synthesizer
+releases a file can be used with, stored without a leading `v` so they compare
+directly against `synthesizer.__version__`. By convention grids and
+instruments carry a minimum of `1.0.0` and no maximum, meaning every supported
+Synthesizer release can read them; a maximum is set only when a future release
+genuinely drops support. Simulation data, generation inputs, and cache
+archives are left unconstrained, since they are not Synthesizer-format files.
+Nothing enforces these bounds yet; they are recorded so the downloader can
+honour them when a real incompatibility first appears.
+
 `provenance_json` records how the published bytes came to exist: the HDF5
 root attributes the file reports about itself (`date_created`,
 `synthesizer_version`, `synthesizer_grids_version`) under an `hdf5` key, plus

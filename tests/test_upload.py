@@ -249,6 +249,97 @@ def test_prevalidation_failure_aborts_before_cloud(tmp_path, monkeypatch):
     assert upload.run([str(path)]) == 2
 
 
+def make_sps_grid(path: Path, photoionised: bool = False) -> None:
+    """Write a grid shaped the way Syncretize writes stellar population grids."""
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["ages", "metallicities"]
+        axes = hdf.create_group("axes")
+        ages = axes.create_dataset("ages", data=[1e6, 1e7])
+        ages.attrs["Units"] = "yr"
+        axes.create_dataset("metallicities", data=[0.01, 0.02])
+        spectra = hdf.create_group("spectra")
+        wavelength = spectra.create_dataset("wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["Units"] = "angstrom"
+        spectra.create_dataset("incident", data=np.ones((2, 2, 2)))
+        model = hdf.create_group("Model")
+        model.attrs["sps_name"] = "maraston13"
+        model.attrs["sps_version"] = "2013"
+        model.attrs["imf_type"] = "kroupa"
+        if photoionised:
+            spectra.create_dataset("nebular", data=np.ones((2, 2, 2)))
+            cloudy = hdf.create_group("CloudyParams")
+            cloudy.attrs["cloudy_version"] = "c23.01"
+
+
+def make_agn_grid(path: Path) -> None:
+    """Write a grid shaped the way Syncretize writes AGN grids."""
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["mass"]
+        axes = hdf.create_group("axes")
+        axes.create_dataset("mass", data=[1e8, 1e9])
+        spectra = hdf.create_group("spectra")
+        wavelength = spectra.create_dataset("wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["Units"] = "angstrom"
+        spectra.create_dataset("incident", data=np.ones((2, 2)))
+        model = hdf.create_group("Model")
+        model.attrs["type"] = "agn"
+        model.attrs["family"] = "qsosed"
+        cloudy = hdf.create_group("CloudyParams")
+        cloudy.attrs["cloudy_version"] = "c23.01"
+
+
+def test_sps_incident_grid_classified_from_its_model_group(tmp_path):
+    path = tmp_path / "maraston13_kroupa.hdf5"
+    make_sps_grid(path)
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    # Nothing was supplied by hand: the file says what it is.
+    assert plan["dataset"]["data_type"] == "grid"
+    assert plan["grid"]["grid_type"] == "sps"
+    assert plan["grid"]["emission_type"] == "incident"
+    assert plan["grid"]["model_name"] == "maraston13"
+    assert plan["grid"]["model_version"] == "2013"
+    assert plan["grid"].get("photoionisation_code") is None
+
+
+def test_photoionised_grid_detected_from_cloudy_parameters(tmp_path):
+    path = tmp_path / "maraston13_kroupa_cloudy.hdf5"
+    make_sps_grid(path, photoionised=True)
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    assert plan["grid"]["emission_type"] == "photoionised"
+    assert plan["grid"]["photoionisation_code"] == "Cloudy"
+    assert plan["grid"]["photoionisation_code_version"] == "c23.01"
+
+
+def test_agn_grid_classified_from_its_model_group(tmp_path):
+    path = tmp_path / "qsosed.hdf5"
+    make_agn_grid(path)
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    assert plan["grid"]["grid_type"] == "agn"
+    assert plan["grid"]["emission_type"] == "photoionised"
+    assert plan["grid"]["model_name"] == "qsosed"
+
+
+def test_explicit_metadata_still_overrides_detection(tmp_path):
+    path = tmp_path / "maraston13_kroupa.hdf5"
+    make_sps_grid(path)
+
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {},
+        {"grid": {"model_name": "Maraston (2013)", "emission_type": "incident"}},
+    )
+
+    # Curated names win over the raw value written by the generator.
+    assert plan["grid"]["model_name"] == "Maraston (2013)"
+    assert plan["grid"]["grid_type"] == "sps"
+
+
 def test_dust_extinction_curve_grid_type_detected(tmp_path):
     path = tmp_path / "dust.hdf5"
     make_dust_extinction_grid(path)

@@ -50,7 +50,10 @@ Lists datasets with summary information from the current release.
 | Parameter | Meaning | Default |
 |---|---|---|
 | `data_type` | Restrict to one type, e.g. `grid`, `dust_grid`, `instrument` | all |
-| `is_test` | `true` or `false`; reduced fixtures or production data | all |
+| `is_test` | `true` or `false`; deliberately reduced data or not | all |
+| `is_ci` | `true` or `false`; downloaded by Synthesizer's CI or not | all |
+| `has_spectra` | `true` or `false`; grids carrying spectra or not | all |
+| `has_lines` | `true` or `false`; grids carrying line luminosities or not | all |
 | `limit` | Page size, clamped to 1–1000 | `100` |
 | `after` | Dataset name to continue after, from a previous `cursor` | start |
 
@@ -82,7 +85,9 @@ Datasets are ordered by name. `cursor` is the last name in a full page, or
 ```
 
 A dataset with no current release still appears, with null release fields
-including a null `download_url`.
+including a null `download_url`. `has_spectra` and `has_lines` appear only for
+grids; other data types omit them. Filtering on either restricts the listing
+to grids, since only grids have contents to report.
 
 ## `GET /v1/datasets/{name}`
 
@@ -169,6 +174,73 @@ for this release carries all 254 line identifiers, all 51 age values, and the
 second `metallicities` axis, because complete axis values are what let a client
 plot or filter a grid without downloading it.
 
+## `GET /v1/datasets/{name}/releases`
+
+Lists every release of one dataset, newest publication first, each with
+`is_current`, its file details, and urls for the release and its bytes.
+
+A dataset gains releases as its file is regenerated: the BPASS 2.2.1 Cloudy
+grid, for example, has an earlier release and a later one that adds star
+fraction data. Superseded releases are never removed — their bytes stay in R2
+and their rows stay in D1 — so this is how a client discovers which versions
+exist and pins deliberately to one.
+
+```json
+{
+  "dataset": "bpass-2-2-1-cloudy-sps",
+  "data_type": "grid",
+  "releases": [
+    {
+      "release_id": 9,
+      "published_at": "2026-09-06T12:00:00Z",
+      "is_current": true,
+      "file": { "filename": "...updated-star-fraction.hdf5", "sha256": "..." },
+      "url": "https://data.synthesizer-project.org/v1/releases/9",
+      "download_url": "https://data.synthesizer-project.org/v1/releases/9/download"
+    },
+    {
+      "release_id": 2,
+      "published_at": "2026-09-01T12:00:00Z",
+      "is_current": false,
+      "file": { "filename": "...cloudy-c23.01-sps.hdf5", "sha256": "..." },
+      "url": "https://data.synthesizer-project.org/v1/releases/2",
+      "download_url": "https://data.synthesizer-project.org/v1/releases/2/download"
+    }
+  ]
+}
+```
+
+## `GET /v1/releases/{id}`
+
+Returns one release by id, whatever dataset it belongs to. Releases are
+referenced by id from within the catalogue — a photoionised grid names the
+incident release it was computed from — so they must be retrievable without
+knowing the dataset first.
+
+The body is the same release object `GET /v1/datasets/{name}` nests under
+`current_release`, with three additions: `dataset` names the dataset it
+belongs to, `data_type` repeats that dataset's type, and `is_current` says
+whether this is the dataset's current release. Historical releases stay
+retrievable after a newer one supersedes them.
+
+```json
+{
+  "dataset": "bc03-2016-miles-kroupa-0p1-100",
+  "data_type": "grid",
+  "is_current": true,
+  "release_id": 25,
+  "published_at": "2026-09-06T09:14:21.117Z",
+  "file": { "filename": "...", "size_bytes": 470456456, "sha256": "..." },
+  "download_url": "https://data.synthesizer-project.org/v1/releases/25/download",
+  "grid": { "grid_type": "sps", "emission_type": "photoionised", "...": "..." }
+}
+```
+
+Grid metadata carries `incident_release_id` alongside an
+`incident_release_url` pointing at this endpoint, so a client can follow a
+processed grid back to the incident grid it was built from without
+constructing urls itself.
+
 ## `GET /v1/releases/{id}/download`
 
 Streams the release's file bytes. The R2 bucket stays private: bytes are
@@ -212,10 +284,9 @@ installation.
 
 ## Deferred
 
-`GET /v1/datasets/{name}/releases`, `GET /v1/releases/{id}`, and
-`GET /v1/facets` appear in [`plan.md`](plan.md) but are not implemented. They
-serve catalogue browsing rather than downloading, so they are deferred until
-the website needs them.
+`GET /v1/facets` appears in [`plan.md`](plan.md) but is not implemented. It
+serves catalogue browsing rather than downloading, so it is deferred until the
+website needs it.
 
 Multipart range responses are not served: a request for several ranges at
 once receives the whole file instead. No client here needs them, and a

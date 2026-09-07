@@ -93,33 +93,62 @@ function error(status, message) {
 async function listDatasets(db, url) {
   const params = url.searchParams;
   const limit = Math.min(Math.max(Number(params.get("limit") ?? 100), 1), 1000);
-  const isTest = params.get("is_test");
+
+  /**
+   * Read a boolean query parameter as the 0/1 D1 stores, or null for absent.
+   *
+   * @param {string} key Query parameter name.
+   * @returns {number | null} Bound value for the query.
+   */
+  const flag = (key) => {
+    const value = params.get(key);
+    return value === null ? null : Number(value === "true" || value === "1");
+  };
 
   const { results } = await db
     .prepare(
       `SELECT d.name, d.display_name, d.description, d.data_type, d.is_test,
-              d.is_recommended, d.licence,
+              d.is_ci, d.is_recommended, d.licence,
               r.release_id, r.published_at,
-              f.filename, f.format, f.size_bytes, f.sha256
+              f.filename, f.format, f.size_bytes, f.sha256,
+              g.has_spectra, g.has_lines
        FROM datasets d
        LEFT JOIN releases r ON r.release_id = d.current_release_id
        LEFT JOIN files f ON f.file_id = r.file_id
+       LEFT JOIN grid_metadata g ON g.release_id = r.release_id
        WHERE (?1 IS NULL OR d.data_type = ?1)
          AND (?2 IS NULL OR d.is_test = ?2)
-         AND (?3 IS NULL OR d.name > ?3)
+         AND (?3 IS NULL OR d.is_ci = ?3)
+         AND (?4 IS NULL OR g.has_spectra = ?4)
+         AND (?5 IS NULL OR g.has_lines = ?5)
+         AND (?6 IS NULL OR d.name > ?6)
        ORDER BY d.name
-       LIMIT ?4`,
+       LIMIT ?7`,
     )
     .bind(
       params.get("data_type"),
-      isTest === null ? null : Number(isTest === "true" || isTest === "1"),
+      flag("is_test"),
+      flag("is_ci"),
+      flag("has_spectra"),
+      flag("has_lines"),
       params.get("after"),
       limit,
     )
     .all();
 
   const datasets = results.map((row) => {
-    const dataset = decodeRow(row, ["is_test", "is_recommended"]);
+    const dataset = decodeRow(row, [
+      "is_test",
+      "is_ci",
+      "is_recommended",
+      "has_spectra",
+      "has_lines",
+    ]);
+    // Only grids have contents worth reporting; other types have none.
+    if (dataset.has_spectra === null || row.has_spectra === null) {
+      delete dataset.has_spectra;
+      delete dataset.has_lines;
+    }
     dataset.download_url =
       dataset.release_id === null
         ? null
@@ -129,6 +158,176 @@ async function listDatasets(db, url) {
   return json({
     datasets,
     cursor: datasets.length === limit ? datasets[datasets.length - 1].name : null,
+  });
+}
+
+/**
+ * Assemble one release's complete metadata.
+ *
+ * Grid metadata, ordered axes, and instrument metadata are fetched in a
+ * single batch. Both the dataset detail and the release detail responses use
+ * this, so a release describes itself identically wherever it appears.
+ *
+ * @param {D1Database} db Catalogue database.
+ * @param {Record<string, unknown>} row Decoded release row joined to its file.
+ * @param {string} origin Origin of the incoming request.
+ * @returns {Promise<Record<string, unknown>>} The release object.
+ */
+async function releasePayload(db, row, origin) {
+  const releaseId = row.release_id;
+  const [grid, axes, instrument] = await db.batch([
+    db
+      .prepare("SELECT * FROM grid_metadata WHERE release_id = ?")
+      .bind(releaseId),
+    db
+      .prepare(
+        `SELECT axis_index, name, units, scale, count, minimum, maximum,
+                values_json
+         FROM grid_axes WHERE release_id = ? ORDER BY axis_index`,
+      )
+      .bind(releaseId),
+    db.prepare("SELECT * FROM instruments WHERE release_id = ?").bind(releaseId),
+  ]);
+
+  const gridRow = decodeRow(grid.results[0] ?? null, [
+    "has_spectra",
+    "has_lines",
+  ]);
+  if (gridRow !== null) {
+    delete gridRow.release_id;
+    gridRow.axes = axes.results.map((axis) => decodeRow(axis));
+    // A processed grid names the incident release it came from, so give the
+    // client somewhere to follow rather than a bare integer.
+    gridRow.incident_release_url =
+      gridRow.incident_release_id === null
+        ? null
+        : `${origin}/v1/releases/${gridRow.incident_release_id}`;
+  }
+  const instrumentRow = decodeRow(instrument.results[0] ?? null);
+  if (instrumentRow !== null) {
+    delete instrumentRow.release_id;
+  }
+
+  return {
+    release_id: releaseId,
+    published_at: row.published_at,
+    deprecated_at: row.deprecated_at,
+    synthesizer_min_version: row.synthesizer_min_version,
+    synthesizer_max_version: row.synthesizer_max_version,
+    provenance: row.provenance,
+    file: {
+      filename: row.filename,
+      format: row.format,
+      size_bytes: row.size_bytes,
+      sha256: row.sha256,
+    },
+    download_url: `${origin}/v1/releases/${releaseId}/download`,
+    grid: gridRow,
+    instrument: instrumentRow,
+  };
+}
+
+/**
+ * List every release of one dataset, newest publication first.
+ *
+ * A dataset accumulates releases as its file is regenerated. Older releases
+ * stay downloadable forever, so this is how a client discovers which
+ * versions exist and pins to one deliberately.
+ *
+ * @param {D1Database} db Catalogue database.
+ * @param {string} name Stable dataset name.
+ * @param {string} origin Origin of the incoming request.
+ * @returns {Promise<Response>} JSON list of releases.
+ */
+async function listReleases(db, name, origin) {
+  const dataset = await db
+    .prepare(
+      "SELECT dataset_id, name, data_type, current_release_id FROM datasets WHERE name = ?",
+    )
+    .bind(name)
+    .first();
+
+  if (dataset === null) {
+    return error(404, `No dataset named '${name}'`);
+  }
+
+  const { results } = await db
+    .prepare(
+      `SELECT r.release_id, r.published_at, r.deprecated_at,
+              r.synthesizer_min_version, r.synthesizer_max_version,
+              f.filename, f.format, f.size_bytes, f.sha256
+       FROM releases r
+       JOIN files f ON f.file_id = r.file_id
+       WHERE r.dataset_id = ?
+       ORDER BY r.published_at DESC, r.release_id DESC`,
+    )
+    .bind(dataset.dataset_id)
+    .all();
+
+  return json({
+    dataset: dataset.name,
+    data_type: dataset.data_type,
+    releases: results.map((row) => ({
+      release_id: row.release_id,
+      published_at: row.published_at,
+      deprecated_at: row.deprecated_at,
+      is_current: row.release_id === dataset.current_release_id,
+      synthesizer_min_version: row.synthesizer_min_version,
+      synthesizer_max_version: row.synthesizer_max_version,
+      file: {
+        filename: row.filename,
+        format: row.format,
+        size_bytes: row.size_bytes,
+        sha256: row.sha256,
+      },
+      url: `${origin}/v1/releases/${row.release_id}`,
+      download_url: `${origin}/v1/releases/${row.release_id}/download`,
+    })),
+  });
+}
+
+/**
+ * Return one release by id, whatever dataset it belongs to.
+ *
+ * Releases are referenced by id from elsewhere in the catalogue, most notably
+ * by a photoionised grid naming the incident grid it was computed from, so
+ * they need to be retrievable without knowing the dataset first.
+ *
+ * @param {D1Database} db Catalogue database.
+ * @param {string} releaseId Release identifier from the path.
+ * @param {string} origin Origin of the incoming request.
+ * @returns {Promise<Response>} JSON release detail.
+ */
+async function getRelease(db, releaseId, origin) {
+  if (!/^[0-9]+$/.test(releaseId)) {
+    return error(400, "Release id must be an integer");
+  }
+
+  const row = await db
+    .prepare(
+      `SELECT r.release_id, r.published_at, r.deprecated_at,
+              r.synthesizer_min_version, r.synthesizer_max_version,
+              r.provenance_json,
+              f.filename, f.format, f.size_bytes, f.sha256,
+              d.name AS dataset, d.data_type, d.current_release_id
+       FROM releases r
+       JOIN files f ON f.file_id = r.file_id
+       JOIN datasets d ON d.dataset_id = r.dataset_id
+       WHERE r.release_id = ?`,
+    )
+    .bind(Number(releaseId))
+    .first();
+
+  if (row === null) {
+    return error(404, `No release with id ${releaseId}`);
+  }
+
+  const decoded = decodeRow(row);
+  return json({
+    dataset: decoded.dataset,
+    data_type: decoded.data_type,
+    is_current: decoded.current_release_id === decoded.release_id,
+    ...(await releasePayload(db, decoded, origin)),
   });
 }
 
@@ -148,7 +347,8 @@ async function getDataset(db, name, origin) {
   const row = await db
     .prepare(
       `SELECT d.name, d.display_name, d.description, d.data_type, d.is_test,
-              d.is_recommended, d.licence, d.citations_json, d.metadata_json,
+              d.is_ci, d.is_recommended, d.licence, d.citations_json,
+              d.metadata_json,
               r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.provenance_json,
@@ -165,7 +365,7 @@ async function getDataset(db, name, origin) {
     return error(404, `No dataset named '${name}'`);
   }
 
-  const dataset = decodeRow(row, ["is_test", "is_recommended"]);
+  const dataset = decodeRow(row, ["is_test", "is_ci", "is_recommended"]);
   const releaseId = dataset.release_id;
   if (releaseId === null) {
     return json({
@@ -174,6 +374,7 @@ async function getDataset(db, name, origin) {
       description: dataset.description,
       data_type: dataset.data_type,
       is_test: dataset.is_test,
+      is_ci: dataset.is_ci,
       is_recommended: dataset.is_recommended,
       licence: dataset.licence,
       citations: dataset.citations,
@@ -182,57 +383,18 @@ async function getDataset(db, name, origin) {
     });
   }
 
-  const [grid, axes, instrument] = await db.batch([
-    db
-      .prepare("SELECT * FROM grid_metadata WHERE release_id = ?")
-      .bind(releaseId),
-    db
-      .prepare(
-        `SELECT axis_index, name, units, scale, count, minimum, maximum,
-                values_json
-         FROM grid_axes WHERE release_id = ? ORDER BY axis_index`,
-      )
-      .bind(releaseId),
-    db.prepare("SELECT * FROM instruments WHERE release_id = ?").bind(releaseId),
-  ]);
-
-  const gridRow = decodeRow(grid.results[0] ?? null);
-  if (gridRow !== null) {
-    delete gridRow.release_id;
-    gridRow.axes = axes.results.map((axis) => decodeRow(axis));
-  }
-  const instrumentRow = decodeRow(instrument.results[0] ?? null);
-  if (instrumentRow !== null) {
-    delete instrumentRow.release_id;
-  }
-
   return json({
     name: dataset.name,
     display_name: dataset.display_name,
     description: dataset.description,
     data_type: dataset.data_type,
     is_test: dataset.is_test,
+    is_ci: dataset.is_ci,
     is_recommended: dataset.is_recommended,
     licence: dataset.licence,
     citations: dataset.citations,
     metadata: dataset.metadata,
-    current_release: {
-      release_id: releaseId,
-      published_at: dataset.published_at,
-      deprecated_at: dataset.deprecated_at,
-      synthesizer_min_version: dataset.synthesizer_min_version,
-      synthesizer_max_version: dataset.synthesizer_max_version,
-      provenance: dataset.provenance,
-      file: {
-        filename: dataset.filename,
-        format: dataset.format,
-        size_bytes: dataset.size_bytes,
-        sha256: dataset.sha256,
-      },
-      download_url: `${origin}/v1/releases/${releaseId}/download`,
-      grid: gridRow,
-      instrument: instrumentRow,
-    },
+    current_release: await releasePayload(db, dataset, origin),
   });
 }
 
@@ -428,9 +590,23 @@ export default {
         return await getDataset(env.DB, decodeURIComponent(dataset[1]), url.origin);
       }
 
+      const releases = /^\/v1\/datasets\/([^/]+)\/releases$/.exec(path);
+      if (releases !== null) {
+        return await listReleases(
+          env.DB,
+          decodeURIComponent(releases[1]),
+          url.origin,
+        );
+      }
+
       const download = /^\/v1\/releases\/([^/]+)\/download$/.exec(path);
       if (download !== null) {
         return await downloadRelease(env, request, download[1]);
+      }
+
+      const release = /^\/v1\/releases\/([^/]+)$/.exec(path);
+      if (release !== null) {
+        return await getRelease(env.DB, release[1], url.origin);
       }
 
       return error(404, `No route for ${path}`);

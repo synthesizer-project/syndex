@@ -1015,3 +1015,37 @@ def test_a_part_that_never_succeeds_raises(tmp_path, monkeypatch):
         upload._upload_resumable(client, "bucket", "key", plan, "abc")
 
     assert client.completed is None, "must not complete a partial upload"
+
+
+class PagedPartsClient(FlakyMultipartClient):
+    """A stub whose list_parts pages at 1000, the way S3 and R2 actually do.
+
+    Missing this pagination in a monitoring script made healthy uploads look
+    frozen at exactly 1000 parts. In the uploader itself the same mistake would
+    silently re-upload every part past the first thousand on resume, so the
+    behaviour is pinned here.
+    """
+
+    PAGE = 1000
+
+    def list_parts(self, **kwargs):
+        numbers = sorted(self._existing)
+        marker = kwargs.get("PartNumberMarker", 0)
+        page = [n for n in numbers if n > marker][: self.PAGE]
+        return {
+            "Parts": [{"PartNumber": n, "ETag": self._existing[n]} for n in page],
+            "IsTruncated": bool([n for n in numbers if n > marker][self.PAGE :]),
+            "NextPartNumberMarker": page[-1] if page else marker,
+        }
+
+
+def test_resume_reads_every_page_of_existing_parts(tmp_path):
+    """A resume must see parts beyond the first list_parts page."""
+    client = PagedPartsClient(existing_parts=range(1, 1201))
+    plan = _big_plan(tmp_path, 1300)
+
+    upload._upload_resumable(client, "bucket", "key", plan, "abc")
+
+    # Only the genuinely missing parts are sent, not everything past 1000.
+    assert sorted(client.attempts) == list(range(1201, 1301))
+    assert len(client.completed) == 1300

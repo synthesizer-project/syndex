@@ -302,7 +302,7 @@ carry are taken directly from `synthesizer.instruments`
 `spectroscopic`/`ifu` instruments and only when Synthesizer was given a
 constant value; a wavelength-dependent resolving power is a Python callable
 and cannot be serialised to HDF5, so it is `NULL` here too (this is a real
-Synthesizer limitation, not a Syndicate one — added as an explicit column now
+Synthesizer limitation, not a Syndex one — added as an explicit column now
 so a future Synthesizer release that supports non-constant resolving powers
 differently, or new instrument classes that expose it, has somewhere to land
 without another migration).

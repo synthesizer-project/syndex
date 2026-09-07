@@ -109,7 +109,7 @@ representation.
 6. **Next:** integrate test paths in `synthesizer-download`.
 7. Migrate remaining categories incrementally and update their downloader paths.
 8. Compare catalogues and retain Box through a transition period.
-9. **Done:** the portal, on the same Worker at `/syndicate`, reading D1
+9. **Done:** the portal, on the same Worker at `/syndex`, reading D1
    through the binding rather than through its own API. See
    [website.md](website.md).
 

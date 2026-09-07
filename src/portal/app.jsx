@@ -2,7 +2,7 @@
 /** @jsxImportSource hono/jsx */
 
 /**
- * The Syndicate portal: server-rendered pages over the same D1 and R2
+ * The Syndex portal: server-rendered pages over the same D1 and R2
  * bindings the API uses.
  *
  * Search state lives in URL query parameters, so every filtered view is
@@ -57,7 +57,7 @@ const NOUNS = {
 
 const app = new Hono().basePath(BASE);
 
-// /syndicate/ and /syndicate are the same page, and only one of them should
+// /syndex/ and /syndex are the same page, and only one of them should
 // be the URL anybody shares or cites.
 app.use(trimTrailingSlash());
 
@@ -366,8 +366,8 @@ app.post("/submit/:token/complete", async (c) => {
  * @returns {Promise<Response | void>} A refusal, or the guarded handler.
  */
 const requireReviewer = (c, next) => {
-  const username = c.env.SYNDICATE_REVIEW_USER;
-  const password = c.env.SYNDICATE_REVIEW_PASSWORD;
+  const username = c.env.SYNDEX_REVIEW_USER;
+  const password = c.env.SYNDEX_REVIEW_PASSWORD;
   if (!username || !password) {
     return c.text("The review queue is not configured.", 503);
   }
@@ -435,7 +435,7 @@ app.post("/review/:id{[0-9]+}", async (c) => {
         submission === null
           ? "That submission has already been reviewed."
           : `${submission.name} marked ${decision}. Publishing it is still a` +
-            " deliberate run of syndicate-upload."
+            " deliberate run of syndex-upload."
       }
     />,
     { cache: "no-store" },
@@ -468,7 +468,7 @@ app.onError((error, c) => {
     }),
   );
   return c.html(
-    "<!doctype html><title>Syndicate</title><p>Something went wrong " +
+    "<!doctype html><title>Syndex</title><p>Something went wrong " +
       "rendering this page. The failure has been logged.",
     500,
     { "cache-control": "no-store" },

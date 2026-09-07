@@ -2,7 +2,7 @@
 
 The Worker in [`src/worker/index.js`](../src/worker/index.js) serves the public
 read side of the data service. It is read-only: publication happens through
-`syndicate-upload`, never through this API.
+`syndex-upload`, never through this API.
 
 D1 is authoritative for catalogue metadata and R2 for file bytes. The Worker
 queries both through bindings and never parses HDF5.
@@ -263,7 +263,7 @@ Response headers:
 |---|---|
 | `ETag` | R2 object etag; send it back as `If-None-Match` for `304` |
 | `Content-Disposition` | `attachment` with the catalogue filename |
-| `X-Syndicate-SHA256` | Expected SHA-256, so a client can verify without a second request |
+| `X-Syndex-SHA256` | Expected SHA-256, so a client can verify without a second request |
 | `Cache-Control` | `public, max-age=31536000, immutable` |
 | `Accept-Ranges` | `bytes`, advertising resumable downloads |
 

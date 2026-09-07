@@ -287,7 +287,7 @@ function postSubmission(env, fields = {}) {
     "cf-turnstile-response": "XXXX.DUMMY.TOKEN.XXXX",
     ...fields,
   });
-  return call("/syndicate/submit", env, {
+  return call("/syndex/submit", env, {
     method: "POST",
     body,
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -305,7 +305,7 @@ const tests = {
       "application/json; charset=utf-8",
     );
 
-    const portal = await call("/syndicate/grids", env);
+    const portal = await call("/syndex/grids", env);
     assert.equal(portal.status, 200);
     assert.match(portal.headers.get("content-type"), /text\/html/);
 
@@ -488,7 +488,7 @@ const tests = {
 
   async "a page names its filters and offers a way out of them"() {
     const env = { DB: stubDb() };
-    const { body } = await call("/syndicate/grids?model=BPASS&axis=ages", env);
+    const { body } = await call("/syndex/grids?model=BPASS&axis=ages", env);
 
     // The count, the chips, and a link that clears everything.
     assert.match(body, /1 grid</);
@@ -508,14 +508,14 @@ const tests = {
     }));
     const env = { DB: stubDb({ rows: { facets: many } }) };
 
-    const collapsed = (await call("/syndicate/grids", env)).body;
+    const collapsed = (await call("/syndex/grids", env)).body;
     // Six values, then the link. Never the link, then the values.
     const shown = collapsed.indexOf('value="model-5"');
     const link = collapsed.indexOf("4 more");
     assert.ok(shown > 0 && link > shown, "the toggle comes after the values");
     assert.equal(collapsed.includes('value="model-6"'), false);
 
-    const opened = (await call("/syndicate/grids?more=model", env)).body;
+    const opened = (await call("/syndex/grids?more=model", env)).body;
     assert.ok(opened.includes('value="model-9"'), "all values are shown");
     const last = opened.indexOf('value="model-9"');
     assert.ok(opened.indexOf("collapse") > last, "the toggle is still last");
@@ -526,7 +526,7 @@ const tests = {
   async "an expanded list is not a filter"() {
     // It narrows nothing, so it must not make the page look filtered.
     const env = { DB: stubDb() };
-    const { body, headers } = await call("/syndicate/grids?more=model", env);
+    const { body, headers } = await call("/syndex/grids?more=model", env);
 
     assert.doesNotMatch(body, /clear all/);
     assert.equal(headers.get("cache-control"), "public, max-age=60");
@@ -534,7 +534,7 @@ const tests = {
 
   async "htmx gets the panel and nothing around it"() {
     const env = { DB: stubDb() };
-    const { body, headers } = await call("/syndicate/grids", env, {
+    const { body, headers } = await call("/syndex/grids", env, {
       headers: { "HX-Request": "true" },
     });
 
@@ -573,7 +573,7 @@ const tests = {
     };
 
     const { status, body } = await call(
-      `/syndicate/datasets/${GRID_ROW.name}`,
+      `/syndex/datasets/${GRID_ROW.name}`,
       env,
     );
 
@@ -589,7 +589,7 @@ const tests = {
 
   async "a dataset that is not there says so as a page"() {
     const env = { DB: stubDb({ rows: { datasets: [] } }) };
-    const { status, body } = await call("/syndicate/datasets/nope", env);
+    const { status, body } = await call("/syndex/datasets/nope", env);
 
     assert.equal(status, 404);
     assert.match(body, /no dataset named nope/);
@@ -601,7 +601,7 @@ const tests = {
     // default, so an unconfigured portal says so instead of taking a file
     // it has nowhere to put.
     const env = { DB: stubDb() };
-    const { body } = await call("/syndicate/submit", env);
+    const { body } = await call("/syndex/submit", env);
     assert.match(body, /Submissions are not open yet/);
     assert.doesNotMatch(body, /cf-turnstile/);
 
@@ -675,7 +675,7 @@ const tests = {
       // upload, so it is what the address carries, not the row's id.
       assert.match(
         headers.get("location"),
-        /^\/syndicate\/submit\/[0-9a-f]{8}-[0-9a-f]{4}-/,
+        /^\/syndex\/submit\/[0-9a-f]{8}-[0-9a-f]{4}-/,
       );
       assert.doesNotMatch(headers.get("location"), /\/7$/);
     } finally {
@@ -699,7 +699,7 @@ const tests = {
   },
 
   async "an oversized submission is refused before it is parsed"() {
-    const { status } = await call("/syndicate/submit", submissionEnv(), {
+    const { status } = await call("/syndex/submit", submissionEnv(), {
       method: "POST",
       body: "name=x",
       headers: {
@@ -714,7 +714,7 @@ const tests = {
   async "the upload page offers both ways up"() {
     const env = submissionEnv({ rows: { submission: SUBMISSION } });
     const { status, body } = await call(
-      `/syndicate/submit/${SUBMISSION.upload_token}`,
+      `/syndex/submit/${SUBMISSION.upload_token}`,
       env,
     );
 
@@ -731,7 +731,7 @@ const tests = {
   async "an upload url is signed for exactly one key"() {
     const env = submissionEnv({ rows: { submission: SUBMISSION } });
     const { status, body } = await call(
-      `/syndicate/submit/${SUBMISSION.upload_token}/upload-url`,
+      `/syndex/submit/${SUBMISSION.upload_token}/upload-url`,
       env,
       {
         method: "POST",
@@ -763,7 +763,7 @@ const tests = {
       },
     });
     const { status } = await call(
-      `/syndicate/submit/${SUBMISSION.upload_token}/upload-url`,
+      `/syndex/submit/${SUBMISSION.upload_token}/upload-url`,
       env,
       { method: "POST", body: "{}", headers: { "content-type": "application/json" } },
     );
@@ -781,7 +781,7 @@ const tests = {
     env.DB = stubDb({ rows: { submission: SUBMISSION }, issued });
 
     const { status, headers } = await call(
-      `/syndicate/submit/${SUBMISSION.upload_token}/complete`,
+      `/syndex/submit/${SUBMISSION.upload_token}/complete`,
       env,
       {
         method: "POST",
@@ -791,7 +791,7 @@ const tests = {
     );
 
     assert.equal(status, 303);
-    assert.match(headers.get("location"), /\/syndicate\/submit\//);
+    assert.match(headers.get("location"), /\/syndex\/submit\//);
 
     // The size and filename recorded are R2's, and the digest is only kept
     // when it is one.
@@ -808,7 +808,7 @@ const tests = {
     const env = submissionEnv({ objects: [{ key, size: 10 }] });
     env.DB = stubDb({ rows: { submission: SUBMISSION }, issued });
 
-    await call(`/syndicate/submit/${SUBMISSION.upload_token}/complete`, env, {
+    await call(`/syndex/submit/${SUBMISSION.upload_token}/complete`, env, {
       method: "POST",
       body: new URLSearchParams({ declared_sha256: "not-a-digest" }),
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -820,7 +820,7 @@ const tests = {
   async "an upload that never arrived says so"() {
     const env = submissionEnv({ rows: { submission: SUBMISSION }, objects: [] });
     const { status, body } = await call(
-      `/syndicate/submit/${SUBMISSION.upload_token}/complete`,
+      `/syndex/submit/${SUBMISSION.upload_token}/complete`,
       env,
       { method: "POST", body: "", headers: { "content-type": "application/x-www-form-urlencoded" } },
     );
@@ -831,10 +831,10 @@ const tests = {
 
   async "an unknown token is not a way to browse the queue"() {
     const env = submissionEnv({ rows: { submission: undefined } });
-    assert.equal((await call("/syndicate/submit/nope", env)).status, 404);
+    assert.equal((await call("/syndex/submit/nope", env)).status, 404);
     assert.equal(
       (
-        await call("/syndicate/submit/nope/upload-url", env, {
+        await call("/syndex/submit/nope/upload-url", env, {
           method: "POST",
           body: "{}",
           headers: { "content-type": "application/json" },
@@ -846,18 +846,18 @@ const tests = {
 
   async "the review queue is closed until it is configured"() {
     const unconfigured = { DB: stubDb() };
-    assert.equal((await call("/syndicate/review", unconfigured)).status, 503);
+    assert.equal((await call("/syndex/review", unconfigured)).status, 503);
 
     const configured = {
       DB: stubDb(),
-      SYNDICATE_REVIEW_USER: "reviewer",
-      SYNDICATE_REVIEW_PASSWORD: "secret",
+      SYNDEX_REVIEW_USER: "reviewer",
+      SYNDEX_REVIEW_PASSWORD: "secret",
     };
-    const challenged = await call("/syndicate/review", configured);
+    const challenged = await call("/syndex/review", configured);
     assert.equal(challenged.status, 401);
     assert.match(challenged.headers.get("www-authenticate"), /Basic/);
 
-    const authorised = await call("/syndicate/review", configured, {
+    const authorised = await call("/syndex/review", configured, {
       headers: { authorization: `Basic ${btoa("reviewer:secret")}` },
     });
     assert.equal(authorised.status, 200);
@@ -867,10 +867,10 @@ const tests = {
   async "reviewing records a decision and does not publish anything"() {
     const env = {
       DB: stubDb(),
-      SYNDICATE_REVIEW_USER: "reviewer",
-      SYNDICATE_REVIEW_PASSWORD: "secret",
+      SYNDEX_REVIEW_USER: "reviewer",
+      SYNDEX_REVIEW_PASSWORD: "secret",
     };
-    const { status, body } = await call("/syndicate/review/7", env, {
+    const { status, body } = await call("/syndex/review/7", env, {
       method: "POST",
       body: new URLSearchParams({ decision: "approved", reviewer_note: "Fine" }),
       headers: {
@@ -891,7 +891,7 @@ const tests = {
         },
       },
     };
-    const { status, body } = await call("/syndicate/grids", env);
+    const { status, body } = await call("/syndex/grids", env);
 
     assert.equal(status, 500);
     assert.doesNotMatch(body, /D1 exploded/);

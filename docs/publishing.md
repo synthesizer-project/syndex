@@ -1,7 +1,7 @@
 # Publishing and Migration
 
-This guide is for maintainers publishing files to Syndicate. Read it before
-running `syndicate-upload` without `--dry-run`.
+This guide is for maintainers publishing files to Syndex. Read it before
+running `syndex-upload` without `--dry-run`.
 
 The remote database has the initial schema applied and the catalogue API is
 deployed, so publication and its final API verification both work. Dry-run
@@ -9,7 +9,7 @@ first regardless: publication writes immutable objects.
 
 ## How Publication Works
 
-For every file, `syndicate-upload`:
+For every file, `syndex-upload`:
 
 1. Detects its physical format from its contents where possible.
 2. Recognizes Synthesizer grids from their HDF5 structure.
@@ -40,7 +40,7 @@ uv sync --extra test
 Run the command through the project environment:
 
 ```bash
-uv run syndicate-upload --help
+uv run syndex-upload --help
 ```
 
 ## Format and Type
@@ -71,7 +71,7 @@ can use command-line defaults; a mixed batch should use a metadata file.
 Always dry-run a batch first:
 
 ```bash
-uv run syndicate-upload PATH \
+uv run syndex-upload PATH \
     --data-type simulation_data \
     --is-test \
     --dry-run
@@ -214,7 +214,7 @@ configuration variables are:
 After reviewing dry-run output, remove `--dry-run`:
 
 ```bash
-uv run syndicate-upload PATH --metadata metadata.json
+uv run syndex-upload PATH --metadata metadata.json
 ```
 
 Verification through the deployed API stays opt-in, because a transient API
@@ -223,7 +223,7 @@ publication as a failure. Enable it when you want the extra check:
 
 ```bash
 SYNTHESIZER_DATA_API_URL=https://data.synthesizer-project.org \
-    uv run syndicate-upload PATH --metadata metadata.json
+    uv run syndex-upload PATH --metadata metadata.json
 ```
 
 Existing R2 objects are reused only when size and stored SHA-256 match. Existing

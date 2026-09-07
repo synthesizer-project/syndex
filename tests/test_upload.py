@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 import pytest
 
-from syndicate import upload
+from syndex import upload
 
 
 def migrated_database() -> sqlite3.Connection:

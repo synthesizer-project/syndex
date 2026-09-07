@@ -530,7 +530,7 @@ async function downloadRelease(env, request, releaseId) {
     "accept-ranges": "bytes",
     "cache-control": "public, max-age=31536000, immutable",
     "content-disposition": `attachment; filename="${row.filename}"`,
-    "x-syndicate-sha256": row.sha256,
+    "x-syndex-sha256": row.sha256,
     etag: object.httpEtag,
   });
   object.writeHttpMetadata(headers);

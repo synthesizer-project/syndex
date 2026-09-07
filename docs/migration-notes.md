@@ -79,7 +79,7 @@ map between plural **grid axis** names and singular **per-object component**
 attributes. The singular names in `blackhole.py` are component attributes and
 are unrelated to this.
 
-`syndicate-upload` now warns at publish time on singular axis names and on
+`syndex-upload` now warns at publish time on singular axis names and on
 units that do not match the expected dimension for a known axis, so neither
 defect can be reintroduced silently. Re-running those rules over every current
 release reports zero problems across all nineteen distinct name/unit pairs.

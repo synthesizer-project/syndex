@@ -13,7 +13,7 @@
 import { AXIS_UNITS, MODEL_LABELS, RANGE_MODES, TABS, toQuery } from "./catalogue.js";
 
 /** Where the portal lives, and where its stylesheet and htmx are served. */
-export const BASE = "/syndicate";
+export const BASE = "/syndex";
 
 /**
  * The API's own host.
@@ -160,7 +160,7 @@ export const Layout = ({
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>{title} · Syndicate</title>
+      <title>{title} · Syndex</title>
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
       <link rel="stylesheet" href={FONTS} />
@@ -190,7 +190,7 @@ export const Layout = ({
             href={BASE}
             class="text-xl font-medium tracking-tight text-text no-underline"
           >
-            Syndicate
+            Syndex
           </a>
           {nav && (
             <nav

@@ -1,4 +1,4 @@
-# Syndicate Portal Plan
+# Syndex Portal Plan
 
 The catalogue has 240 datasets and no way to look at them. This is the plan for
 the portal that fixes that, and eventually for accepting contributions to it.
@@ -8,7 +8,7 @@ than estimated, because several of the design decisions turn on them.
 
 ## What it is
 
-Syndicate is three things, in this order of arrival:
+Syndex is three things, in this order of arrival:
 
 1. A portal for exploring and searching what is in the database.
 2. A way to contribute new entries to it, reviewed before they go live.
@@ -23,12 +23,12 @@ avoids the hard part.
 ```
 synthesizer-project.org/            GitHub Pages (org landing)
 synthesizer-project.org/synthesizer/  GitHub Pages (docs)
-synthesizer-project.org/syndicate/*   Worker  <- the portal
+synthesizer-project.org/syndex/*   Worker  <- the portal
 data.synthesizer-project.org/v1/*     Worker  <- the API, unchanged
 ```
 
 The org site is static GitHub Pages and the portal is the one dynamic thing in
-the project, so `/syndicate` is a routing decision rather than a hosting one. A
+the project, so `/syndex` is a routing decision rather than a hosting one. A
 Cloudflare Worker route matches before the request reaches the origin, so the
 Worker serves that path without GitHub Pages knowing about it. This matches the
 path pattern already intended for project docs.
@@ -40,7 +40,7 @@ One Worker serves both, with API routes matched first. They share the D1 and R2
 bindings, so portal pages query D1 in-process rather than making HTTP calls
 back through their own API.
 
-There is a `syndicate` repository. If it ever enables GitHub Pages it would
+There is a `syndex` repository. If it ever enables GitHub Pages it would
 claim the same path; the Worker route wins, but leave Pages off it anyway.
 
 ## Stack
@@ -67,13 +67,13 @@ share, and middleware for protecting the review page later.
 
 No client-side framework. The interactive parts are a filter rail and a form.
 
-**Search state lives in URL query parameters.** `/syndicate/grids?model=bpass`
+**Search state lives in URL query parameters.** `/syndex/grids?model=bpass`
 is shareable, citable, back-button-correct, and works with JavaScript
 disabled. Filter changes are form submissions, which htmx then upgrades into
 background requests that swap in just the updated table and rewrite the URL:
 
 ```html
-<form hx-get="/syndicate/grids" hx-target="#results"
+<form hx-get="/syndex/grids" hx-target="#results"
       hx-push-url="true" hx-trigger="change">
 ```
 
@@ -90,7 +90,7 @@ are real URLs, not JavaScript state, because each data type needs its own
 columns and its own filters.
 
 ```
-Syndicate            Grids 156 | Dust 3 | Instruments 19 | Data 62
+Syndex            Grids 156 | Dust 3 | Instruments 19 | Data 62
 -------------------+-------------------------------------------------
  search [        ] |  23 grids   BPASS x  photoionised x   clear all
                    +-------------------------------------------------
@@ -116,7 +116,7 @@ Syndicate            Grids 156 | Dust 3 | Instruments 19 | Data 62
                    |
 ```
 
-`/syndicate` itself is a separate, thin landing page: what this is, the install
+`/syndex` itself is a separate, thin landing page: what this is, the install
 command, headline counts, and a search box that drops into the Grids tab.
 Someone arriving from a paper needs orientation; someone who knows what they
 want should be one keystroke from the search. A wall of 156 rows serves
@@ -310,7 +310,7 @@ These block portal work or make it much less useful:
    command; the honest instruction would be `--all`, which is 63 GiB. The fix
    is small because `_resolve_release(dataset, release_id=None)` already turns
    a catalogue name into a download: it needs a flag wired to it.
-2. **DNS for the apex**, plus GitHub Pages as origin and the `/syndicate/*`
+2. **DNS for the apex**, plus GitHub Pages as origin and the `/syndex/*`
    Worker route.
 3. **The Cloudflare Gateway policy inspects `data.synthesizer-project.org`**,
    which breaks HTTPS to it from any local tool while the VPN is up. The
@@ -327,7 +327,7 @@ These block portal work or make it much less useful:
 - **v2**: presigned direct-to-R2 uploads with resumption, replacing the
   URL-fetch submission.
 - **v2**: an interactive coverage view (age/metallicity, Cloudy, IMF). The
-  static `syndicate-plots` output already covers sharing with colleagues, which
+  static `syndex-plots` output already covers sharing with colleagues, which
   was its purpose.
 - **v3**: generating the job scripts to process an incident grid through
   Cloudy, delivered as a downloadable bundle.

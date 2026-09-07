@@ -1,6 +1,6 @@
-# Syndicate
+# Syndex
 
-Syndicate is the data service for the
+Syndex is the data service for the
 [Synthesizer project](https://github.com/synthesizer-project). It will replace
 the current Box-hosted collection with one searchable catalogue and one stable
 download service for grids, instruments, test data, generation inputs, and
@@ -21,7 +21,7 @@ Implemented:
 - D1 schema migration, applied locally and remotely.
 - Read-only catalogue and download API, described in
   [`docs/api.md`](docs/api.md).
-- The catalogue portal at `/syndicate`, described in
+- The catalogue portal at `/syndex`, described in
   [`docs/website.md`](docs/website.md): tabs per data type, facet and axis
   range filtering, dataset pages, and a reviewed submission queue.
 - Tests for mixed batches, metadata precedence, upload verification, and D1
@@ -49,7 +49,7 @@ The next milestone is resolving downloads through the API in
 Syncretize ──creates──> grid files
                            |
                            v
-                    syndicate-upload
+                    syndex-upload
                       /          \
                     R2            D1
                  file bytes   catalogue data
@@ -62,7 +62,7 @@ Syncretize ──creates──> grid files
 - R2 is authoritative for immutable file bytes.
 - D1 is authoritative for catalogue metadata and publication state.
 - Worker provides read-only catalogue and download endpoints.
-- `syndicate-upload` validates files, uploads to R2, then registers them in D1.
+- `syndex-upload` validates files, uploads to R2, then registers them in D1.
 - Synthesizer retains user-facing aliases, download groups, and destination
   handling.
 
@@ -80,7 +80,7 @@ uv sync --extra test
 Inspect one non-grid file without contacting Cloudflare:
 
 ```bash
-uv run syndicate-upload sample.dat \
+uv run syndex-upload sample.dat \
     --data-type simulation_data \
     --is-test \
     --dry-run
@@ -89,7 +89,7 @@ uv run syndicate-upload sample.dat \
 Inspect a directory using per-file metadata:
 
 ```bash
-uv run syndicate-upload ./data \
+uv run syndex-upload ./data \
     --metadata ./metadata.json \
     --dry-run
 ```
@@ -112,7 +112,7 @@ dependencies beyond `npm install`, and neither touches the network.
 ## The Portal
 
 The portal is more routes on the same Worker, under
-`synthesizer-project.org/syndicate/*`, sharing the D1 and R2 bindings so its
+`synthesizer-project.org/syndex/*`, sharing the D1 and R2 bindings so its
 pages query the catalogue in process rather than calling `/v1` over HTTP. It
 is server-rendered Hono JSX with Tailwind for styling and htmx for filtering;
 nothing hydrates, and every filtered view is a URL that works without
@@ -143,11 +143,11 @@ resumes). The Worker then lists that prefix to find out what actually
 arrived, rather than believing a report of success.
 
 Approving a submission records a decision. It does not publish: the reviewer
-pulls the file out of the submissions bucket and runs `syndicate-upload`,
+pulls the file out of the submissions bucket and runs `syndex-upload`,
 which is the only thing that opens the HDF5, verifies the digest, and
 registers R2 and D1 in one transaction. The review page prints both commands.
 
-Both `/syndicate/submit` and `/syndicate/review` fail closed. The form says
+Both `/syndex/submit` and `/syndex/review` fail closed. The form says
 submissions are shut unless every piece below is configured, and the review
 page refuses to serve at all without its credentials, so a missing secret can
 never leave a write endpoint standing open.
@@ -167,8 +167,8 @@ wrangler secret put TURNSTILE_SECRET
 wrangler secret put TURNSTILE_SITEKEY   # public, so a var in wrangler.jsonc also works
 
 # Whoever reads the queue
-wrangler secret put SYNDICATE_REVIEW_USER
-wrangler secret put SYNDICATE_REVIEW_PASSWORD
+wrangler secret put SYNDEX_REVIEW_USER
+wrangler secret put SYNDEX_REVIEW_PASSWORD
 ```
 
 The account id and the bucket name are non-secret and live in
@@ -194,12 +194,12 @@ the command without `--dry-run`.
 
 ## Catalogue Plots
 
-`syndicate-plots` renders diagnostic figures from the public API, so they
+`syndex-plots` renders diagnostic figures from the public API, so they
 describe exactly what a client sees:
 
 ```bash
-uv run syndicate-plots --output-dir plots
-uv run syndicate-plots --plot wavelengths --refresh
+uv run syndex-plots --output-dir plots
+uv run syndex-plots --plot wavelengths --refresh
 ```
 
 | Plot | Shows |
@@ -218,9 +218,9 @@ Responses are cached in `.catalogue-cache.json`; `--refresh` re-fetches them.
 ```text
 docs/                    architecture, schema, API, and publishing guides
 migrations/              ordered D1 schema migrations
-src/syndicate/upload.py  inspection and publication CLI
-src/syndicate/plots.py   diagnostic plots of the published catalogue
-src/worker/entry.js      splits /v1 from /syndicate
+src/syndex/upload.py  inspection and publication CLI
+src/syndex/plots.py   diagnostic plots of the published catalogue
+src/worker/entry.js      splits /v1 from /syndex
 src/worker/index.js      read-only catalogue and download API
 src/portal/              the portal: routes, catalogue queries, views, tokens
 tests/                   local tests with mocked cloud operations, for the
@@ -236,7 +236,7 @@ wrangler.jsonc           Worker entrypoint, static assets and resource
   grid files and defines their HDF5 conventions.
 - [Synthesizer](https://github.com/synthesizer-project/synthesizer) resolves and
   installs published files through `synthesizer-download`.
-- Syndicate stores, describes, serves, and eventually presents those files.
+- Syndex stores, describes, serves, and eventually presents those files.
 
 ## Further Reading
 

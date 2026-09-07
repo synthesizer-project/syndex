@@ -18,7 +18,7 @@
     // matches before the request reaches the origin, so this path is served
     // from here without Pages knowing about it.
     {
-      "pattern": "synthesizer-project.org/syndicate/*",
+      "pattern": "synthesizer-project.org/syndex/*",
       "zone_name": "synthesizer-project.org"
     }
   ],

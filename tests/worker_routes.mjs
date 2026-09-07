@@ -387,7 +387,7 @@ const tests = {
 
     assert.equal(status, 200);
     assert.equal(body, "payload");
-    assert.equal(headers.get("x-syndicate-sha256"), DATASET_ROW.sha256);
+    assert.equal(headers.get("x-syndex-sha256"), DATASET_ROW.sha256);
     assert.equal(headers.get("etag"), '"abc123"');
     assert.equal(headers.get("accept-ranges"), "bytes");
     assert.match(headers.get("cache-control"), /immutable/);

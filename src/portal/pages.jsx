@@ -97,13 +97,10 @@ function decode(text, fallback = null) {
  * and one line saying how to fetch anything once found.
  */
 export const Landing = ({ counts, datasets, bytes }) => (
-  <Layout title="Syndicate" counts={counts} nav={false} bare active={null}>
+  <Layout title="Syndex" counts={counts} nav={false} bare active={null}>
     <div class="rise text-center">
-      {/* Sized and measured to break after "Synthesizer": a monospace sets
-          every character at 0.6em, so a headline's width is arithmetic
-          rather than a guess. */}
-      <h1 class="mx-auto max-w-[30rem] text-[clamp(1.6rem,5vw,2.6rem)] leading-[1.25] text-balance">
-        The Synthesizer data catalogue
+      <h1 class="mx-auto whitespace-nowrap text-[clamp(1rem,4.8vw,2.6rem)] leading-[1.25]">
+        The Synthesizer Database
       </h1>
 
       <form
@@ -964,7 +961,7 @@ export const Review = ({ counts, submissions, bucket, note = null }) => (
         />
         {submission.state === "pending" && (
           <>
-            {/* syndicate-upload publishes a local file: it opens the HDF5,
+            {/* syndex-upload publishes a local file: it opens the HDF5,
                 verifies the digest and registers R2 and D1 in one
                 transaction, none of which a Worker can do. So the bytes come
                 down out of the submissions bucket first, as a separate and
@@ -979,7 +976,7 @@ export const Review = ({ counts, submissions, bucket, note = null }) => (
                 </div>
                 <div class="mt-2">
                   <Command>
-                    syndicate-upload {submission.filename} --data-type{" "}
+                    syndex-upload {submission.filename} --data-type{" "}
                     {submission.data_type}
                   </Command>
                 </div>

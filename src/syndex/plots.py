@@ -3,8 +3,8 @@
 Reads the public API rather than D1, so the plots describe exactly what a
 client sees, and caches the responses so repeated runs are instant.
 
-    uv run syndicate-plots --output-dir plots
-    uv run syndicate-plots --plot wavelengths --refresh
+    uv run syndex-plots --output-dir plots
+    uv run syndex-plots --plot wavelengths --refresh
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def fetch(api_url: str, path: str) -> dict[str, Any]:
     request = urllib.request.Request(
         f"{api_url}{path}",
         # Cloudflare rejects urllib's default agent, so name ourselves.
-        headers={"User-Agent": "syndicate-plots/1.0"},
+        headers={"User-Agent": "syndex-plots/1.0"},
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:

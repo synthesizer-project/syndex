@@ -1071,7 +1071,7 @@ wheels = [
 ]
 
 [[package]]
-name = "synthesizer-syndicate"
+name = "synthesizer-syndex"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

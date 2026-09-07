@@ -94,9 +94,13 @@ Syndicate            Grids 156 | Dust 3 | Instruments 19 | Data 62
 -------------------+-------------------------------------------------
  search [        ] |  23 grids   BPASS x  photoionised x   clear all
                    +-------------------------------------------------
- MODEL             | name             emission   ages      Z      size
- [x] BPASS      47 | bpass-2.2.1-...  photoion  1e6-1e11  1e-5-.04 194M
- [ ] FSPS       54 | ...
+ KIND              | name             emission   ages      Z      size
+ [ ] stellar   142 | bpass-2.2.1-...  photoion  1e6-1e11  1e-5-.04 194M
+ [ ] AGN        15 | ...
+                   |
+ MODEL             |
+ [x] BPASS      47 |
+ [ ] FSPS       54 |
  > 8 more          |
                    |
  EMISSION          |
@@ -129,6 +133,19 @@ neither.
 
 Dust grids stay a separate tab despite holding three datasets. They are not
 grids and nothing that consumes a grid can consume one.
+
+The rail leads with **stellar or AGN** (`grid_type`, 142 and 15), above the
+models, because it is the first cut anyone makes and it is one column. The
+models below it are then almost a restatement of that choice — every BPASS
+grid is stellar, every QSOSED grid is AGN — which is why the counts beside
+each are computed against the other active filters rather than against the
+whole tab.
+
+Every dataset on the **Other data** tab carries a description and nothing else
+that distinguishes it: no model, no axes, no filters. So that tab shows the
+description as a column. All 49 generation inputs are Maraston SEDs — 12 from
+2005, 8 from 2011, 9 from 2013 and 20 from 2024 — which their descriptions say
+and their names do not.
 
 ## The search interface
 
@@ -209,9 +226,10 @@ variables and generate utilities directly:
 
 Tokens are copied from `synthesizer-project.github.io` and the source recorded
 in a comment. There is little else to share: the org site is cards and a centre
-glow, and the portal needs tables, filter rails, form controls, pagination and
-badges, none of which the org site has any styling for. Cohesion comes from the
-tokens, the two typefaces and the card idiom.
+glow, and the portal needs tables, filter rails, form controls and badges, none
+of which the org site has any styling for. Cohesion comes from the tokens, the
+card idiom and the centre glow; the typeface is deliberately the project's own
+rather than the org site's.
 
 **Tailwind introduces a build step, so `wrangler deploy` on its own is no
 longer sufficient** and would ship stale styling. Wrap it: the deploy script
@@ -240,13 +258,24 @@ longer than a landing page and these were measured against WCAG:
 `--accent` fails as text and also fails the 3.0 floor for interactive
 boundaries, so it can only sit behind light text.
 
-Typography: `Outfit` at **400** for body text, not the 300 the landing page
-uses, which is too light for dense tables. `Cormorant Garamond` for display.
+Typography: **`JetBrains Mono` throughout**, at 400 for body text, UI and
+tables, and 500 for headings. It is the project's own typeface, and using it
+here is a deliberate divergence from the org landing page, which has not
+adopted it: a catalogue is mostly identifiers, digits and numeric ranges, all
+of which a monospace sets better than a proportional face. Weight 400 rather
+than the 300 the org landing page uses, which is too light for dense tables
+and lighter still in a monospace.
 
-Note: the org site requests `family=Cormorant+Garant`, which is not a Google
-family and returns **HTTP 400**, so its display font currently falls back to a
-generic serif. The portal should implement the intent and the org site should
-be fixed to agree.
+One family, and no display serif: hierarchy comes from size and weight.
+`Cormorant Garamond` was tried for headings and dropped — a serif over
+monospace tables reads as two unrelated documents, and mono headings at weight
+500 carry the hierarchy on their own.
+
+Note on the org site's own request: it asks for `family=Cormorant+Garant`,
+which is not a Google family. That request now returns **HTTP 200 carrying
+only Outfit** — it returned 400 when this was first measured — so either way
+the org site's display font falls back to a generic serif. That should still
+be fixed there, but the portal no longer shares the face.
 
 Accessibility, treated as requirements rather than aspirations: visible focus
 rings on every control, the filter rail reachable and operable by keyboard,

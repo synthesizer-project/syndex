@@ -7,7 +7,7 @@ download service for grids, instruments, test data, generation inputs, and
 related project assets.
 
 This repository owns the complete service: publication tooling, Cloudflare
-infrastructure, catalogue API, Box migration, and the future catalogue website.
+infrastructure, catalogue API, Box migration, and the catalogue portal.
 It does not generate scientific grids and it does not install downloads into a
 user's Synthesizer environment.
 
@@ -21,6 +21,9 @@ Implemented:
 - D1 schema migration, applied locally and remotely.
 - Read-only catalogue and download API, described in
   [`docs/api.md`](docs/api.md).
+- The catalogue portal at `/syndicate`, described in
+  [`docs/website.md`](docs/website.md): tabs per data type, facet and axis
+  range filtering, dataset pages, and a reviewed submission queue.
 - Tests for mixed batches, metadata precedence, upload verification, and D1
   registration.
 
@@ -34,7 +37,8 @@ Live:
 
 Not yet built:
 
-- Catalogue website.
+- Multipart uploads driven by the portal itself. Files over 1 GiB go up with
+  an S3 client instead, which already resumes.
 
 The next milestone is resolving downloads through the API in
 `synthesizer-download` instead of Box links.
@@ -52,7 +56,7 @@ Syncretize ──creates──> grid files
                       \          /
                     Worker API
                       /      \
-      synthesizer-download   catalogue website
+      synthesizer-download   catalogue portal
 ```
 
 - R2 is authoritative for immutable file bytes.
@@ -94,14 +98,96 @@ Run local checks:
 
 ```bash
 uv run --extra test pytest
-node tests/worker_routes.mjs
+npm test
 uvx ruff check .
 uvx ruff format --check .
 wrangler d1 migrations apply synthesizer-database --local
 ```
 
-`tests/worker_routes.mjs` exercises the API's routing and response shaping
-against stubbed bindings, so it needs neither dependencies nor network access.
+`npm test` runs `tests/worker_routes.mjs` and `tests/portal_routes.mjs`, which
+exercise the API's routing and response shaping and the portal's routing,
+filter SQL and form handling against stubbed bindings. Neither needs
+dependencies beyond `npm install`, and neither touches the network.
+
+## The Portal
+
+The portal is more routes on the same Worker, under
+`synthesizer-project.org/syndicate/*`, sharing the D1 and R2 bindings so its
+pages query the catalogue in process rather than calling `/v1` over HTTP. It
+is server-rendered Hono JSX with Tailwind for styling and htmx for filtering;
+nothing hydrates, and every filtered view is a URL that works without
+JavaScript. [`docs/website.md`](docs/website.md) records the decisions and the
+measurements behind them.
+
+```bash
+npm install
+npm run dev      # builds the stylesheet, then wrangler dev
+npm run deploy   # builds the stylesheet, then wrangler deploy
+```
+
+**Deploy with `npm run deploy`, not `wrangler deploy`.** Tailwind generates
+`dist/assets/` at build time, and Workers Static Assets serves what is on
+disk, so deploying without building first ships whatever styling was there
+last. The npm script exists so the step cannot be skipped by anyone who
+forgets it is there.
+
+### Submissions
+
+A contributor describes a dataset, then sends the file straight to R2. The
+bytes never pass through the Worker: registering a submission mints an
+unguessable upload token naming one prefix of a separate submissions bucket,
+and the file goes up either through a presigned PUT from the browser (under
+1 GiB, which covers 233 of the catalogue's 241 datasets) or with an ordinary
+S3 client driven by prefix-scoped temporary credentials (any size, and it
+resumes). The Worker then lists that prefix to find out what actually
+arrived, rather than believing a report of success.
+
+Approving a submission records a decision. It does not publish: the reviewer
+pulls the file out of the submissions bucket and runs `syndicate-upload`,
+which is the only thing that opens the HDF5, verifies the digest, and
+registers R2 and D1 in one transaction. The review page prints both commands.
+
+Both `/syndicate/submit` and `/syndicate/review` fail closed. The form says
+submissions are shut unless every piece below is configured, and the review
+page refuses to serve at all without its credentials, so a missing secret can
+never leave a write endpoint standing open.
+
+```bash
+# One-off infrastructure
+wrangler r2 bucket create synthesizer-submissions
+wrangler d1 migrations apply synthesizer-database --remote   # 0005
+
+# From an R2 API token scoped to synthesizer-submissions only
+wrangler secret put SYNTHESIZER_SUBMISSIONS_ACCESS_KEY_ID
+wrangler secret put SYNTHESIZER_SUBMISSIONS_SECRET_ACCESS_KEY
+wrangler secret put SYNTHESIZER_SUBMISSIONS_API_TOKEN   # mints temp credentials
+
+# From a Turnstile widget for synthesizer-project.org
+wrangler secret put TURNSTILE_SECRET
+wrangler secret put TURNSTILE_SITEKEY   # public, so a var in wrangler.jsonc also works
+
+# Whoever reads the queue
+wrangler secret put SYNDICATE_REVIEW_USER
+wrangler secret put SYNDICATE_REVIEW_PASSWORD
+```
+
+The account id and the bucket name are non-secret and live in
+`wrangler.jsonc` under `vars`. For local development everything else goes in
+`.dev.vars`, which is not committed; Cloudflare publishes Turnstile test keys
+that always pass, and a presigned URL signed with placeholder R2 credentials
+is rejected by R2, so the browser upload is the one step that cannot be
+exercised locally. To test the rest of the flow, put a file in the local
+bucket by hand:
+
+```bash
+wrangler r2 object put \
+    synthesizer-submissions/submissions/YOUR-TOKEN/example.hdf5 \
+    --file example.hdf5 --local
+```
+
+Nothing expires the submissions bucket at present. If unreviewed
+submissions ever accumulate, an R2 lifecycle rule on the `submissions/`
+prefix is a bucket setting rather than a code change.
 
 See [publishing guide](docs/publishing.md) before preparing metadata or using
 the command without `--dry-run`.
@@ -134,10 +220,14 @@ docs/                    architecture, schema, API, and publishing guides
 migrations/              ordered D1 schema migrations
 src/syndicate/upload.py  inspection and publication CLI
 src/syndicate/plots.py   diagnostic plots of the published catalogue
+src/worker/entry.js      splits /v1 from /syndicate
 src/worker/index.js      read-only catalogue and download API
-tests/                   local tests with mocked cloud operations, for both
-                         the CLI and the API
-wrangler.jsonc           Worker entrypoint and resource bindings
+src/portal/              the portal: routes, catalogue queries, views, tokens
+tests/                   local tests with mocked cloud operations, for the
+                         CLI, the API and the portal
+package.json             portal dependencies, build and deploy scripts
+wrangler.jsonc           Worker entrypoint, static assets and resource
+                         bindings
 ```
 
 ## Repository Boundaries

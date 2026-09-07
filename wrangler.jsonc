@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
   "name": "synthesizer-data-api",
-  "main": "src/worker/index.js",
+  "main": "src/worker/entry.js",
   "compatibility_date": "2026-09-04",
   // workers.dev stays enabled as a second entrypoint while
   // data.synthesizer-project.org is young: security products routinely block
@@ -13,8 +13,23 @@
     {
       "pattern": "data.synthesizer-project.org",
       "custom_domain": true
+    },
+    // The portal. The org site is static GitHub Pages, and a Worker route
+    // matches before the request reaches the origin, so this path is served
+    // from here without Pages knowing about it.
+    {
+      "pattern": "synthesizer-project.org/syndicate/*",
+      "zone_name": "synthesizer-project.org"
     }
   ],
+  // The portal's stylesheet and its vendored copy of htmx, built by
+  // `npm run build`. Assets are matched before the Worker runs, and nothing
+  // in here sits at a /v1 path, so the API cannot be shadowed by one; with
+  // no matching asset the request falls through to the Worker, which is
+  // every page the portal serves.
+  "assets": {
+    "directory": "dist/assets"
+  },
   "observability": {
     "enabled": true,
     "logs": { "head_sampling_rate": 1 }
@@ -31,6 +46,22 @@
     {
       "binding": "FILES",
       "bucket_name": "synthesizer-data"
+    },
+    // Contributed files, before anyone has opened them. A separate bucket
+    // rather than a prefix of the catalogue's: unvalidated bytes should not
+    // share a namespace with the authoritative store, and the credentials
+    // the portal mints for a submitter are scoped to this bucket, so they
+    // could not reach a published object even if they leaked.
+    {
+      "binding": "SUBMISSIONS",
+      "bucket_name": "synthesizer-submissions"
     }
-  ]
+  ],
+  "vars": {
+    // Not secrets: an account id and a bucket name. The R2 key, its secret,
+    // the API token that mints temporary credentials, the Turnstile secret
+    // and the review password are all `wrangler secret put`.
+    "SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID": "e86ac0bb0bee64457c144e84d67966ef",
+    "SYNTHESIZER_SUBMISSIONS_BUCKET": "synthesizer-submissions"
+  }
 }

@@ -1,0 +1,243 @@
+/*
+ * Portal stylesheet.
+ *
+ * Tailwind v4 is configured in CSS rather than a JavaScript file, so this is
+ * both the entry point and the whole configuration. `npm run build` compiles
+ * it to dist/assets/, which is where Workers Static Assets serves it from.
+ */
+
+@import "tailwindcss";
+
+@source "./";
+
+/*
+ * Tokens are the org site's (synthesizer-project.github.io, :root in
+ * index.html) so the two read as one project. Three were measured against
+ * WCAG and corrected here, because a data portal is read for far longer than
+ * a landing page: --color-muted was #5a7a96 (4.22, fails AA body text) and is
+ * now #6484a0 (4.54); --color-accent (2.88) is a fill only, never text or a
+ * border; --color-dim (2.07) is borders and dividers only. See
+ * docs/website.md for the full table.
+ */
+@theme {
+  --color-bg: #07101f;
+  --color-surface: #0c1829;
+  --color-line: rgba(60, 130, 190, 0.16);
+  --color-line-hover: rgba(74, 150, 210, 0.42);
+  --color-accent: #2b6090;
+  --color-accent-light: #4a9acc;
+  --color-text: #dce8f2;
+  --color-muted: #6484a0;
+  --color-dim: #304a62;
+
+  /*
+   * JetBrains Mono throughout, being the project's own typeface. One face
+   * and no display serif: a catalogue is mostly identifiers, digits and
+   * numeric ranges, which a monospace sets better anyway, and hierarchy
+   * comes from size and weight rather than from a second family.
+   */
+  --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    /* 400, not the 300 the org landing page sets: too light for dense
+       tables, and lighter still in a monospace. */
+    font-weight: 400;
+    min-height: 100vh;
+  }
+
+  /*
+   * The org site's centre glow, anchored to the top rather than the middle
+   * of the viewport: on the landing page it sits behind the banner exactly
+   * as it does there, and on a page that is mostly table it stays behind the
+   * header instead of washing out the rows.
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -38%);
+    width: 900px;
+    height: 600px;
+    background: radial-gradient(
+      ellipse,
+      rgba(43, 96, 144, 0.09) 0%,
+      transparent 68%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  body > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Headings are the body face, larger. A monospace needs no extra tracking
+     at size, and reads tighter without it. */
+  h1,
+  h2,
+  h3 {
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* Every control gets a visible ring, once, rather than per component. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-light);
+    outline-offset: 2px;
+  }
+
+  a {
+    color: var(--color-accent-light);
+  }
+
+  /* Checkboxes inherit the browser's blue otherwise, which is the one colour
+     on the page that belongs to nothing else. */
+  input[type="checkbox"] {
+    accent-color: var(--color-accent-light);
+  }
+}
+
+/* The org site's card: same radius, same translucent surface, same border. */
+@utility card {
+  background-color: rgba(12, 24, 41, 0.55);
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+}
+
+/* A card that is also a link, and says so on hover the way the org's do. */
+@utility card-link {
+  transition:
+    transform 0.28s ease,
+    box-shadow 0.28s ease,
+    border-color 0.28s ease;
+
+  &:hover {
+    transform: translateY(-5px);
+    border-color: var(--color-line-hover);
+    box-shadow:
+      0 20px 48px rgba(43, 96, 144, 0.2),
+      0 0 0 1px rgba(74, 150, 210, 0.28);
+  }
+}
+
+/* The org site's pill badge, used here for counts and for markers. */
+@utility pill {
+  display: inline-block;
+  border: 1px solid rgba(74, 150, 210, 0.22);
+  background: rgba(43, 96, 144, 0.14);
+  border-radius: 20px;
+  padding: 0.15em 0.7em 0.2em;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@utility btn {
+  display: inline-block;
+  border-radius: 20px;
+  border: 1px solid rgba(74, 150, 210, 0.55);
+  background: rgba(43, 96, 144, 0.45);
+  padding: 0.5rem 1.1rem;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease;
+
+  &:hover {
+    background: rgba(43, 96, 144, 0.7);
+    border-color: var(--color-accent-light);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+  }
+}
+
+/* The same shape, for the action that is not the one being encouraged. */
+@utility btn-quiet {
+  display: inline-block;
+  border-radius: 20px;
+  border: 1px solid var(--color-muted);
+  padding: 0.5rem 1.1rem;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  transition: border-color 0.25s ease;
+
+  &:hover {
+    border-color: var(--color-accent-light);
+  }
+}
+
+/* A group heading in the filter rail, and a dt in a definition list. */
+@utility label-caps {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+/* Rows arrive rather than appear, matching the org site's entrance. */
+@utility rise {
+  animation: rise 0.9s ease both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*
+ * The filter rail is a sheet that collapses on narrow screens and a plain
+ * column on wide ones. <details> gives the collapsing, the keyboard handling
+ * and the label for free, so the only thing left is to stop showing the
+ * summary once there is room for the rail beside the results.
+ */
+@media (width >= 64rem) {
+  .filter-sheet > summary {
+    display: none;
+  }
+}
+
+/*
+ * A long table keeps its column names. The header sits on the card's own
+ * background so rows passing under it stay legible.
+ */
+.results thead th {
+  position: sticky;
+  top: 0;
+  background-color: #0c1829;
+  z-index: 2;
+}
+
+.results tbody tr:hover {
+  background-color: rgba(43, 96, 144, 0.12);
+}
+
+/* htmx reveals this while a filter request is in flight. */
+#busy {
+  visibility: hidden;
+}
+#busy.htmx-request {
+  visibility: visible;
+}

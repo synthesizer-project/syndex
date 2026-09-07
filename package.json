@@ -1,0 +1,23 @@
+{
+  "name": "syndicate",
+  "private": true,
+  "type": "module",
+  "description": "Worker serving the Synthesizer data API and the Syndicate portal.",
+  "scripts": {
+    "build": "mkdir -p dist/assets/syndicate/static && tailwindcss --input src/portal/app.css --output dist/assets/syndicate/static/app.css --minify && cp node_modules/htmx.org/dist/htmx.min.js dist/assets/syndicate/static/htmx.min.js && cp src/portal/upload.js dist/assets/syndicate/static/upload.js",
+    "deploy": "npm run build && wrangler deploy",
+    "dev": "npm run build && wrangler dev",
+    "test": "node tests/worker_routes.mjs && node tests/portal_routes.mjs"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "hono": "4.13.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "esbuild": "0.27.2",
+    "htmx.org": "2.0.10",
+    "tailwindcss": "4.3.3",
+    "wrangler": "4.129.0"
+  }
+}

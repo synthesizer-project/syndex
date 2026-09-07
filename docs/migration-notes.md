@@ -84,6 +84,18 @@ units that do not match the expected dimension for a known axis, so neither
 defect can be reintroduced silently. Re-running those rules over every current
 release reports zero problems across all nineteen distinct name/unit pairs.
 
+One incident link was moved as a consequence.
+`maraston13-kroupa-0p1-100-cloudy-c23p01` recorded release 10 as the incident
+grid it was derived from, and release 10 is now flagged. Since release 242
+holds the same axis and spectral data with only the units corrected, the link
+was repointed to 242: it exists to lead a user to the incident grid, and
+leading them to a flagged release serves nobody. This does edit recorded
+provenance, which is why it is written down here.
+
+These generator bugs were not reported upstream. They are corrected in the
+catalogue and guarded against at publish time, so new grids carrying them would
+be caught rather than published, but the generators will keep producing them.
+
 ### Deliberately left alone
 
 - **`alpha` on `draine-li-dust-emission-mw-3p1`** is *not* a misspelling of

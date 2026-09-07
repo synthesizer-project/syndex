@@ -144,7 +144,9 @@ CREATE TABLE releases (
     deprecated_at TEXT,
     synthesizer_min_version TEXT,
     synthesizer_max_version TEXT,
-    provenance_json TEXT NOT NULL DEFAULT '{}'
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    known_bug INTEGER NOT NULL DEFAULT 0,
+    known_bug_description TEXT
 );
 ```
 
@@ -160,6 +162,15 @@ genuinely drops support. Simulation data, generation inputs, and cache
 archives are left unconstrained, since they are not Synthesizer-format files.
 Nothing enforces these bounds yet; they are recorded so the downloader can
 honour them when a real incompatibility first appears.
+
+`known_bug` and `known_bug_description` record a defect found in a release
+after it was published. Releases are immutable and stay resolvable, so a file
+that turns out to be wrong is corrected by publishing a new release rather than
+by editing the old one; anything still pinned to the old release then needs to
+be told what is wrong with it. The description says what the defect is, whether
+the data or only the metadata is affected, and that a corrected release exists.
+This is deliberately a property of the release and not of the dataset, because
+the same dataset's next release is clean.
 
 `provenance_json` records how the published bytes came to exist: the HDF5
 root attributes the file reports about itself (`date_created`,

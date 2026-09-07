@@ -114,6 +114,8 @@ by `axis_index` and include complete `values`.
     "release_id": 2,
     "published_at": "2026-09-04T16:47:01.550420Z",
     "deprecated_at": null,
+    "known_bug": false,
+    "known_bug_description": null,
     "synthesizer_min_version": null,
     "synthesizer_max_version": null,
     "provenance": {
@@ -173,6 +175,14 @@ by `axis_index` and include complete `values`.
 for this release carries all 254 line identifiers, all 51 age values, and the
 second `metallicities` axis, because complete axis values are what let a client
 plot or filter a grid without downloading it.
+
+`known_bug` is `true` when a defect was found in that release after it was
+published. Releases are immutable, so a bad file is corrected by publishing a
+new release rather than by editing the old one, and the old release stays
+resolvable for anything pinned to it. When the flag is set,
+`known_bug_description` says what is wrong, whether the data or only the
+metadata is affected, and that a corrected release exists. A client resolving a
+pinned release should surface this rather than ignore it.
 
 ## `GET /v1/datasets/{name}/releases`
 

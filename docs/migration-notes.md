@@ -57,6 +57,46 @@ loudly rather than producing a grid that breaks later.
   as `None`. Fixed in Synthesizer, covering `IntegratedFieldUnit` too through
   inheritance.
 
+## Axis metadata defects, found and corrected
+
+Querying every axis in the catalogue at once, which nothing had done before,
+turned up defects that are invisible when files are inspected one at a time.
+All three files were corrected and republished as new releases; the superseded
+releases carry `known_bug` and a description, since they remain resolvable.
+
+| Dataset | Defect | Correction |
+|---|---|---|
+| `maraston13-kroupa-0p1-100` | `axes/ages` had `Units = 'yr**2'`, which is dimensionally impossible. The axis's own `Description` read "(yr)", so the file contradicted itself. Values (10³–1.5×10¹⁰) were always years. | `Units = 'yr'`. Release 10 superseded by 242. |
+| `maraston13-salpeter-0p1-100` | As above. | Release 11 superseded by 243. |
+| `qsosed-cloudy-agn-test` | Five of six axes named in the singular (`mass`, `accretion_rate_eddington`, `cosine_inclination`, `ionisation_parameter`, `hydrogen_density`) where all thirteen sibling AGN grids use the plural. Code addressing axes by name would not find them. | Renamed to the plural forms `pluralize` produces, with the root `axes` and `incident_axes` attributes and the axis `Description`s updated to agree. Release 7 superseded by 244. |
+
+Only metadata changed in all three: every dataset in every file was verified
+byte-identical before and after, once the renames are accounted for.
+
+The plural form is correct because Synthesizer draws the distinction
+explicitly: `synthesizer.utils.util_funcs.pluralize` and `depluralize` exist to
+map between plural **grid axis** names and singular **per-object component**
+attributes. The singular names in `blackhole.py` are component attributes and
+are unrelated to this.
+
+`syndicate-upload` now warns at publish time on singular axis names and on
+units that do not match the expected dimension for a known axis, so neither
+defect can be reintroduced silently. Re-running those rules over every current
+release reports zero problems across all nineteen distinct name/unit pairs.
+
+### Deliberately left alone
+
+- **`alpha` on `draine-li-dust-emission-mw-3p1`** is *not* a misspelling of
+  `alpha_enhancement`. In the DL07 model it is the power-law index of the
+  starlight intensity distribution (dU ∝ U^−α), and its range of 1–3 matches.
+  Merging the two facets on name similarity would conflate unrelated physical
+  quantities, which is why the publish-time check uses an explicit list rather
+  than fuzzy matching.
+- **`masses` carries three unit spellings** for the same quantity
+  (`1.98841586e+30*kg`, the same number written out in full, and plain `kg`).
+  All are physically correct, so nothing was rewritten, but any mass range
+  filter has to normalise before comparing.
+
 ## Naming observations
 
 - Several relagn files were **renamed on Box** during the project's life:

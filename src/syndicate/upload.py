@@ -141,6 +141,68 @@ def detect_format(path: Path) -> str:
     return "text"
 
 
+# Axis names follow the plural grid-axis convention; the singular form belongs
+# to per-object component attributes. Two published grids escaped with singular
+# names and one with dimensionally impossible units, and neither was noticed
+# until the whole catalogue was queried at once, so both are checked at publish
+# time now. These are warnings rather than errors: a genuinely new axis should
+# not be blocked by a list that has not heard of it yet.
+_SINGULAR_AXIS_NAMES = {
+    "mass": "masses",
+    "age": "ages",
+    "metallicity": "metallicities",
+    "accretion_rate_eddington": "accretion_rates_eddington",
+    "cosine_inclination": "cosine_inclinations",
+    "ionisation_parameter": "ionisation_parameters",
+    "hydrogen_density": "hydrogen_densities",
+    "spin": "spins",
+    "column_density": "column_densities",
+    "turbulence": "turbulences",
+}
+
+# Only axes whose dimensions are not in doubt. `units` is compared loosely
+# because unyt spells the same unit several ways.
+_EXPECTED_AXIS_UNITS = {
+    "ages": ("yr", "myr", "gyr", "kyr", "s", "day"),
+    "metallicities": ("dimensionless",),
+    "accretion_rates_eddington": ("dimensionless",),
+    "cosine_inclinations": ("dimensionless",),
+    "ionisation_parameters": ("dimensionless",),
+}
+
+
+def check_axis_conventions(axes: list[dict[str, Any]]) -> list[str]:
+    """Report axis names and units that break the catalogue's conventions.
+
+    Args:
+        axes (list[dict[str, Any]]): Extracted axis records.
+
+    Returns:
+        list[str]: One human-readable warning per problem found.
+    """
+    warnings = []
+    for axis in axes:
+        name = axis["name"]
+        if name in _SINGULAR_AXIS_NAMES:
+            warnings.append(
+                f"axis '{name}' is singular; grid axes use the plural form "
+                f"'{_SINGULAR_AXIS_NAMES[name]}'"
+            )
+
+        expected = _EXPECTED_AXIS_UNITS.get(name)
+        units = axis.get("units")
+        if expected is None or units is None:
+            continue
+        # A compound unit such as yr**2 shares a prefix with yr, so require the
+        # whole string to match one of the accepted spellings.
+        if str(units).strip().lower() not in expected:
+            warnings.append(
+                f"axis '{name}' has units '{units}', expected one of "
+                f"{', '.join(expected)}"
+            )
+    return warnings
+
+
 def extract_hdf5(path: Path) -> dict[str, Any] | None:
     """Extract Synthesizer grid metadata without reading bulk science arrays.
 
@@ -196,6 +258,9 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
                     "values": values,
                 }
             )
+
+        for warning in check_axis_conventions(axes):
+            print(f"  WARNING {path.name}: {warning}", file=sys.stderr)
 
         spectra_group_name = None
         for candidate in ("spectra", "extinction_curves"):

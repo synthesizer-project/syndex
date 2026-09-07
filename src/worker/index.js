@@ -212,6 +212,8 @@ async function releasePayload(db, row, origin) {
     release_id: releaseId,
     published_at: row.published_at,
     deprecated_at: row.deprecated_at,
+    known_bug: row.known_bug === 1,
+    known_bug_description: row.known_bug_description,
     synthesizer_min_version: row.synthesizer_min_version,
     synthesizer_max_version: row.synthesizer_max_version,
     provenance: row.provenance,
@@ -255,6 +257,7 @@ async function listReleases(db, name, origin) {
     .prepare(
       `SELECT r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
+              r.known_bug, r.known_bug_description,
               f.filename, f.format, f.size_bytes, f.sha256
        FROM releases r
        JOIN files f ON f.file_id = r.file_id
@@ -271,6 +274,8 @@ async function listReleases(db, name, origin) {
       release_id: row.release_id,
       published_at: row.published_at,
       deprecated_at: row.deprecated_at,
+      known_bug: row.known_bug === 1,
+      known_bug_description: row.known_bug_description,
       is_current: row.release_id === dataset.current_release_id,
       synthesizer_min_version: row.synthesizer_min_version,
       synthesizer_max_version: row.synthesizer_max_version,
@@ -307,6 +312,7 @@ async function getRelease(db, releaseId, origin) {
     .prepare(
       `SELECT r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
+              r.known_bug, r.known_bug_description,
               r.provenance_json,
               f.filename, f.format, f.size_bytes, f.sha256,
               d.name AS dataset, d.data_type, d.current_release_id
@@ -351,6 +357,7 @@ async function getDataset(db, name, origin) {
               d.metadata_json,
               r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
+              r.known_bug, r.known_bug_description,
               r.provenance_json,
               f.filename, f.r2_path, f.format, f.size_bytes, f.sha256
        FROM datasets d

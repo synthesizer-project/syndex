@@ -881,3 +881,43 @@ def test_same_file_cannot_move_between_datasets(tmp_path):
     with pytest.raises(sqlite3.IntegrityError), database:
         for statement in upload.d1_statements(second):
             database.execute(statement["sql"], statement["params"])
+
+
+def test_singular_axis_names_are_reported():
+    """The plural convention is what the catalogue and Synthesizer both use."""
+    warnings = upload.check_axis_conventions(
+        [
+            {"name": "mass", "units": "kg"},
+            {"name": "accretion_rate_eddington", "units": "dimensionless"},
+        ]
+    )
+    assert len(warnings) == 2
+    assert "masses" in warnings[0]
+    assert "accretion_rates_eddington" in warnings[1]
+
+
+def test_compound_units_are_not_mistaken_for_the_base_unit():
+    """'yr**2' shares a prefix with 'yr' and must not pass as a time unit."""
+    (warning,) = upload.check_axis_conventions(
+        [{"name": "ages", "units": "yr**2"}]
+    )
+    assert "yr**2" in warning
+
+
+def test_conventional_axes_produce_no_warnings():
+    assert (
+        upload.check_axis_conventions(
+            [
+                {"name": "ages", "units": "yr"},
+                {"name": "metallicities", "units": "dimensionless"},
+                {"name": "masses", "units": "kg"},
+            ]
+        )
+        == []
+    )
+
+
+def test_unknown_axes_are_left_alone():
+    """A new axis must not be blocked by a list that has not heard of it."""
+    assert upload.check_axis_conventions([{"name": "qpah", "units": "dimensionless"}]) == []
+    assert upload.check_axis_conventions([{"name": "alpha", "units": "dimensionless"}]) == []

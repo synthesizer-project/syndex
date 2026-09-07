@@ -85,12 +85,10 @@ GET /v1/releases/{id}
 GET /v1/releases/{id}/download
 ```
 
-Deferred until the catalogue website needs them, since they serve browsing
-rather than downloading:
-
-```text
-GET /v1/facets
-```
+A facets endpoint was considered for browsing rather than downloading, and is
+not being built. The portal server-renders its pages and computes facet counts
+from D1 directly, so an endpoint with no caller outside the site would be
+speculative. See `website.md`.
 
 Responses support catalogue filtering, cursor pagination, CORS, ETags, and
 appropriate cache headers. Files stream from R2 through the Worker, keeping the

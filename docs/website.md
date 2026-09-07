@@ -45,8 +45,19 @@ claim the same path; the Worker route wins, but leave Pages off it anyway.
 
 ## Stack
 
+| Piece | Job | Runs |
+|---|---|---|
+| Hono | routing, middleware, JSX rendering | Worker |
+| Hono JSX | describes the HTML; escapes by default | server only |
+| Tailwind v4 | styling, from the tokens below | build step |
+| htmx | swaps the results table on filter changes | browser |
+| D1 / R2 bindings | metadata and files, in-process | Worker |
+
 Hono with JSX, server-rendered. Wrangler already bundles with esbuild, so JSX
-costs no additional build step.
+costs no additional build step; Tailwind does add one, covered under Design.
+
+No client-side framework, and no JSX in the browser: the server renders HTML
+and htmx updates fragments of it. Nothing hydrates.
 
 JSX rather than template literals specifically because the submission form
 accepts user input and echoes it back, which makes HTML escaping a security
@@ -58,10 +69,19 @@ No client-side framework. The interactive parts are a filter rail and a form.
 
 **Search state lives in URL query parameters.** `/syndicate/grids?model=bpass`
 is shareable, citable, back-button-correct, and works with JavaScript
-disabled. Filter changes are form submissions; a small script then intercepts
-them, fetches the updated table, swaps it in and rewrites the URL with
-`history.pushState`, so the list updates live without a page flash. That is
-progressive enhancement, roughly fifty lines, not a dependency.
+disabled. Filter changes are form submissions, which htmx then upgrades into
+background requests that swap in just the updated table and rewrite the URL:
+
+```html
+<form hx-get="/syndicate/grids" hx-target="#results"
+      hx-push-url="true" hx-trigger="change">
+```
+
+htmx (~14 KB, vendored as a pinned file rather than loaded from a CDN) is used
+in preference to hand-rolling this. The naive version is a few lines of
+`fetch`, but the correct version also cancels in-flight requests when filters
+change rapidly, shows loading state, handles failures and integrates with
+history, which is materially more code than it first appears.
 
 ## Layout
 
@@ -171,11 +191,37 @@ axes; the page never scrolls sideways.
 
 ## Design
 
+Tailwind CSS v4 (4.3.3 at time of writing), which configures itself in CSS
+rather than a JavaScript config file. The tokens below become `@theme`
+variables and generate utilities directly:
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07101f;
+  --color-surface: #0c1829;
+  --color-muted: #6484a0;
+  --color-accent: #2b6090;
+  --color-accent-light: #4a9acc;
+}
+```
+
 Tokens are copied from `synthesizer-project.github.io` and the source recorded
 in a comment. There is little else to share: the org site is cards and a centre
 glow, and the portal needs tables, filter rails, form controls, pagination and
 badges, none of which the org site has any styling for. Cohesion comes from the
 tokens, the two typefaces and the card idiom.
+
+**Tailwind introduces a build step, so `wrangler deploy` on its own is no
+longer sufficient** and would ship stale styling. Wrap it: the deploy script
+must generate the CSS first, so the step cannot be skipped by anyone who
+forgets it exists.
+
+The generated stylesheet needs serving, and `wrangler.jsonc` currently
+configures no static assets. Use Workers Static Assets, checking the current
+documentation for how assets and routes interact so that `/v1/*` is not
+shadowed by the asset handler.
 
 Dark only, matching the org site.
 

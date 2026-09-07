@@ -106,12 +106,34 @@ against stubbed bindings, so it needs neither dependencies nor network access.
 See [publishing guide](docs/publishing.md) before preparing metadata or using
 the command without `--dry-run`.
 
+## Catalogue Plots
+
+`syndicate-plots` renders diagnostic figures from the public API, so they
+describe exactly what a client sees:
+
+```bash
+uv run syndicate-plots --output-dir plots
+uv run syndicate-plots --plot wavelengths --refresh
+```
+
+| Plot | Shows |
+|---|---|
+| `composition` | Volume and dataset count by data type |
+| `sizes` | File size distribution, with the extremes named |
+| `wavelengths` | Distinct wavelength coverage across the grids |
+| `models` | Grids by model family and emission type |
+| `timeline` | Datasets and cumulative volume over publication time |
+| `instruments` | Instrument wavelength coverage and filter counts |
+
+Responses are cached in `.catalogue-cache.json`; `--refresh` re-fetches them.
+
 ## Repository Layout
 
 ```text
 docs/                    architecture, schema, API, and publishing guides
 migrations/              ordered D1 schema migrations
 src/syndicate/upload.py  inspection and publication CLI
+src/syndicate/plots.py   diagnostic plots of the published catalogue
 src/worker/index.js      read-only catalogue and download API
 tests/                   local tests with mocked cloud operations, for both
                          the CLI and the API
@@ -133,3 +155,5 @@ wrangler.jsonc           Worker entrypoint and resource bindings
 - [`docs/schema.md`](docs/schema.md): R2 layout and D1 data model.
 - [`docs/publishing.md`](docs/publishing.md): dry runs, metadata, credentials,
   upload safety, and Box migration.
+- [`docs/migration-notes.md`](docs/migration-notes.md): broken source files,
+  upstream issues, and naming decisions found during the Box migration.

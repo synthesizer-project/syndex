@@ -80,6 +80,8 @@ Implemented, and documented in [api.md](api.md):
 ```text
 GET /v1/datasets
 GET /v1/datasets/{name}
+GET /v1/datasets/{name}/releases
+GET /v1/releases/{id}
 GET /v1/releases/{id}/download
 ```
 
@@ -87,8 +89,6 @@ Deferred until the catalogue website needs them, since they serve browsing
 rather than downloading:
 
 ```text
-GET /v1/datasets/{name}/releases
-GET /v1/releases/{id}
 GET /v1/facets
 ```
 

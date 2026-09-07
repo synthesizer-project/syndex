@@ -125,6 +125,31 @@ be caught rather than published, but the generators will keep producing them.
   each file rather than its filename, so the catalogue is consistent where the
   filenames are not.
 
+## Incident links
+
+64 of the 77 photoionised grids record the incident grid they were derived
+from. Six of those links were added after the migration, once querying the
+whole catalogue revealed they had never been set.
+
+Each was verified structurally before being written, not matched on name. A
+Cloudy run inherits its incident grid's axes and adds its own, so a candidate
+is only accepted when the incident grid's axis names are a subset of the
+photoionised grid's. An earlier pass in this migration produced 22 wrong links
+from a regex that merely looked plausible, which is why name similarity alone
+is not treated as evidence.
+
+The remaining 13 are null for reasons, not by omission:
+
+| Grids | Why |
+|---|---|
+| 6 Yggdrasil `fcov` grids | No photoionisation code. Yggdrasil applies its own nebular treatment and there is no separate incident grid. |
+| `qsosed-cloudy-agn-test` | Its incident grid is `qsosed-isotropic.hdf5`, which is one of the broken source files and is not in the catalogue. |
+| `qsosed-test-agn`, `-blr`, `-nlr` | No `qsosed-test` incident grid exists in the catalogue. |
+| 2 FSPS 4.0 variable-IMF grids | Published from a local copy; their incident grids were never published. |
+| `relagn-incident-fixed-rad-efficiency-0p1-cloudy-c23p01-nlr` | Derives from the **unreduced** incident grid, which is not in the catalogue. Proven rather than assumed: its inherited axes are finer than either reduced candidate (`masses` 9 values against 4 and 7, `accretion_rates_eddington` 15 against 6 and 7) and it carries no `spins` axis, which `relagn-variable-rad-efficiency-reduced` would have passed down. Matching on name would have linked it to release 54 and been wrong. |
+
+No photoionised grid points at a release flagged `known_bug`.
+
 ## Files that exist only in the catalogue
 
 The two FSPS 4.0 variable-IMF grids were never on Box; they were published

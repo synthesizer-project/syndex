@@ -8,11 +8,13 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1081,6 +1083,187 @@ def _head_object(client, bucket: str, key: str) -> dict[str, Any] | None:
         raise
 
 
+# Above this size a failed part is expensive enough to be worth uploading the
+# file by hand rather than through upload_file. Below it, a restart costs
+# seconds and the simpler path is preferable.
+RESUMABLE_THRESHOLD_BYTES = 1024**3
+
+# 16 MB parts at concurrency 2, matching the tuning upload_file was given.
+PART_SIZE_BYTES = 16 * 1024 * 1024
+PART_CONCURRENCY = 2
+
+
+def _find_incomplete_upload(client, bucket: str, key: str) -> str | None:
+    """Return the id of an unfinished multipart upload for this exact key.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+
+    Returns:
+        The upload id to resume, or None when there is nothing to resume.
+    """
+    response = client.list_multipart_uploads(Bucket=bucket, Prefix=key)
+    for upload in response.get("Uploads", []):
+        if upload["Key"] == key:
+            return upload["UploadId"]
+    return None
+
+
+def _completed_parts(client, bucket: str, key: str, upload_id: str) -> dict[int, str]:
+    """Map part number to ETag for the parts already stored.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+        upload_id: Multipart upload being resumed.
+
+    Returns:
+        ETags of parts already uploaded, keyed by part number.
+    """
+    parts, marker = {}, None
+    while True:
+        request = {"Bucket": bucket, "Key": key, "UploadId": upload_id}
+        if marker is not None:
+            request["PartNumberMarker"] = marker
+        response = client.list_parts(**request)
+        for part in response.get("Parts", []):
+            parts[part["PartNumber"]] = part["ETag"]
+        if not response.get("IsTruncated"):
+            return parts
+        marker = response.get("NextPartNumberMarker")
+
+
+def _upload_one_part(
+    client,
+    bucket: str,
+    key: str,
+    upload_id: str,
+    number: int,
+    offset: int,
+    size: int,
+    source: str,
+    attempts: int = 6,
+) -> dict[str, Any]:
+    """Upload a single part, retrying that part alone on failure.
+
+    This is the whole point of the manual path. A transient TLS failure part
+    way through a large upload costs one part here, where upload_file discards
+    the entire transfer.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+        upload_id: Multipart upload to add the part to.
+        number: One-based part number.
+        offset: Byte offset of the part within the file.
+        size: Part length in bytes.
+        source: Path of the file being uploaded.
+        attempts: How many times to try this part.
+
+    Returns:
+        The part number and ETag, as complete_multipart_upload wants them.
+
+    Raises:
+        Exception: The last failure, if every attempt for this part fails.
+    """
+    failure = None
+    for attempt in range(1, attempts + 1):
+        try:
+            # Read per attempt and per part: concurrent parts must not share a
+            # file position.
+            with open(source, "rb") as handle:
+                handle.seek(offset)
+                body = handle.read(size)
+            response = client.upload_part(
+                Bucket=bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=number,
+                Body=body,
+            )
+            return {"PartNumber": number, "ETag": response["ETag"]}
+        except Exception as exc:  # noqa: BLE001 - every failure is retried
+            failure = exc
+            if attempt == attempts:
+                break
+            time.sleep(min(2**attempt, 30))
+    raise failure
+
+
+def _upload_resumable(
+    client,
+    bucket: str,
+    key: str,
+    plan: dict[str, Any],
+    expected_sha: str,
+) -> None:
+    """Upload a large file part by part, resuming any earlier attempt.
+
+    An unfinished multipart upload for the same key is reused rather than
+    replaced, so an interrupted run continues instead of starting again. This
+    is safe because the key is content addressed: the same key can only ever
+    hold the same bytes, so parts from an earlier attempt are the parts this
+    attempt would upload.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+        plan: Validated publication plan.
+        expected_sha: Digest recorded alongside the object.
+
+    Raises:
+        UploadError: If the assembled object is not the expected size.
+        Exception: If a part fails every attempt.
+    """
+    source = plan["source_path"]
+    total = plan["file"]["size_bytes"]
+    upload_id = _find_incomplete_upload(client, bucket, key)
+    existing = {}
+    if upload_id is None:
+        upload_id = client.create_multipart_upload(
+            Bucket=bucket, Key=key, Metadata={"sha256": expected_sha}
+        )["UploadId"]
+    else:
+        existing = _completed_parts(client, bucket, key, upload_id)
+        if existing:
+            print(
+                f"  resuming {plan['file']['filename']}: "
+                f"{len(existing)} of "
+                f"{-(-total // PART_SIZE_BYTES)} parts already uploaded",
+                file=sys.stderr,
+            )
+
+    pending = []
+    for index, offset in enumerate(range(0, total, PART_SIZE_BYTES), start=1):
+        if index not in existing:
+            pending.append((index, offset, min(PART_SIZE_BYTES, total - offset)))
+
+    parts = [{"PartNumber": n, "ETag": tag} for n, tag in existing.items()]
+    if pending:
+        with ThreadPoolExecutor(max_workers=PART_CONCURRENCY) as pool:
+            futures = [
+                pool.submit(
+                    _upload_one_part,
+                    client, bucket, key, upload_id, number, offset, size, source,
+                )
+                for number, offset, size in pending
+            ]
+            # Surfacing the first failure here leaves the upload unfinished on
+            # purpose: the next run resumes from the parts that did land.
+            for future in futures:
+                parts.append(future.result())
+
+    parts.sort(key=lambda part: part["PartNumber"])
+    client.complete_multipart_upload(
+        Bucket=bucket, Key=key, UploadId=upload_id, MultipartUpload={"Parts": parts}
+    )
+
+
 def _upload_with_retries(
     client,
     bucket: str,
@@ -1091,10 +1274,13 @@ def _upload_with_retries(
 ) -> None:
     """Upload one file, retrying a transfer that dies part way through.
 
-    Large transfers fail often enough that a single attempt wastes hours.
-    Each retry restarts the transfer, so an abandoned multipart upload is
-    left behind; R2 discards those, and the digest check still decides
-    whether what finally arrives is correct.
+    Small files go through upload_file and are simply retried whole, which
+    costs seconds. Large files take the resumable path instead: upload_file
+    discards the entire transfer when a part fails hard, and on a 30 GiB grid
+    that threw away hours of work repeatedly, so those are uploaded part by
+    part with each part retried on its own and any earlier attempt resumed.
+
+    The digest check still decides whether what finally arrives is correct.
 
     Args:
         client: Configured boto3 S3 client.
@@ -1125,15 +1311,23 @@ def _upload_with_retries(
     except ImportError:
         pass
 
+    resumable = (
+        plan["file"]["size_bytes"] >= RESUMABLE_THRESHOLD_BYTES
+        and hasattr(client, "create_multipart_upload")
+    )
+
     for attempt in range(1, attempts + 1):
         try:
-            client.upload_file(
-                plan["source_path"],
-                bucket,
-                key,
-                ExtraArgs={"Metadata": {"sha256": expected_sha}},
-                **extra,
-            )
+            if resumable:
+                _upload_resumable(client, bucket, key, plan, expected_sha)
+            else:
+                client.upload_file(
+                    plan["source_path"],
+                    bucket,
+                    key,
+                    ExtraArgs={"Metadata": {"sha256": expected_sha}},
+                    **extra,
+                )
             return
         except Exception as exc:
             if attempt == attempts:

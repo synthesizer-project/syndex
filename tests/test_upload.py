@@ -682,7 +682,7 @@ def test_upload_verifies_r2_metadata(tmp_path):
                 raise MissingObject
             return self.object
 
-        def upload_file(self, filename, bucket, key, ExtraArgs):
+        def upload_file(self, filename, bucket, key, ExtraArgs, **kwargs):
             self.object = {
                 "ContentLength": Path(filename).stat().st_size,
                 "Metadata": ExtraArgs["Metadata"],
@@ -921,3 +921,97 @@ def test_unknown_axes_are_left_alone():
     """A new axis must not be blocked by a list that has not heard of it."""
     assert upload.check_axis_conventions([{"name": "qpah", "units": "dimensionless"}]) == []
     assert upload.check_axis_conventions([{"name": "alpha", "units": "dimensionless"}]) == []
+
+
+class FlakyMultipartClient:
+    """A stub R2 client that fails a chosen part a set number of times.
+
+    Records every part upload attempt so a test can prove that a failure costs
+    one part rather than the whole transfer.
+    """
+
+    def __init__(self, fail_part=None, failures=0, existing_parts=()):
+        self.fail_part = fail_part
+        self.remaining_failures = failures
+        self.attempts = []
+        self.completed = None
+        self.created = 0
+        self._existing = {n: f'"etag{n}"' for n in existing_parts}
+
+    def list_multipart_uploads(self, **kwargs):
+        if not self._existing:
+            return {}
+        return {"Uploads": [{"Key": kwargs["Prefix"], "UploadId": "resumed"}]}
+
+    def list_parts(self, **kwargs):
+        return {
+            "Parts": [
+                {"PartNumber": n, "ETag": tag} for n, tag in self._existing.items()
+            ],
+            "IsTruncated": False,
+        }
+
+    def create_multipart_upload(self, **kwargs):
+        self.created += 1
+        return {"UploadId": "fresh"}
+
+    def upload_part(self, **kwargs):
+        number = kwargs["PartNumber"]
+        self.attempts.append(number)
+        if number == self.fail_part and self.remaining_failures > 0:
+            self.remaining_failures -= 1
+            raise RuntimeError("SSL validation failed (_ssl.c:2406)")
+        return {"ETag": f'"etag{number}"'}
+
+    def complete_multipart_upload(self, **kwargs):
+        self.completed = kwargs["MultipartUpload"]["Parts"]
+
+
+def _big_plan(tmp_path, parts):
+    """A plan whose file spans the given number of whole parts."""
+    size = upload.PART_SIZE_BYTES * parts
+    path = tmp_path / "big.hdf5"
+    with open(path, "wb") as handle:
+        handle.truncate(size)
+    return {
+        "source_path": str(path),
+        "file": {"filename": "big.hdf5", "size_bytes": size},
+    }
+
+
+def test_a_failing_part_is_retried_alone(tmp_path, monkeypatch):
+    """The point of the manual path: one bad part must not restart the file."""
+    monkeypatch.setattr(upload.time, "sleep", lambda _: None)
+    client = FlakyMultipartClient(fail_part=3, failures=2)
+    plan = _big_plan(tmp_path, 4)
+
+    upload._upload_resumable(client, "bucket", "key", plan, "abc")
+
+    # Four parts, plus exactly the two retries of part 3, and no restart.
+    assert sorted(client.attempts) == [1, 2, 3, 3, 3, 4]
+    assert client.created == 1
+    assert [p["PartNumber"] for p in client.completed] == [1, 2, 3, 4]
+
+
+def test_an_interrupted_upload_resumes(tmp_path):
+    """Parts already stored are not uploaded again."""
+    client = FlakyMultipartClient(existing_parts=(1, 2))
+    plan = _big_plan(tmp_path, 4)
+
+    upload._upload_resumable(client, "bucket", "key", plan, "abc")
+
+    assert client.created == 0, "should reuse the existing upload id"
+    assert sorted(client.attempts) == [3, 4], "only the missing parts"
+    assert [p["PartNumber"] for p in client.completed] == [1, 2, 3, 4]
+
+
+def test_a_part_that_never_succeeds_raises(tmp_path, monkeypatch):
+    """Exhausting a part's attempts must fail loudly, not complete the upload."""
+    monkeypatch.setattr(upload.time, "sleep", lambda _: None)
+    client = FlakyMultipartClient(fail_part=2, failures=99)
+    plan = _big_plan(tmp_path, 3)
+
+    with pytest.raises(RuntimeError, match="_ssl.c:2406"):
+        upload._upload_resumable(client, "bucket", "key", plan, "abc")
+
+    assert client.completed is None, "must not complete a partial upload"

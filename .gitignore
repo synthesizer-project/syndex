@@ -7,3 +7,6 @@ dist/
 node_modules/
 *.egg-info/
 .staging/
+.catalogue-cache.json
+plots/
+.DS_Store

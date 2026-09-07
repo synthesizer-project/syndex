@@ -89,6 +89,8 @@ CREATE TABLE datasets (
     current_release_id INTEGER REFERENCES releases(release_id),
     is_test INTEGER NOT NULL DEFAULT 0
         CHECK (is_test IN (0, 1)),
+    is_ci INTEGER NOT NULL DEFAULT 0
+        CHECK (is_ci IN (0, 1)),
     is_recommended INTEGER NOT NULL DEFAULT 0
         CHECK (is_recommended IN (0, 1)),
     licence TEXT,
@@ -109,10 +111,21 @@ throughout: `data_type = dust_grid`, an R2 prefix of `dust-grid/`, and
 `emission_type` of `dust_attenuation` or `dust_emission`. Both `grid` and
 `dust_grid` still populate `grid_metadata` and `grid_axes`, because the
 underlying HDF5 layout is shared. `data_type` is detected structurally: any
-file whose resolved `grid_type` is `dust` is published as `dust_grid`. `is_test` is independent of data type and marks reduced or
-synthetic fixtures not intended for scientific production. A production
-instrument used by CI remains `is_test = 0`. Current release and scientific
-recommendation are separate decisions.
+file whose resolved `grid_type` is `dust` is published as `dust_grid`. `is_test` and `is_ci` are independent of data type and of each other:
+
+- `is_test` marks data that is **deliberately reduced or incomplete** — a
+  handful of points per axis, a synthetic fixture — and therefore not suitable
+  for science.
+- `is_ci` marks data that **Synthesizer's CI workflows download**.
+
+The two were originally one flag, which could not describe the common case:
+the Draine & Li dust grids and the Euclid NISP instrument cache are fetched on
+every CI run and are complete, science-grade files, so they are `is_ci = 1`
+and `is_test = 0`. Conversely a deliberately reduced grid that CI never
+touches is `is_test = 1` and `is_ci = 0`.
+
+Current release and scientific recommendation remain separate decisions
+again.
 
 `metadata_json` retains data-type-specific curated metadata for non-grid assets
 without forcing them into grid tables. Promote a field to a column only when it
@@ -174,6 +187,10 @@ CREATE TABLE grid_metadata (
     photoionisation_parameters_json TEXT,
     available_spectra_json TEXT NOT NULL DEFAULT '[]',
     available_lines_json TEXT NOT NULL DEFAULT '[]',
+    has_spectra INTEGER NOT NULL DEFAULT 0
+        CHECK (has_spectra IN (0, 1)),
+    has_lines INTEGER NOT NULL DEFAULT 0
+        CHECK (has_lines IN (0, 1)),
     wavelength_min REAL,
     wavelength_max REAL,
     wavelength_units TEXT,
@@ -185,6 +202,13 @@ Expected `grid_type` values include `sps`, `agn`, and `dust`; `dust` always
 accompanies `data_type = dust_grid`. Initial
 `emission_type` values include `incident`, `photoionised`, `dust_emission`, and
 `dust_attenuation`; inventory validation may refine this vocabulary.
+
+`has_spectra` and `has_lines` summarise the two JSON lists beside them so a
+client can filter on what a grid actually contains. Not every grid carries
+both: some hold line luminosities alone, and some hold only specific ionising
+luminosities over their axes. Those are legitimate products, but a grid with
+no spectra is useless for anyone wanting a spectrum, and answering that from
+`available_spectra_json` would mean decoding JSON for every row.
 
 Model and photoionisation parameters remain separate JSON objects because keys
 vary between models and processing codes. `incident_release_id` links a

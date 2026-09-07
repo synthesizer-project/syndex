@@ -123,6 +123,12 @@ Metadata is JSON with optional batch `defaults` and per-file `files` entries:
 }
 ```
 
+A published file is one release of a dataset. Publishing a regenerated file
+under the same `name` adds a release rather than replacing anything: the older
+release keeps its bytes in R2 and stays retrievable through
+`GET /v1/releases/{id}`. Use `set_current` to decide which release the dataset
+points at, and leave it false when publishing a superseded file after the fact.
+
 Per-file keys normally use paths relative to the input directory. Exact
 absolute paths and basenames are also accepted. Avoid duplicate basenames in a
 batch when using basename keys.
@@ -142,7 +148,8 @@ Supported catalogue fields:
 | `display_name` | Human-readable catalogue name | Filename stem |
 | `description` | Human-readable explanation | `null` |
 | `data_type` | `grid`, `dust_grid`, `instrument`, `simulation_data`, etc. | Recognized grids only |
-| `is_test` | Fixture not intended for scientific production | `false` |
+| `is_test` | Deliberately reduced or incomplete, unsuitable for science | `false` |
+| `is_ci` | Downloaded by Synthesizer's CI workflows | `false` |
 | `is_recommended` | Scientifically recommended dataset | `false` |
 | `licence` | Licence identifier or text | `null` |
 | `citations` | Citation strings or structured citation objects | `[]` |
@@ -174,9 +181,11 @@ filters, wavelength coverage, resolution, depth/SNR, and PSF/noise-map
 presence extracted structurally — see [`schema.md`](schema.md#instruments)
 for the full field-by-field mapping to Synthesizer's instrument classes.
 
-`is_test` means reduced or synthetic fixture data not intended for scientific
-production. It does not mean “downloaded by CI”; production instrument files
-used in tests remain `is_test = false`.
+`is_test` means deliberately reduced or incomplete data: a grid with two
+points per axis, a cut-down snapshot. It does not mean “downloaded by CI” —
+that is `is_ci`, and the two are independent. Production files that CI happens
+to download, such as the dust grids and the Euclid NISP instrument cache, are
+`is_ci: true` with `is_test: false`.
 
 ## Real Publication
 

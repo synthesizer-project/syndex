@@ -130,7 +130,15 @@ def detect_format(path: Path) -> str:
         return "gzip"
     if suffix in {"json", "yaml", "yml", "csv", "dat", "txt", "pkl"}:
         return suffix
-    return suffix or "binary"
+
+    # An unrecognised suffix is not a format. Raw model inputs are named for
+    # what they contain, so "sed.ssz002.rhb" would otherwise be recorded as
+    # format "rhb". Fall back to what the bytes are instead.
+    try:
+        signature.decode("utf-8")
+    except UnicodeDecodeError:
+        return "binary"
+    return "text"
 
 
 def extract_hdf5(path: Path) -> dict[str, Any] | None:
@@ -151,11 +159,20 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
         return None
 
     with h5py.File(path, "r") as hdf:
+        # A grid is a set of axes plus something computed over them. That is
+        # usually spectra or extinction curves, but lines alone are a normal
+        # product, and so are grids holding only ionising luminosities.
+        # Requiring spectra would reject both.
         is_grid = (
             "axes" in hdf.attrs
             and "axes" in hdf
             and isinstance(hdf["axes"], h5py.Group)
-            and ("spectra" in hdf or "extinction_curves" in hdf)
+            and (
+                "spectra" in hdf
+                or "extinction_curves" in hdf
+                or "lines" in hdf
+                or "log10_specific_ionising_luminosity" in hdf
+            )
         )
         if not is_grid:
             return None
@@ -180,9 +197,19 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
                 }
             )
 
-        spectra_group_name = "spectra" if "spectra" in hdf else "extinction_curves"
-        spectra_group = hdf[spectra_group_name]
-        available_spectra = sorted(key for key in spectra_group if key != "wavelength")
+        spectra_group_name = None
+        for candidate in ("spectra", "extinction_curves"):
+            if candidate in hdf:
+                spectra_group_name = candidate
+                break
+        spectra_group = (
+            hdf[spectra_group_name] if spectra_group_name is not None else None
+        )
+        available_spectra = (
+            sorted(key for key in spectra_group if key != "wavelength")
+            if spectra_group is not None
+            else []
+        )
 
         # The extinction-curve layout is unambiguous: every Synthesizer grid
         # using this key is a dust attenuation-curve grid. A plain "spectra"
@@ -204,9 +231,17 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
         else:
             detected_emission_type = None
 
+        # Wavelength coverage comes from the spectra when there are any, and
+        # otherwise from the line wavelengths, so a lines-only grid still
+        # reports the range it covers.
         wavelength = {}
-        if "wavelength" in spectra_group:
-            wavelength_dataset = spectra_group["wavelength"]
+        wavelength_source = None
+        if spectra_group is not None and "wavelength" in spectra_group:
+            wavelength_source = spectra_group
+        elif "lines" in hdf and "wavelength" in hdf["lines"]:
+            wavelength_source = hdf["lines"]
+        if wavelength_source is not None:
+            wavelength_dataset = wavelength_source["wavelength"]
             wavelength_values = wavelength_dataset[...]
             wavelength = {
                 "minimum": float(np.min(wavelength_values)),
@@ -243,9 +278,21 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             "sps",
             "agn",
         ):
-            detected_emission_type = (
-                "photoionised" if photoionisation_parameters else "incident"
+            # Reprocessed emission is visible in the spectra a grid carries,
+            # which matters because not every model reprocesses through
+            # Cloudy: Yggdrasil applies its own nebular treatment and stores
+            # no photoionisation parameters at all. A grid holding nothing
+            # but incident emission is incident; one carrying nebular,
+            # transmitted or line-continuum emission has been reprocessed.
+            # Anything else stays unclassified rather than guessed.
+            reprocessed = any(
+                spectrum.startswith(("nebular", "transmitted", "linecont"))
+                for spectrum in available_spectra
             )
+            if photoionisation_parameters or reprocessed:
+                detected_emission_type = "photoionised"
+            elif available_spectra == ["incident"]:
+                detected_emission_type = "incident"
 
         result = {
             "axes": axes,
@@ -787,6 +834,7 @@ def build_plan(
         raise UploadError(f"{source.key}: invalid data_type {data_type!r}")
 
     is_test = bool(config.get("is_test", False))
+    is_ci = bool(config.get("is_ci", False))
     dataset_name = config.get("name") or _slug(source.path.stem)
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", dataset_name):
         raise UploadError(f"{source.key}: invalid dataset name {dataset_name!r}")
@@ -847,6 +895,7 @@ def build_plan(
             "description": config.get("description"),
             "data_type": data_type,
             "is_test": is_test,
+            "is_ci": is_ci,
             "is_recommended": bool(config.get("is_recommended", False)),
             "licence": config.get("licence"),
             "citations": config.get("citations", []),
@@ -914,6 +963,7 @@ def _make_s3_client(account_id: str):
     """
     try:
         import boto3
+        from botocore.config import Config
     except ImportError as exc:
         raise UploadError("boto3 is required for publication") from exc
     access_key = os.getenv("SYNTHESIZER_R2_ACCESS_KEY_ID")
@@ -923,12 +973,21 @@ def _make_s3_client(account_id: str):
             "R2 credentials are required (set SYNTHESIZER_R2_ACCESS_KEY_ID "
             "and SYNTHESIZER_R2_SECRET_ACCESS_KEY)"
         )
+    # Multi-gigabyte grids upload as hundreds of parts, and a single dropped
+    # TLS connection anywhere in that sequence fails the whole transfer.
+    # Retrying individual parts turns an hour of wasted transfer into a pause.
     return boto3.client(
         "s3",
         endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
         region_name="auto",
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
+        config=Config(
+            retries={"max_attempts": 10, "mode": "adaptive"},
+            connect_timeout=30,
+            read_timeout=120,
+            max_pool_connections=10,
+        ),
     )
 
 
@@ -957,6 +1016,70 @@ def _head_object(client, bucket: str, key: str) -> dict[str, Any] | None:
         raise
 
 
+def _upload_with_retries(
+    client,
+    bucket: str,
+    key: str,
+    plan: dict[str, Any],
+    expected_sha: str,
+    attempts: int = 3,
+) -> None:
+    """Upload one file, retrying a transfer that dies part way through.
+
+    Large transfers fail often enough that a single attempt wastes hours.
+    Each retry restarts the transfer, so an abandoned multipart upload is
+    left behind; R2 discards those, and the digest check still decides
+    whether what finally arrives is correct.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+        plan: Validated publication plan.
+        expected_sha: Digest recorded alongside the object.
+        attempts: How many times to try before giving up.
+
+    Raises:
+        Exception: The last failure, if every attempt fails.
+    """
+    # Smaller chunks and less concurrency: a dropped connection then costs
+    # one part rather than a large in-flight window. Tests drive this with a
+    # stub client and no boto3 installed, so the tuning is optional.
+    extra = {}
+    try:
+        from boto3.s3.transfer import TransferConfig
+
+        # 16 MB parts at concurrency 2 keeps the in-flight buffer near 32 MB.
+        # Bigger windows cost memory on a machine that may be doing other
+        # work, and a dropped connection then wastes more.
+        extra["Config"] = TransferConfig(
+            multipart_chunksize=16 * 1024 * 1024,
+            multipart_threshold=16 * 1024 * 1024,
+            max_concurrency=2,
+        )
+    except ImportError:
+        pass
+
+    for attempt in range(1, attempts + 1):
+        try:
+            client.upload_file(
+                plan["source_path"],
+                bucket,
+                key,
+                ExtraArgs={"Metadata": {"sha256": expected_sha}},
+                **extra,
+            )
+            return
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            print(
+                f"upload of {plan['file']['filename']} failed on attempt "
+                f"{attempt} ({exc}); retrying",
+                file=sys.stderr,
+            )
+
+
 def upload_and_verify(client, bucket: str, plan: dict[str, Any]) -> None:
     """Idempotently upload one file and verify size and digest metadata.
 
@@ -975,12 +1098,7 @@ def upload_and_verify(client, bucket: str, plan: dict[str, Any]) -> None:
     expected_sha = file_info["sha256"]
     head = _head_object(client, bucket, key)
     if head is None:
-        client.upload_file(
-            plan["source_path"],
-            bucket,
-            key,
-            ExtraArgs={"Metadata": {"sha256": expected_sha}},
-        )
+        _upload_with_retries(client, bucket, key, plan, expected_sha)
         head = _head_object(client, bucket, key)
     if head is None:
         raise UploadError(f"R2 verification failed: {key} is absent")
@@ -1013,13 +1131,14 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
             ],
         },
         {
-            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, data_type = excluded.data_type, is_test = excluded.is_test, is_recommended = excluded.is_recommended, licence = excluded.licence, citations_json = excluded.citations_json, metadata_json = excluded.metadata_json",
+            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_ci, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, data_type = excluded.data_type, is_test = excluded.is_test, is_ci = excluded.is_ci, is_recommended = excluded.is_recommended, licence = excluded.licence, citations_json = excluded.citations_json, metadata_json = excluded.metadata_json",
             "params": [
                 dataset["name"],
                 dataset["display_name"],
                 dataset["description"],
                 dataset["data_type"],
                 int(dataset["is_test"]),
+                int(dataset["is_ci"]),
                 int(dataset["is_recommended"]),
                 dataset["licence"],
                 _json_dump(dataset["citations"]),
@@ -1044,7 +1163,7 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
         wavelength = grid.get("wavelength", {})
         statements.append(
             {
-                "sql": "INSERT INTO grid_metadata (release_id, grid_type, emission_type, model_name, model_version, model_parameters_json, photoionisation_code, photoionisation_code_version, photoionisation_parameters_json, available_spectra_json, available_lines_json, wavelength_min, wavelength_max, wavelength_units, incident_release_id) SELECT releases.release_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM releases JOIN files ON files.file_id = releases.file_id WHERE files.sha256 = ? ON CONFLICT(release_id) DO UPDATE SET grid_type = excluded.grid_type, emission_type = excluded.emission_type, model_name = excluded.model_name, model_version = excluded.model_version, model_parameters_json = excluded.model_parameters_json, photoionisation_code = excluded.photoionisation_code, photoionisation_code_version = excluded.photoionisation_code_version, photoionisation_parameters_json = excluded.photoionisation_parameters_json, available_spectra_json = excluded.available_spectra_json, available_lines_json = excluded.available_lines_json, wavelength_min = excluded.wavelength_min, wavelength_max = excluded.wavelength_max, wavelength_units = excluded.wavelength_units, incident_release_id = excluded.incident_release_id",
+                "sql": "INSERT INTO grid_metadata (release_id, grid_type, emission_type, model_name, model_version, model_parameters_json, photoionisation_code, photoionisation_code_version, photoionisation_parameters_json, available_spectra_json, available_lines_json, has_spectra, has_lines, wavelength_min, wavelength_max, wavelength_units, incident_release_id) SELECT releases.release_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM releases JOIN files ON files.file_id = releases.file_id WHERE files.sha256 = ? ON CONFLICT(release_id) DO UPDATE SET grid_type = excluded.grid_type, emission_type = excluded.emission_type, model_name = excluded.model_name, model_version = excluded.model_version, model_parameters_json = excluded.model_parameters_json, photoionisation_code = excluded.photoionisation_code, photoionisation_code_version = excluded.photoionisation_code_version, photoionisation_parameters_json = excluded.photoionisation_parameters_json, available_spectra_json = excluded.available_spectra_json, available_lines_json = excluded.available_lines_json, has_spectra = excluded.has_spectra, has_lines = excluded.has_lines, wavelength_min = excluded.wavelength_min, wavelength_max = excluded.wavelength_max, wavelength_units = excluded.wavelength_units, incident_release_id = excluded.incident_release_id",
                 "params": [
                     grid["grid_type"],
                     grid["emission_type"],
@@ -1056,6 +1175,8 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
                     _json_dump(grid.get("photoionisation_parameters", {})),
                     _json_dump(grid.get("available_spectra", [])),
                     _json_dump(grid.get("available_lines", [])),
+                    int(bool(grid.get("available_spectra"))),
+                    int(bool(grid.get("available_lines"))),
                     wavelength.get("minimum"),
                     wavelength.get("maximum"),
                     wavelength.get("units"),
@@ -1268,6 +1389,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--is-test", action=argparse.BooleanOptionalAction, default=None
     )
+    parser.add_argument("--is-ci", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--r2-prefix")
     parser.add_argument(
         "--set-current", action=argparse.BooleanOptionalAction, default=None
@@ -1309,6 +1431,7 @@ def run(argv: list[str] | None = None) -> int:
             for key, value in {
                 "data_type": args.data_type,
                 "is_test": args.is_test,
+                "is_ci": args.is_ci,
                 "r2_prefix": args.r2_prefix,
                 "set_current": args.set_current,
             }.items()

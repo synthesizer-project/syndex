@@ -10,6 +10,15 @@ import pytest
 from syndicate import upload
 
 
+def migrated_database() -> sqlite3.Connection:
+    """Open an in-memory database with every migration applied in order."""
+    migrations = sorted((Path(__file__).parents[1] / "migrations").glob("*.sql"))
+    database = sqlite3.connect(":memory:")
+    for migration in migrations:
+        database.executescript(migration.read_text())
+    return database
+
+
 def make_grid(path: Path) -> None:
     with h5py.File(path, "w") as hdf:
         hdf.attrs["axes"] = ["age", "metallicity"]
@@ -191,6 +200,17 @@ def test_content_format_detection(tmp_path, filename, content, expected):
     assert upload.detect_format(path) == expected
 
 
+def test_an_unknown_suffix_is_not_treated_as_a_format(tmp_path):
+    """Raw model inputs are named for their contents, not their format."""
+    text_file = tmp_path / "sed.ssz002.rhb"
+    text_file.write_text("1.0 2.0 3.0\n4.0 5.0 6.0\n")
+    binary_file = tmp_path / "model.weights"
+    binary_file.write_bytes(bytes(range(200, 256)) * 4)
+
+    assert upload.detect_format(text_file) == "text"
+    assert upload.detect_format(binary_file) == "binary"
+
+
 def test_grid_extraction_reads_metadata_not_spectra(tmp_path):
     path = tmp_path / "grid.hdf5"
     make_grid(path)
@@ -312,6 +332,109 @@ def test_photoionised_grid_detected_from_cloudy_parameters(tmp_path):
     assert plan["grid"]["emission_type"] == "photoionised"
     assert plan["grid"]["photoionisation_code"] == "Cloudy"
     assert plan["grid"]["photoionisation_code_version"] == "c23.01"
+
+
+def test_content_flags_match_what_a_grid_holds(tmp_path):
+    """has_spectra and has_lines summarise the grid's contents for filtering."""
+    spectra_only = tmp_path / "spectra.hdf5"
+    make_sps_grid(spectra_only)
+    ionising_only = tmp_path / "ionising.hdf5"
+    with h5py.File(ionising_only, "w") as hdf:
+        hdf.attrs["axes"] = ["ages"]
+        hdf.create_group("axes").create_dataset("ages", data=[1e6, 1e7])
+        hdf.create_group("log10_specific_ionising_luminosity").create_dataset(
+            "HI", data=[1.0, 2.0]
+        )
+        hdf.create_group("Model").attrs["sps_name"] = "maraston13"
+        # Real ionising-only grids come out of a Cloudy run, which is what
+        # makes their emission type knowable despite having no spectra.
+        hdf.create_group("CloudyParams").attrs["cloudy_version"] = "c23.01"
+
+    database = migrated_database()
+    for path, expected in ((spectra_only, (1, 0)), (ionising_only, (0, 0))):
+        plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+        with database:
+            for statement in upload.d1_statements(plan):
+                database.execute(statement["sql"], statement["params"])
+        row = database.execute(
+            "SELECT has_spectra, has_lines FROM grid_metadata g"
+            " JOIN releases r ON r.release_id = g.release_id"
+            " JOIN files f ON f.file_id = r.file_id WHERE f.sha256 = ?",
+            (plan["file"]["sha256"],),
+        ).fetchone()
+        assert row == expected, path.name
+
+
+def test_a_lines_only_grid_is_recognised(tmp_path):
+    """Grids carrying line luminosities but no spectra are a normal product."""
+    path = tmp_path / "qsosed_lines_only.hdf5"
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["masses"]
+        axes = hdf.create_group("axes")
+        axes.create_dataset("masses", data=[1e8, 1e9])
+        lines = hdf.create_group("lines")
+        lines.create_dataset("id", data=[b"H 1 1215.67A", b"O 3 5006.84A"])
+        wavelength = lines.create_dataset("wavelength", data=[1215.67, 5006.84])
+        wavelength.attrs["Units"] = "angstrom"
+        lines.create_dataset("luminosity", data=np.ones((2, 2)))
+        model = hdf.create_group("Model")
+        model.attrs["type"] = "agn"
+        model.attrs["family"] = "qsosed"
+        hdf.create_group("CloudyParams").attrs["cloudy_version"] = "c23.01"
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    assert plan["dataset"]["data_type"] == "grid"
+    assert plan["grid"]["available_spectra"] == []
+    assert len(plan["grid"]["available_lines"]) == 2
+    # Coverage falls back to the line wavelengths when there are no spectra.
+    assert plan["grid"]["wavelength"]["minimum"] == 1215.67
+    assert plan["grid"]["wavelength"]["units"] == "angstrom"
+
+
+def test_an_ionising_luminosity_only_grid_is_recognised(tmp_path):
+    """Some grids hold only ionising luminosities over their axes."""
+    path = tmp_path / "qsosed_ionising_only.hdf5"
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["masses"]
+        axes = hdf.create_group("axes")
+        axes.create_dataset("masses", data=[1e8, 1e9])
+        ionising = hdf.create_group("log10_specific_ionising_luminosity")
+        ionising.create_dataset("HI", data=[1.0, 2.0])
+        model = hdf.create_group("Model")
+        model.attrs["type"] = "agn"
+        model.attrs["family"] = "qsosed"
+        hdf.create_group("CloudyParams").attrs["cloudy_version"] = "c23.01"
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    assert plan["dataset"]["data_type"] == "grid"
+    assert plan["grid"]["grid_type"] == "agn"
+    assert plan["grid"]["available_spectra"] == []
+    assert plan["grid"]["available_lines"] == []
+    assert plan["grid"]["wavelength"] == {}
+
+
+def test_nebular_spectra_mean_reprocessed_even_without_cloudy(tmp_path):
+    """Not every model reprocesses through Cloudy."""
+    path = tmp_path / "yggdrasil_popiii.hdf5"
+    with h5py.File(path, "w") as hdf:
+        hdf.attrs["axes"] = ["ages"]
+        axes = hdf.create_group("axes")
+        axes.create_dataset("ages", data=[1e6, 1e7])
+        spectra = hdf.create_group("spectra")
+        wavelength = spectra.create_dataset("wavelength", data=[1000.0, 2000.0])
+        wavelength.attrs["Units"] = "angstrom"
+        # Yggdrasil applies its own nebular treatment and writes no
+        # photoionisation parameters at all.
+        spectra.create_dataset("nebular_fcov_0.5", data=np.ones((2, 2)))
+        model = hdf.create_group("Model")
+        model.attrs["sps_name"] = "yggdrasil"
+
+    plan = upload.build_plan(upload.SourceFile(path, path.name), {}, {})
+
+    assert plan["grid"]["emission_type"] == "photoionised"
+    assert plan["grid"].get("photoionisation_code") is None
 
 
 def test_agn_grid_classified_from_its_model_group(tmp_path):
@@ -571,6 +694,61 @@ def test_upload_verifies_r2_metadata(tmp_path):
     assert client.object["Metadata"]["sha256"] == plan["file"]["sha256"]
 
 
+def test_a_failed_transfer_is_retried(tmp_path):
+    """A dropped connection costs a retry, not the whole transfer."""
+    path = tmp_path / "grid.hdf5"
+    make_grid(path)
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {"grid": {"grid_type": "sps", "emission_type": "incident"}},
+        {},
+    )
+    attempts = []
+
+    class FlakyClient:
+        def head_object(self, **kwargs):
+            if not attempts:
+                error = Exception("missing")
+                error.response = {"Error": {"Code": "404"}}
+                raise error
+            return {
+                "ContentLength": plan["file"]["size_bytes"],
+                "Metadata": {"sha256": plan["file"]["sha256"]},
+            }
+
+        def upload_file(self, *args, **kwargs):
+            attempts.append(1)
+            if len(attempts) < 2:
+                raise OSError("SSL validation failed")
+
+    upload.upload_and_verify(FlakyClient(), "bucket", plan)
+
+    assert len(attempts) == 2, "the transfer should have been retried once"
+
+
+def test_a_transfer_that_keeps_failing_gives_up(tmp_path):
+    """Retries are bounded, so a genuinely broken transfer still reports."""
+    path = tmp_path / "grid.hdf5"
+    make_grid(path)
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {"grid": {"grid_type": "sps", "emission_type": "incident"}},
+        {},
+    )
+
+    class BrokenClient:
+        def head_object(self, **kwargs):
+            error = Exception("missing")
+            error.response = {"Error": {"Code": "404"}}
+            raise error
+
+        def upload_file(self, *args, **kwargs):
+            raise OSError("SSL validation failed")
+
+    with pytest.raises(OSError, match="SSL validation failed"):
+        upload.upload_and_verify(BrokenClient(), "bucket", plan)
+
+
 def test_d1_batch_is_parameterized(tmp_path):
     path = tmp_path / "dangerous-name.dat"
     path.write_text("sample")
@@ -623,9 +801,7 @@ def test_d1_batch_matches_migration_and_is_idempotent(tmp_path):
         },
         {},
     )
-    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
-    database = sqlite3.connect(":memory:")
-    database.executescript(migration.read_text())
+    database = migrated_database()
 
     for _ in range(2):
         with database:
@@ -649,9 +825,7 @@ def test_instrument_d1_batch_matches_migration(tmp_path):
         {"data_type": "instrument", "is_test": True, "set_current": True},
         {},
     )
-    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
-    database = sqlite3.connect(":memory:")
-    database.executescript(migration.read_text())
+    database = migrated_database()
 
     for _ in range(2):
         with database:
@@ -678,9 +852,7 @@ def test_spectroscopic_resolving_power_d1_batch_matches_migration(tmp_path):
         {"data_type": "instrument", "is_test": True, "set_current": True},
         {},
     )
-    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
-    database = sqlite3.connect(":memory:")
-    database.executescript(migration.read_text())
+    database = migrated_database()
 
     for statement in upload.d1_statements(plan):
         database.execute(statement["sql"], statement["params"])
@@ -701,9 +873,7 @@ def test_same_file_cannot_move_between_datasets(tmp_path):
         {"data_type": "simulation_data", "name": "different-dataset"},
         {},
     )
-    migration = Path(__file__).parents[1] / "migrations/0001_initial.sql"
-    database = sqlite3.connect(":memory:")
-    database.executescript(migration.read_text())
+    database = migrated_database()
     with database:
         for statement in upload.d1_statements(first):
             database.execute(statement["sql"], statement["params"])

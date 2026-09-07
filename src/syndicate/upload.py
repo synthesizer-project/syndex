@@ -1088,9 +1088,15 @@ def _head_object(client, bucket: str, key: str) -> dict[str, Any] | None:
 # seconds and the simpler path is preferable.
 RESUMABLE_THRESHOLD_BYTES = 1024**3
 
-# 16 MB parts at concurrency 2, matching the tuning upload_file was given.
+# 16 MB parts at concurrency 6. Each worker reads its part and then uploads
+# it synchronously, so it spends most of its life blocked on the network and
+# more workers help a little: measured 1.5 MiB/s at six against 1.25 at two on
+# the same file. Only a little, because the real limit is upstream bandwidth
+# rather than this loop, so raising it further would buy nothing. Six keeps
+# under 100 MB in flight, which matters on a machine that has already had a
+# job killed for memory pressure.
 PART_SIZE_BYTES = 16 * 1024 * 1024
-PART_CONCURRENCY = 2
+PART_CONCURRENCY = 6
 
 
 def _find_incomplete_upload(client, bucket: str, key: str) -> str | None:

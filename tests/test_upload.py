@@ -1049,3 +1049,24 @@ def test_resume_reads_every_page_of_existing_parts(tmp_path):
     # Only the genuinely missing parts are sent, not everything past 1000.
     assert sorted(client.attempts) == list(range(1201, 1301))
     assert len(client.completed) == 1300
+
+
+def test_filename_and_recorded_cloudy_version_must_agree():
+    """The defect that made three c25.00 grids look like c23.01 ones."""
+    (warning,) = upload.check_photoionisation_version(
+        Path("bpass_cloudy-c25.00-sps.hdf5"), "c23.01"
+    )
+    assert "c25.00" in warning and "c23.01" in warning
+
+
+def test_a_missing_c_prefix_is_not_a_disagreement():
+    """One grid recorded '23.01'; that is a spelling difference, not a bug."""
+    assert upload.check_photoionisation_version(
+        Path("bpass_cloudy-c23.01-sps.hdf5"), "23.01"
+    ) == []
+
+
+def test_filenames_without_a_cloudy_version_are_ignored():
+    assert upload.check_photoionisation_version(
+        Path("maraston24-Te00_kroupa.hdf5"), "c23.01"
+    ) == []

@@ -125,6 +125,46 @@ be caught rather than published, but the generators will keep producing them.
   each file rather than its filename, so the catalogue is consistent where the
   filenames are not.
 
+## The c25.00 grids recorded the wrong Cloudy version
+
+Three grids named `cloudy-c25.00` carried `CloudyParams.cloudy_version =
+c23.01`, written by the generator and never updated. The filenames and the runs
+are c25.00. Left alone, the catalogue's Cloudy version had effectively one
+value and the new grids were indistinguishable from the old ones.
+
+The correction was applied to the files, not just the catalogue, and without
+publishing superseding releases: 64 GiB of duplicated grids is too much storage
+to spend on a version string.
+
+That was possible because `c23.01` and `c25.00` are both exactly six bytes, so
+the fix is a byte-for-byte edit that changes neither the size nor the structure
+of the file. Each object was rebuilt from itself using R2's `UploadPartCopy`,
+which composes server-side, so only the first 16 MiB part -- the one holding
+the edit -- was uploaded. Roughly 48 MiB crossed the network instead of 64 GiB.
+
+Two constraints are worth recording for anyone attempting this again:
+
+- **R2 requires every non-trailing part to be the same length**, which is
+  stricter than S3 and rejects the obvious "small patched head plus one large
+  copied tail" shape. Uniform parts are required.
+- **The digest has to be recomputed**, because it names the object and the
+  downloader verifies against it. Each grid was streamed once to hash it. That
+  is a download rather than an upload, and it is the only unavoidable cost.
+
+Each release was repointed at its corrected object and the old object deleted,
+so every dataset still has exactly one release and one stored copy. The
+reconciliation afterwards showed 247 file rows against 247 objects with no
+orphans and no size disagreements.
+
+A separate grid recorded `23.01` without the `c` prefix while its file was
+correct, so that one was a catalogue-side fix with no object to rewrite. The
+Cloudy versions in the catalogue are now `c23.01` on 70 grids and `c25.00` on
+three.
+
+`syndex-upload` now warns when a filename says `cloudy-cXX.YY` and the file
+records something else, comparing loosely enough that a missing `c` prefix is
+not treated as a disagreement.
+
 ## Incident links
 
 64 of the 77 photoionised grids record the incident grid they were derived

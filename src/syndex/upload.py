@@ -173,6 +173,38 @@ _EXPECTED_AXIS_UNITS = {
 }
 
 
+def check_photoionisation_version(path: Path, version: str | None) -> list[str]:
+    """Report a Cloudy version that disagrees with the filename.
+
+    Three grids were published named cloudy-c25.00 while carrying
+    `cloudy_version = c23.01` inside, because the generator wrote a stale
+    attribute. Nothing detected it until the whole catalogue was grouped by
+    version and the new grids turned out to be indistinguishable from the old
+    ones. The filename is checked against the attribute at publish time so the
+    next one is caught immediately.
+
+    Args:
+        path (Path): Source file being published.
+        version (str | None): Version recorded inside the file.
+
+    Returns:
+        list[str]: One warning if the two disagree, otherwise empty.
+    """
+    match = re.search(r"cloudy-(c\d+\.\d+)", path.name)
+    if match is None or not version:
+        return []
+    # Compare loosely: a missing "c" prefix is a spelling difference, not a
+    # different version.
+    named = match.group(1).lstrip("c")
+    recorded = str(version).strip().lstrip("c")
+    if named == recorded:
+        return []
+    return [
+        f"filename says Cloudy {match.group(1)} but the file records "
+        f"{version!r}"
+    ]
+
+
 def check_axis_conventions(axes: list[dict[str, Any]]) -> list[str]:
     """Report axis names and units that break the catalogue's conventions.
 
@@ -387,6 +419,8 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
         if isinstance(cloudy_version, str) and cloudy_version:
             result["photoionisation_code"] = "Cloudy"
             result["photoionisation_code_version"] = cloudy_version
+            for warning in check_photoionisation_version(path, cloudy_version):
+                print(f"  WARNING {path.name}: {warning}", file=sys.stderr)
 
         return result
 

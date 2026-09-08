@@ -102,6 +102,9 @@ function resultsFor(sql, rows) {
   if (sql.includes("COUNT(*) AS n")) {
     return [{ n: 3 }];
   }
+  if (sql.includes("FROM file_citations")) {
+    return rows.citations ?? [];
+  }
   if (sql.includes("SELECT a.release_id")) {
     return rows.axes ?? AXIS_ROWS;
   }
@@ -305,12 +308,18 @@ const tests = {
       "application/json; charset=utf-8",
     );
 
-    const portal = await call("/syndex/grids", env);
+    const portal = await call("/syndex/search", env);
     assert.equal(portal.status, 200);
     assert.match(portal.headers.get("content-type"), /text\/html/);
     assert.equal(portal.headers.get("vary"), "HX-Request");
     assert.match(portal.body, /class="bg-layer"/);
     assert.match(portal.body, /viewBox="0 0 1440 900"/);
+    const oldTab = await call("/syndex/grids?q=bpass", env);
+    assert.equal(oldTab.status, 308);
+    assert.equal(
+      oldTab.headers.get("location"),
+      "/syndex/search?q=bpass&type=grid",
+    );
 
     // Nothing else moved: the API still owns every other path, including the
     // 404 for the root.
@@ -320,8 +329,9 @@ const tests = {
 
   async "a filter URL survives being parsed and rebuilt"() {
     const query =
-      "?q=bpass&model=BPASS&model=FSPS&emission=photoionised&content=spectra" +
-      "&axis=ages&min.ages=1000000&max.ages=10000000000&mode.ages=contain";
+      "?q=bpass&type=grid&model=BPASS&model=FSPS&emission=photoionised&content=spectra" +
+      "&axis=ages&min.ages=1000000&max.ages=10000000000&mode.ages=contain" +
+      "&open=model&open=axes";
     const filters = parseFilters(new URLSearchParams(query));
 
     assert.deepEqual(filters.model, ["BPASS", "FSPS"]);
@@ -348,7 +358,11 @@ const tests = {
     const issued = [];
     const env = { DB: stubDb({ issued }) };
 
-    await search(env.DB, grids, parseFilters(new URLSearchParams("?axis=spins")));
+    await search(
+      env.DB,
+      grids,
+      parseFilters(new URLSearchParams("?type=grid&axis=spins")),
+    );
 
     const rows = statement(issued, "ORDER BY d.name");
     assert.match(rows.sql, /EXISTS \(SELECT 1 FROM grid_axes a/);
@@ -361,7 +375,9 @@ const tests = {
     await search(
       stubDb({ issued: overlap }),
       grids,
-      parseFilters(new URLSearchParams("?axis=ages&min.ages=1e6&max.ages=1e10")),
+      parseFilters(
+        new URLSearchParams("?type=grid&axis=ages&min.ages=1e6&max.ages=1e10"),
+      ),
     );
     const anyOverlap = statement(overlap, "ORDER BY d.name");
     // gmin <= qmax AND gmax >= qmin, bound in that order.
@@ -374,7 +390,7 @@ const tests = {
       grids,
       parseFilters(
         new URLSearchParams(
-          "?axis=ages&min.ages=1e6&max.ages=1e10&mode.ages=contain",
+          "?type=grid&axis=ages&min.ages=1e6&max.ages=1e10&mode.ages=contain",
         ),
       ),
     );
@@ -389,7 +405,7 @@ const tests = {
     await search(
       stubDb({ issued }),
       grids,
-      parseFilters(new URLSearchParams("?axis=ages&min.ages=1e9")),
+      parseFilters(new URLSearchParams("?type=grid&axis=ages&min.ages=1e9")),
     );
 
     const rows = statement(issued, "ORDER BY d.name");
@@ -403,7 +419,7 @@ const tests = {
     await search(
       stubDb({ issued }),
       grids,
-      parseFilters(new URLSearchParams("?axis=masses&min.masses=1e6")),
+      parseFilters(new URLSearchParams("?type=grid&axis=masses&min.masses=1e6")),
     );
 
     // Mass axes record the same quantity in kilogrammes and in solar masses,
@@ -418,7 +434,9 @@ const tests = {
     await search(
       stubDb({ issued }),
       grids,
-      parseFilters(new URLSearchParams("?axis=metallicities&max.metallicities=0.02")),
+      parseFilters(
+        new URLSearchParams("?type=grid&axis=metallicities&max.metallicities=0.02"),
+      ),
     );
 
     // Axis bounds are physical values and `scale` is a display hint, so a
@@ -443,7 +461,7 @@ const tests = {
       maximum: 1e10 * 1.98841586e30,
     });
 
-    assert.equal(asSolarMasses, "1e6–1e10 M☉");
+    assert.equal(asSolarMasses, "10⁶–10¹⁰ M☉");
     assert.equal(asKilogrammes, asSolarMasses);
   },
 
@@ -452,22 +470,24 @@ const tests = {
     await search(
       stubDb({ issued }),
       grids,
-      parseFilters(new URLSearchParams("?kind=agn&model=QSOSED")),
+      parseFilters(new URLSearchParams("?type=grid&kind=agn&model=QSOSED")),
     );
 
     const rows = statement(issued, "ORDER BY d.name");
     assert.match(rows.sql, /g\.grid_type IN \(\?\)/);
-    assert.deepEqual(rows.params, ["grid", "agn", "QSOSED"]);
+    assert.deepEqual(rows.params, ["agn", "QSOSED", "grid"]);
 
     // Its own count is of what it would return, so the rail says how many
     // stellar grids are there while AGN is ticked.
     const kinds = statement(issued, "SELECT g.grid_type AS value");
-    assert.deepEqual(kinds.params, ["grid", "QSOSED"]);
+    assert.deepEqual(kinds.params, ["QSOSED", "grid"]);
   },
 
   async "an unknown kind is ignored rather than bound"() {
     // The two values are the vocabulary; dust grids are their own tab.
-    const filters = parseFilters(new URLSearchParams("?kind=dust&kind=agn"));
+    const filters = parseFilters(
+      new URLSearchParams("?type=grid&kind=dust&kind=agn"),
+    );
     assert.deepEqual(filters.kind, ["agn"]);
   },
 
@@ -476,32 +496,48 @@ const tests = {
     await search(
       stubDb({ issued }),
       grids,
-      parseFilters(new URLSearchParams("?model=BPASS&emission=incident")),
+      parseFilters(
+        new URLSearchParams("?type=grid&model=BPASS&emission=incident"),
+      ),
     );
 
     // The model counts are computed without the model filter, so ticking a
     // second model adds to the results rather than replacing them.
     const models = statement(issued, "SELECT g.model_name AS value");
-    assert.deepEqual(models.params, ["grid", "incident"]);
+    assert.deepEqual(models.params, ["incident", "grid"]);
 
     // The tab restriction is not a facet and is never dropped.
     const emissions = statement(issued, "SELECT g.emission_type AS value");
-    assert.deepEqual(emissions.params, ["grid", "BPASS"]);
+    assert.deepEqual(emissions.params, ["BPASS", "grid"]);
   },
 
   async "a page names its filters and offers a way out of them"() {
     const env = { DB: stubDb() };
-    const { body } = await call("/syndex/grids?model=BPASS&axis=ages", env);
+    const { body } = await call(
+      "/syndex/search?type=grid&model=BPASS&axis=ages",
+      env,
+    );
 
     // The count, the chips, and a link that clears everything.
     assert.match(body, /1 grid</);
     assert.match(body, /clear all/);
     // The added axis is a column as well as a filter, and only once: ages
     // is a column on the grids tab whether or not it is filtered on.
-    assert.equal(body.match(/>ages<\/th>/g).length, 1);
+    assert.equal(body.match(/>ages<\/a><\/th>/g).length, 1);
     // And it round-trips through the form without JavaScript.
     assert.match(body, /<input type="hidden" name="axis" value="ages"\/>/);
     assert.match(body, /<form id="filters" method="get"/);
+    assert.match(
+      body,
+      /href="\/syndex\/submit" class="btn absolute top-4 right-6/,
+    );
+    assert.match(body, /<button type="submit" class="btn mt-2 w-full">Search<\/button>/);
+    assert.doesNotMatch(body, /Apply filters/);
+    assert.match(body, />Select range<\/summary>/);
+    assert.match(body, />reprocessed<\/a><\/th>/);
+    assert.match(body, /title="Reprocessed: yes"/);
+    assert.doesNotMatch(body, />contents<\/th>/);
+    assert.match(body, />tags<\/a><\/th><\/tr>/);
   },
 
   async "a long facet list puts its toggle after the values"() {
@@ -511,14 +547,14 @@ const tests = {
     }));
     const env = { DB: stubDb({ rows: { facets: many } }) };
 
-    const collapsed = (await call("/syndex/grids", env)).body;
+    const collapsed = (await call("/syndex/search?type=grid", env)).body;
     // Six values, then the link. Never the link, then the values.
     const shown = collapsed.indexOf('value="model-5"');
     const link = collapsed.indexOf("4 more");
     assert.ok(shown > 0 && link > shown, "the toggle comes after the values");
     assert.equal(collapsed.includes('value="model-6"'), false);
 
-    const opened = (await call("/syndex/grids?more=model", env)).body;
+    const opened = (await call("/syndex/search?type=grid&more=model", env)).body;
     assert.ok(opened.includes('value="model-9"'), "all values are shown");
     const last = opened.indexOf('value="model-9"');
     assert.ok(opened.indexOf("collapse") > last, "the toggle is still last");
@@ -529,15 +565,178 @@ const tests = {
   async "an expanded list is not a filter"() {
     // It narrows nothing, so it must not make the page look filtered.
     const env = { DB: stubDb() };
-    const { body, headers } = await call("/syndex/grids?more=model", env);
+    const { body, headers } = await call("/syndex/search?more=model", env);
 
     assert.doesNotMatch(body, /clear all/);
     assert.equal(headers.get("cache-control"), "public, max-age=60");
   },
 
+  async "the landing search and copy describe the whole catalogue"() {
+    const { body } = await call("/syndex", { DB: stubDb() });
+
+    assert.match(body, /An index of SPS and AGN grids/);
+    assert.match(body, /action="\/syndex\/search"/);
+    assert.match(body, /name, description, type or filename/);
+    assert.doesNotMatch(body, /synthesizer-download --dataset NAME/);
+    assert.match(body, /aria-label="Syndex links"/);
+    assert.match(body, /Submit a dataset/);
+    assert.match(body, /Synthesizer project/);
+    assert.doesNotMatch(body, />API<\/a>/);
+    assert.match(body, /<footer class="landing-footer[^>]*>240 datasets · 67 GiB/);
+  },
+
+  async "generic search includes current file fields"() {
+    const issued = [];
+    await search(
+      stubDb({ issued }),
+      TABS[0],
+      parseFilters(new URLSearchParams("?q=hdf5")),
+    );
+
+    const rows = statement(issued, "ORDER BY d.name");
+    assert.match(rows.sql, /f\.filename LIKE/);
+    assert.match(rows.sql, /d\.data_type LIKE/);
+    assert.match(rows.sql, /f\.format LIKE/);
+    assert.deepEqual(rows.params, Array(6).fill("%hdf5%"));
+  },
+
+  async "file-size buckets combine as one generic facet"() {
+    const issued = [];
+    await search(
+      stubDb({ issued }),
+      TABS[0],
+      parseFilters(
+        new URLSearchParams("?size=under_10_mib&size=over_10_gib"),
+      ),
+    );
+
+    const rows = statement(issued, "ORDER BY d.name");
+    assert.match(rows.sql, /f\.size_bytes < 10485760/);
+    assert.match(rows.sql, / OR /);
+    assert.match(rows.sql, /f\.size_bytes >= 10737418240/);
+  },
+
+  async "shopping-style filter groups start collapsed"() {
+    const { body } = await call("/syndex/search?type=grid", {
+      DB: stubDb(),
+    });
+
+    assert.match(body, /<summary[^>]*><span>Data type<\/span>/);
+    assert.match(body, /<summary[^>]*><span>File size<\/span>/);
+    assert.match(body, /<summary[^>]*><span>Model<\/span>/);
+    assert.match(body, /data-filter-group="type">/);
+    assert.match(body, /data-filter-group="model">/);
+    assert.match(body, /<option value="">Axes<\/option>/);
+    assert.match(body, /class="sr-only">Add an axis<\/span>/);
+    assert.match(body, /data-bulk-command=""/);
+    assert.match(body, /data-bulk-command="" class="btn mb-3 w-full" hidden/);
+    assert.match(body, /data-select-all=""/);
+    assert.match(body, new RegExp(`data-dataset-select="" aria-label="Select ${GRID_ROW.name}`));
+    assert.match(body, /data-bulk-command-text=""/);
+  },
+
+  async "the result table owns both scroll directions"() {
+    const { body } = await call("/syndex/search", { DB: stubDb() });
+
+    assert.match(body, /results card min-w-0 overflow-auto/);
+    assert.match(body, /grid min-w-0 items-start/);
+    assert.doesNotMatch(body, />what it is<\/th>/);
+  },
+
+  async "an empty tags column is omitted"() {
+    const row = {
+      ...GRID_ROW,
+      known_bug: 0,
+      is_recommended: 0,
+      is_test: 0,
+      is_ci: 0,
+    };
+    const { body } = await call("/syndex/search?type=grid", {
+      DB: stubDb({ rows: { datasets: [row] } }),
+    });
+
+    assert.doesNotMatch(body, />tags<\/a><\/th>/);
+  },
+
+  async "optional columns require data and flags use ticks and crosses"() {
+    const instruments = [
+      {
+        ...GRID_ROW,
+        name: "instrument-one",
+        data_type: "instrument",
+        instrument_type: "photometric_imager",
+        filter_codes_json: '["JWST/NIRCam.F090W"]',
+        resolving_power: null,
+        psfs_json: "[]",
+        noise_maps_json: null,
+        depth_json: null,
+      },
+      {
+        ...GRID_ROW,
+        name: "instrument-two",
+        data_type: "instrument",
+        instrument_type: "photometric_imager",
+        filter_codes_json: '["JWST/NIRCam.F115W"]',
+        resolving_power: null,
+        psfs_json: null,
+        noise_maps_json: "[]",
+        depth_json: null,
+      },
+    ];
+    const { body } = await call("/syndex/search?type=instrument", {
+      DB: stubDb({ rows: { datasets: instruments } }),
+    });
+
+    assert.doesNotMatch(body, />resolving power<\/a><\/th>/);
+    assert.doesNotMatch(body, />depth<\/a><\/th>/);
+    assert.match(body, />PSF<\/a><\/th>/);
+    assert.match(body, />noise<\/a><\/th>/);
+    assert.match(body, /title="PSF: yes"/);
+    assert.match(body, /title="PSF: no"/);
+    assert.match(body, /title="Noise: yes"/);
+    assert.match(body, /title="Noise: no"/);
+  },
+
+  async "column headings toggle persistent sorting"() {
+    const issued = [];
+    const { body } = await call(
+      "/syndex/search?type=grid&sort=size&direction=desc",
+      { DB: stubDb({ issued }) },
+    );
+
+    const rows = statement(issued, "ORDER BY f.size_bytes DESC");
+    assert.match(rows.sql, /ORDER BY f\.size_bytes DESC, d\.name ASC/);
+    assert.match(body, /aria-sort="descending"/);
+    assert.match(body, /size \(MB\).* ↓/s);
+    assert.match(body, /sort=size&amp;direction=asc/);
+    assert.match(body, /<input type="hidden" name="sort" value="size"\/>/);
+    assert.match(body, /<input type="hidden" name="direction" value="desc"\/>/);
+    assert.match(body, /name<\/a><\/th>.*model<\/a><\/th>.*size \(MB\)<span/s);
+  },
+
+  async "filter disclosure and value order survive a search"() {
+    const many = Array.from({ length: 7 }, (unused, index) => ({
+      value: `model-${index}`,
+      n: 7 - index,
+    }));
+    const { body } = await call(
+      "/syndex/search?type=grid&model=model-4&more=model&open=model&open=size",
+      { DB: stubDb({ rows: { facets: many } }) },
+    );
+
+    assert.match(body, /data-filter-group="model" open/);
+    assert.match(body, /data-filter-group="size" open/);
+    assert.ok(
+      body.indexOf('value="model-3"') < body.indexOf('value="model-4"'),
+      "selecting a value must not move it",
+    );
+    assert.match(body, /name="open" value="model"/);
+    assert.match(body, /\/syndex\/static\/filters\.js/);
+  },
+
   async "htmx gets the panel and nothing around it"() {
     const env = { DB: stubDb() };
-    const { body, headers } = await call("/syndex/grids", env, {
+    const { body, headers } = await call("/syndex/search?type=grid", env, {
       headers: { "HX-Request": "true" },
     });
 
@@ -560,7 +759,6 @@ const tests = {
               dataset_id: 1,
               description: "A grid.",
               licence: "CC-BY-4.0",
-              citations_json: '["Eldridge et al. 2017"]',
               metadata_json: "{}",
               provenance_json: "{}",
               current_release_id: 2,
@@ -570,6 +768,16 @@ const tests = {
               synthesizer_max_version: null,
               deprecated_at: null,
               known_bug_description: null,
+            },
+          ],
+          citations: [
+            {
+              bibcode: "2017PASA...34...58E",
+              doi: "10.1017/pasa.2017.51",
+              authors: "Eldridge, J. J. and Stanway, E. R.",
+              title: "Binary Population and Spectral Synthesis Version 2.1",
+              year: 2017,
+              journal: "PASA",
             },
           ],
         },
@@ -588,7 +796,13 @@ const tests = {
       body,
       /https:\/\/data\.synthesizer-project\.org\/v1\/releases\/2\/download/,
     );
-    assert.match(body, /Eldridge et al\. 2017/);
+    // A reference list shows the first author and year, not the full list,
+    // and links out to ADS and the doi rather than reprinting a bibcode.
+    assert.match(body, /Eldridge et al\./);
+    assert.match(body, /\(2017\)/);
+    assert.match(body, /ui\.adsabs\.harvard\.edu\/abs\/2017PASA\.\.\.34\.\.\.58E/);
+    assert.match(body, /doi\.org\/10\.1017\/pasa\.2017\.51/);
+    assert.match(body, /releases\/2\/citations\.bib/);
   },
 
   async "a dataset that is not there says so as a page"() {
@@ -606,113 +820,20 @@ const tests = {
     // it has nowhere to put.
     const env = { DB: stubDb() };
     const { body } = await call("/syndex/submit", env);
-    assert.match(body, /Submissions are not open yet/);
+    assert.match(body, />Coming soon<\/p>/);
+    assert.match(body, /Dataset submission and upload are not open yet/);
+    assert.doesNotMatch(
+      body,
+      /href="\/syndex\/submit" class="btn absolute/,
+    );
     assert.doesNotMatch(body, /cf-turnstile/);
 
     assert.equal((await postSubmission(env)).status, 503);
-  },
-
-  async "the submission form refuses what a reviewer could not act on"() {
-    const restore = stubChallenge(true);
-    try {
-      const { status, body } = await postSubmission(submissionEnv(), {
-        name: "Not A Name",
-        display_name: "",
-        data_type: "nonsense",
-        submitter_name: "",
-        submitter_email: "not-an-address",
-      });
-
-      assert.equal(status, 422);
-      assert.match(body, /lowercase letters, digits and hyphens/);
-      assert.match(body, /display name is required/);
-      assert.match(body, /listed data types/);
-      assert.match(body, /email address is required/);
-      // What was typed comes back, so nothing has to be retyped.
-      assert.match(body, /value="Not A Name"/i);
-    } finally {
-      restore();
-    }
-  },
-
-  async "submitted markup is text by the time it is displayed"() {
-    const restore = stubChallenge(true);
-    try {
-      const { status, body } = await postSubmission(submissionEnv(), {
-        name: "Bad Name",
-        display_name: "<script>alert(1)</script>",
-      });
-
-      assert.equal(status, 422);
-      assert.doesNotMatch(body, /<script>alert/);
-      assert.match(body, /&lt;script&gt;/);
-    } finally {
-      restore();
-    }
-  },
-
-  async "a failed challenge is a refusal, not a submission"() {
-    const restore = stubChallenge(false);
-    try {
-      const { status, body } = await postSubmission(submissionEnv());
-      assert.equal(status, 422);
-      assert.match(body, /anti-robot check did not pass/);
-    } finally {
-      restore();
-    }
-
-    // And so is no challenge at all: verification fails closed rather than
-    // letting an unverified submission through.
-    const { status } = await postSubmission(submissionEnv(), {
-      "cf-turnstile-response": "",
-    });
-    assert.equal(status, 422);
-  },
-
-  async "an accepted submission redirects to its own upload page"() {
-    const restore = stubChallenge(true);
-    try {
-      const { status, headers } = await postSubmission(submissionEnv());
-
-      assert.equal(status, 303);
-      // The token is unguessable and is the only thing that authorises the
-      // upload, so it is what the address carries, not the row's id.
-      assert.match(
-        headers.get("location"),
-        /^\/syndex\/submit\/[0-9a-f]{8}-[0-9a-f]{4}-/,
-      );
-      assert.doesNotMatch(headers.get("location"), /\/7$/);
-    } finally {
-      restore();
-    }
-  },
-
-  async "a name already in the catalogue is not accepted twice"() {
-    const restore = stubChallenge(true);
-    try {
-      const env = submissionEnv({ rows: { taken: [{ 1: 1 }] } });
-      const { status, body } = await postSubmission(env, {
-        name: "bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01",
-      });
-
-      assert.equal(status, 422);
-      assert.match(body, /already in the catalogue/);
-    } finally {
-      restore();
-    }
-  },
-
-  async "an oversized submission is refused before it is parsed"() {
-    const { status } = await call("/syndex/submit", submissionEnv(), {
-      method: "POST",
-      body: "name=x",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        "content-length": String(2 * 1024 * 1024),
-      },
-    });
-
-    assert.equal(status, 413);
+    const configured = submissionEnv();
+    const configuredPage = await call("/syndex/submit", configured);
+    assert.match(configuredPage.body, />Coming soon<\/p>/);
+    assert.doesNotMatch(configuredPage.body, /<form/);
+    assert.equal((await postSubmission(configured)).status, 503);
   },
 
   async "the upload page offers both ways up"() {
@@ -895,7 +1016,7 @@ const tests = {
         },
       },
     };
-    const { status, body } = await call("/syndex/grids", env);
+    const { status, body } = await call("/syndex/search", env);
 
     assert.equal(status, 500);
     assert.doesNotMatch(body, /D1 exploded/);

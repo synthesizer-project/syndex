@@ -11,17 +11,45 @@
  * round-tripped through a shareable URL.
  */
 
-/** Datasets a tab is about, and the columns its table needs. */
+/** Catalogue views. Tabs are shortcuts for setting one data-type filter. */
 export const TABS = [
+  { id: "search", label: "All", types: null },
   { id: "grids", label: "Grids", types: ["grid"] },
   { id: "dust", label: "Dust grids", types: ["dust_grid"] },
   { id: "instruments", label: "Instruments", types: ["instrument"] },
-  // Everything else, defined by exclusion so a data type nobody has thought
-  // of yet still appears somewhere rather than vanishing from the portal.
-  { id: "data", label: "Other data", types: null },
 ];
 
-const GROUPED_TYPES = ["grid", "dust_grid", "instrument"];
+const MiB = 1024 ** 2;
+const GiB = 1024 ** 3;
+
+/** Stable, human-scale file-size ranges used by the generic size facet. */
+export const SIZE_BUCKETS = [
+  {
+    value: "under_10_mib",
+    label: "Under 10 MiB",
+    sql: `f.size_bytes < ${10 * MiB}`,
+  },
+  {
+    value: "10_100_mib",
+    label: "10–100 MiB",
+    sql: `f.size_bytes >= ${10 * MiB} AND f.size_bytes < ${100 * MiB}`,
+  },
+  {
+    value: "100_mib_1_gib",
+    label: "100 MiB–1 GiB",
+    sql: `f.size_bytes >= ${100 * MiB} AND f.size_bytes < ${GiB}`,
+  },
+  {
+    value: "1_10_gib",
+    label: "1–10 GiB",
+    sql: `f.size_bytes >= ${GiB} AND f.size_bytes < ${10 * GiB}`,
+  },
+  {
+    value: "over_10_gib",
+    label: "Over 10 GiB",
+    sql: `f.size_bytes >= ${10 * GiB}`,
+  },
+];
 
 /**
  * Short rail labels for models whose full names do not fit one.
@@ -91,6 +119,31 @@ export function parseFilters(params) {
       .map((value) => value.trim())
       .filter((value) => value !== "");
 
+  const type = list("type").slice(0, 1);
+  const selectedType = type[0] ?? null;
+  const grid = selectedType === "grid";
+  const dust = selectedType === "dust_grid";
+  const instrument = selectedType === "instrument";
+  const requestedSort = (params.get("sort") ?? "").trim();
+  const sortable = new Set([
+    "name",
+    "model",
+    "reprocessed",
+    "emission",
+    "wavelengths",
+    "axes",
+    "size",
+    "type",
+    "file",
+    "version",
+    "instrument_type",
+    "filters",
+    "resolving_power",
+    "psf",
+    "noise",
+    "depth",
+    "tags",
+  ]);
   const axes = [];
   for (const name of new Set(list("axis"))) {
     axes.push({
@@ -103,19 +156,38 @@ export function parseFilters(params) {
 
   return {
     q: (params.get("q") ?? "").trim(),
+    sort:
+      sortable.has(requestedSort) || requestedSort.startsWith("axis.")
+        ? requestedSort
+        : "",
+    direction: params.get("direction") === "desc" ? "desc" : "asc",
     // Which facet groups are showing all of their values. Presentational,
     // but it lives here with everything else the rail remembers, so that
     // expanding a list survives a filter change and a page reload alike.
     more: list("more"),
-    kind: list("kind").filter((v) => v === "sps" || v === "agn"),
-    model: list("model"),
-    emission: list("emission"),
-    content: list("content").filter((v) => v === "spectra" || v === "lines"),
-    type: list("type"),
-    capability: list("capability").filter(
-      (v) => v === "psf" || v === "noise" || v === "depth",
+    open: list("open"),
+    kind: grid
+      ? list("kind").filter((v) => v === "sps" || v === "agn")
+      : [],
+    model: grid ? list("model") : [],
+    emission: grid || dust ? list("emission") : [],
+    content:
+      grid || dust
+        ? list("content").filter((v) => v === "spectra" || v === "lines")
+        : [],
+    type,
+    size: list("size").filter((value) =>
+      SIZE_BUCKETS.some((bucket) => bucket.value === value),
     ),
-    axes: axes.sort((a, b) => a.name.localeCompare(b.name)),
+    capability: instrument
+      ? list("capability").filter(
+          (v) => v === "psf" || v === "noise" || v === "depth",
+        )
+      : [],
+    axes:
+      grid || dust
+        ? axes.sort((a, b) => a.name.localeCompare(b.name))
+        : [],
   };
 }
 
@@ -135,13 +207,19 @@ export function toQuery(filters, changes = {}) {
   if (state.q !== "") {
     params.set("q", state.q);
   }
+  if (state.sort !== "") {
+    params.set("sort", state.sort);
+    params.set("direction", state.direction);
+  }
   for (const key of [
     "more",
+    "open",
     "kind",
     "model",
     "emission",
     "content",
     "type",
+    "size",
     "capability",
   ]) {
     for (const value of state[key] ?? []) {
@@ -174,9 +252,15 @@ export function isFiltered(filters) {
   return (
     filters.q !== "" ||
     filters.axes.length > 0 ||
-    ["kind", "model", "emission", "content", "type", "capability"].some(
-      (key) => filters[key].length > 0,
-    )
+    [
+      "kind",
+      "model",
+      "emission",
+      "content",
+      "type",
+      "size",
+      "capability",
+    ].some((key) => filters[key].length > 0)
   );
 }
 
@@ -216,12 +300,10 @@ function likePattern(text) {
  * the only reading under which clicking a second model makes sense.
  *
  * @param {object} filters Filter state.
- * @param {string[] | null} types Data types the tab covers, or null for the
- *     types no other tab claims.
  * @returns {Array<{group: string, sql: string, params: unknown[]}>} Clauses.
  */
-function clausesFor(filters, types) {
-  const clauses = [tabClause(types)];
+function clausesFor(filters) {
+  const clauses = [];
 
   if (filters.q !== "") {
     const pattern = likePattern(filters.q);
@@ -229,8 +311,9 @@ function clausesFor(filters, types) {
       group: "q",
       sql:
         "(d.name LIKE ? ESCAPE '\\' OR d.display_name LIKE ? ESCAPE '\\'" +
-        " OR d.description LIKE ? ESCAPE '\\')",
-      params: [pattern, pattern, pattern],
+        " OR d.description LIKE ? ESCAPE '\\' OR d.data_type LIKE ? ESCAPE '\\'" +
+        " OR f.filename LIKE ? ESCAPE '\\' OR f.format LIKE ? ESCAPE '\\')",
+      params: [pattern, pattern, pattern, pattern, pattern, pattern],
     });
   }
 
@@ -276,6 +359,17 @@ function clausesFor(filters, types) {
     });
   }
 
+  if (filters.size.length > 0) {
+    const buckets = SIZE_BUCKETS.filter((bucket) =>
+      filters.size.includes(bucket.value),
+    );
+    clauses.push({
+      group: "size",
+      sql: `(${buckets.map((bucket) => `(${bucket.sql})`).join(" OR ")})`,
+      params: [],
+    });
+  }
+
   for (const capability of filters.capability) {
     clauses.push({
       group: "capability",
@@ -283,6 +377,7 @@ function clausesFor(filters, types) {
         psf: "i.psfs_json IS NOT NULL",
         noise: "i.noise_maps_json IS NOT NULL",
         depth: "i.depth_json IS NOT NULL",
+        tags: "(r.known_bug * 8 + d.is_recommended * 4 + d.is_test * 2 + d.is_ci)",
       }[capability],
       params: [],
     });
@@ -293,31 +388,6 @@ function clausesFor(filters, types) {
   }
 
   return clauses;
-}
-
-/**
- * Restrict a query to the datasets one tab covers.
- *
- * This is not a facet, so it keeps its own group and no facet count drops
- * it: the models listed under the Grids tab are the models of grids.
- *
- * @param {string[] | null} types Data types the tab covers, or null for the
- *     types no other tab claims.
- * @returns {{group: string, sql: string, params: unknown[]}} The clause.
- */
-function tabClause(types) {
-  if (types === null) {
-    return {
-      group: "tab",
-      sql: `d.data_type NOT IN (${GROUPED_TYPES.map(() => "?").join(", ")})`,
-      params: GROUPED_TYPES,
-    };
-  }
-  return {
-    group: "tab",
-    sql: `d.data_type IN (${types.map(() => "?").join(", ")})`,
-    params: types,
-  };
 }
 
 /**
@@ -385,12 +455,15 @@ function axisClause(axis) {
 function where(clauses, without) {
   const used = clauses.filter((clause) => clause.group !== without);
   return {
-    sql: used.map((clause) => clause.sql).join("\n  AND "),
+    sql:
+      used.length === 0
+        ? "1 = 1"
+        : used.map((clause) => clause.sql).join("\n  AND "),
     params: used.flatMap((clause) => clause.params),
   };
 }
 
-/** Joins every tab's query shares. A dataset without a current release is
+/** Joins every catalogue query shares. A dataset without a current release is
  *  unpublished and appears nowhere. */
 const FROM = `FROM datasets d
   JOIN releases r ON r.release_id = d.current_release_id
@@ -401,12 +474,45 @@ const FROM = `FROM datasets d
 const COLUMNS = `d.name, d.display_name, d.description, d.data_type,
   d.is_test, d.is_ci,
   d.is_recommended, r.release_id, r.published_at, r.known_bug,
-  f.size_bytes, f.format,
+  f.filename, f.size_bytes, f.format,
   g.grid_type, g.emission_type, g.model_name, g.has_spectra, g.has_lines,
   g.wavelength_min, g.wavelength_max, g.wavelength_units,
   g.photoionisation_code, g.photoionisation_code_version,
   i.instrument_type, i.filter_codes_json, i.resolving_power,
   i.psfs_json, i.noise_maps_json, i.depth_json`;
+
+/** Safe ORDER BY expression for one user-visible column. */
+function ordering(filters) {
+  if (filters.sort.startsWith("axis.")) {
+    return {
+      sql: `(SELECT a.minimum FROM grid_axes a
+             WHERE a.release_id = r.release_id AND a.name = ?)`,
+      params: [filters.sort.slice(5)],
+    };
+  }
+  return {
+    sql:
+      {
+        name: "d.name",
+        model: "g.model_name",
+        reprocessed: "g.emission_type = 'photoionised'",
+        emission: "g.emission_type",
+        wavelengths: "g.wavelength_min",
+        axes: "(SELECT COUNT(*) FROM grid_axes a WHERE a.release_id = r.release_id)",
+        size: "f.size_bytes",
+        type: "d.data_type",
+        file: "f.filename",
+        version: "r.published_at",
+        instrument_type: "i.instrument_type",
+        filters: "json_array_length(i.filter_codes_json)",
+        resolving_power: "i.resolving_power",
+        psf: "i.psfs_json IS NOT NULL",
+        noise: "i.noise_maps_json IS NOT NULL",
+        depth: "i.depth_json IS NOT NULL",
+      }[filters.sort] ?? "d.name",
+    params: [],
+  };
+}
 
 /**
  * Facets that are flags on a row rather than values of a column.
@@ -437,8 +543,7 @@ const FLAG_FACETS = {
       ["depth", "i.depth_json IS NOT NULL"],
     ],
   },
-  // Other data has no flag worth a facet; its own type is a column.
-  data: { group: "flags", values: [] },
+  search: { group: "flags", values: [] },
 };
 
 /**
@@ -459,16 +564,17 @@ export async function tabCounts(db) {
 
   const counts = Object.fromEntries(TABS.map((tab) => [tab.id, 0]));
   for (const row of results) {
-    const tab =
-      TABS.find((candidate) => candidate.types?.includes(row.data_type)) ??
-      TABS.find((candidate) => candidate.types === null);
-    counts[tab.id] += row.n;
+    counts.search += row.n;
+    const tab = TABS.find((candidate) => candidate.types?.includes(row.data_type));
+    if (tab !== undefined) {
+      counts[tab.id] += row.n;
+    }
   }
   return counts;
 }
 
 /**
- * Run one tab's search: its rows, its total, and its facet counts.
+ * Run one catalogue search: its rows, its total, and its facet counts.
  *
  * Everything is issued as a single D1 batch, so a page costs one round trip
  * to the database however many facets it draws.
@@ -479,14 +585,15 @@ export async function tabCounts(db) {
  * @returns {Promise<object>} Rows, total, facet counts and axis columns.
  */
 export async function search(db, tab, filters) {
-  const clauses = clausesFor(filters, tab.types);
+  const clauses = clausesFor(filters);
   const all = where(clauses);
+  const order = ordering(filters);
 
-  // Only the facets a tab actually draws are counted. A facet of one value
+  // Only the facets this view actually draws are counted. A facet of one value
   // narrows nothing, so the instruments tab has none: every instrument in
   // the catalogue is a photometric imager, and its rail asks about what the
   // instrument carries instead.
-  const facetGroups = {
+  const specialistGroups = {
     grids: [
       // Stellar or AGN is the first cut anyone makes, so it leads the rail.
       ["kind", "g.grid_type"],
@@ -495,8 +602,9 @@ export async function search(db, tab, filters) {
     ],
     dust: [["emission", "g.emission_type"]],
     instruments: [],
-    data: [["type", "d.data_type"]],
+    search: [],
   }[tab.id];
+  const facetGroups = [["type", "d.data_type"], ...specialistGroups];
 
   const statements = [
     db
@@ -504,13 +612,22 @@ export async function search(db, tab, filters) {
         `SELECT ${COLUMNS}
          ${FROM}
          WHERE ${all.sql}
-         ORDER BY d.name`,
+         ORDER BY ${order.sql} ${filters.direction.toUpperCase()}, d.name ASC`,
       )
-      .bind(...all.params),
+      .bind(...all.params, ...order.params),
   ];
 
   for (const [group, column] of facetGroups) {
-    const scoped = where(clauses, group);
+    // Type choices should remain available when a specialist filter is
+    // active; choosing one safely drops those specialist filters.
+    const scoped =
+      group === "type"
+        ? where(
+            clauses.filter(
+              (clause) => clause.group === "q" || clause.group === "size",
+            ),
+          )
+        : where(clauses, group);
     statements.push(
       db
         .prepare(
@@ -521,6 +638,17 @@ export async function search(db, tab, filters) {
            ORDER BY n DESC, value`,
         )
         .bind(...scoped.params),
+    );
+  }
+
+  const unsized = where(clauses, "size");
+  for (const bucket of SIZE_BUCKETS) {
+    statements.push(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n ${FROM} WHERE ${unsized.sql} AND (${bucket.sql})`,
+        )
+        .bind(...unsized.params),
     );
   }
 
@@ -542,60 +670,69 @@ export async function search(db, tab, filters) {
   // axis returning nothing is never offered. Ten of the twelve grid axes
   // appear on 13 grids or fewer, which is why the picker is a list of what
   // exists rather than a panel of every axis there could be.
-  statements.push(
-    db
-      .prepare(
-        `SELECT x.name AS value, COUNT(DISTINCT r.release_id) AS n,
-                GROUP_CONCAT(DISTINCT x.units) AS units
-         FROM grid_axes x
-         JOIN releases r ON r.release_id = x.release_id
-         JOIN datasets d ON d.dataset_id = r.dataset_id
-           AND d.current_release_id = r.release_id
-         JOIN files f ON f.file_id = r.file_id
-         LEFT JOIN grid_metadata g ON g.release_id = r.release_id
-         LEFT JOIN instruments i ON i.release_id = r.release_id
-         WHERE ${all.sql}
-         GROUP BY x.name
-         ORDER BY n DESC, x.name`,
-      )
-      .bind(...all.params),
-  );
-
-  const tabOnly = tabClause(tab.types);
-  statements.push(
-    db
-      .prepare(
-        `SELECT a.release_id, a.name, a.units, a.scale, a.count,
-                a.minimum, a.maximum
-         FROM grid_axes a
-         JOIN releases r ON r.release_id = a.release_id
-         JOIN datasets d ON d.dataset_id = r.dataset_id
-           AND d.current_release_id = r.release_id
-         WHERE ${tabOnly.sql}
-         ORDER BY a.axis_index`,
-      )
-      .bind(...tabOnly.params),
-  );
+  const hasAxes = tab.id === "grids" || tab.id === "dust";
+  if (hasAxes) {
+    statements.push(
+      db
+        .prepare(
+          `SELECT x.name AS value, COUNT(DISTINCT r.release_id) AS n,
+                  GROUP_CONCAT(DISTINCT x.units) AS units
+           FROM grid_axes x
+           JOIN releases r ON r.release_id = x.release_id
+           JOIN datasets d ON d.dataset_id = r.dataset_id
+             AND d.current_release_id = r.release_id
+           JOIN files f ON f.file_id = r.file_id
+           LEFT JOIN grid_metadata g ON g.release_id = r.release_id
+           LEFT JOIN instruments i ON i.release_id = r.release_id
+           WHERE ${all.sql}
+           GROUP BY x.name
+           ORDER BY n DESC, x.name`,
+        )
+        .bind(...all.params),
+    );
+    statements.push(
+      db
+        .prepare(
+          `SELECT a.release_id, a.name, a.units, a.scale, a.count,
+                  a.minimum, a.maximum
+           FROM grid_axes a
+           JOIN releases r ON r.release_id = a.release_id
+           JOIN datasets d ON d.dataset_id = r.dataset_id
+             AND d.current_release_id = r.release_id
+           JOIN files f ON f.file_id = r.file_id
+           LEFT JOIN grid_metadata g ON g.release_id = r.release_id
+           LEFT JOIN instruments i ON i.release_id = r.release_id
+           WHERE ${all.sql}
+           ORDER BY a.axis_index`,
+        )
+        .bind(...all.params),
+    );
+  }
 
   const batch = await db.batch(statements);
   const rows = batch[0].results;
 
   const facets = {};
-  facetGroups.forEach(([group], index) => {
-    facets[group] = batch[index + 1].results;
-  });
-  const flagsAt = facetGroups.length + 1;
-  facets[flags.group] = flags.values.map(([value], index) => ({
-    value,
-    n: batch[flagsAt + index].results[0]?.n ?? 0,
+  let at = 1;
+  for (const [group] of facetGroups) {
+    facets[group] = batch[at++].results;
+  }
+  facets.size = SIZE_BUCKETS.map((bucket) => ({
+    value: bucket.value,
+    n: batch[at++].results[0]?.n ?? 0,
   }));
-  facets.axes = batch[flagsAt + flags.values.length].results;
+  facets[flags.group] = flags.values.map(([value]) => ({
+    value,
+    n: batch[at++].results[0]?.n ?? 0,
+  }));
+  facets.axes = hasAxes ? batch[at++].results : [];
+  const axes = hasAxes ? byRelease(batch[at].results) : new Map();
 
   return {
     rows,
     total: rows.length,
     facets,
-    axes: byRelease(batch[batch.length - 1].results),
+    axes,
   };
 }
 
@@ -635,7 +772,7 @@ export async function dataset(db, name) {
       `SELECT d.*, r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description, r.provenance_json,
-              f.filename, f.format, f.size_bytes, f.sha256
+              f.file_id, f.filename, f.format, f.size_bytes, f.sha256
        FROM datasets d
        LEFT JOIN releases r ON r.release_id = d.current_release_id
        LEFT JOIN files f ON f.file_id = r.file_id
@@ -648,7 +785,7 @@ export async function dataset(db, name) {
     return null;
   }
 
-  const [grid, axes, instrument, releases] = await db.batch([
+  const [grid, axes, instrument, releases, citations] = await db.batch([
     db
       .prepare("SELECT * FROM grid_metadata WHERE release_id = ?")
       .bind(row.release_id),
@@ -670,6 +807,17 @@ export async function dataset(db, name) {
          ORDER BY r.published_at DESC, r.release_id DESC`,
       )
       .bind(row.dataset_id),
+    // Citations hang off the file rather than the dataset, because that is
+    // what gets cited: the c25.00 grids reference a different Cloudy release
+    // from their c23.01 siblings despite sharing a model.
+    db
+      .prepare(
+        `SELECT c.bibcode, c.doi, c.authors, c.title, c.year, c.journal
+         FROM file_citations fc
+         JOIN citations c ON c.citation_id = fc.citation_id
+         WHERE fc.file_id = ? ORDER BY fc.position, c.year`,
+      )
+      .bind(row.file_id),
   ]);
 
   const incident = grid.results[0]?.incident_release_id ?? null;
@@ -679,6 +827,7 @@ export async function dataset(db, name) {
     axes: axes.results,
     instrument: instrument.results[0] ?? null,
     releases: releases.results,
+    citations: citations.results,
     // A processed grid names the incident release it came from; the page
     // wants the dataset that release belongs to so it can link to a page
     // rather than to an integer.

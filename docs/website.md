@@ -90,46 +90,37 @@ are real URLs, not JavaScript state, because each data type needs its own
 columns and its own filters.
 
 ```
-Syndex            Grids 156 | Dust 3 | Instruments 19 | Data 62
+Syndex          All 241 | Grids 157 | Dust 3 | Instruments 19
 -------------------+-------------------------------------------------
  search [        ] |  23 grids   BPASS x  photoionised x   clear all
                    +-------------------------------------------------
- KIND              | name             emission   ages      Z      size
- [ ] stellar   142 | bpass-2.2.1-...  photoion  1e6-1e11  1e-5-.04 194M
- [ ] AGN        15 | ...
-                   |
- MODEL             |
- [x] BPASS      47 |
- [ ] FSPS       54 |
- > 8 more          |
-                   |
- EMISSION          |
- [x] photoionised  |
- [ ] incident      |
-                   |
- CONTENT           |
- [ ] has spectra   |
- [ ] has lines     |
-                   |
- AXES              |
- + add axis        |
-                   |
+ > DATA TYPE        | name             emission   ages      Z      size
+ > FILE SIZE        | bpass-2.2.1-...  photoion  1e6-1e11  1e-5-.04 194M
+ > KIND              | ...
+ > MODEL             |
+ > EMISSION          |
+ > CONTENT           |
+ > AXES              |
 ```
 
-`/syndex` itself is a separate, thin landing page: what this is, the install
-command, headline counts, and a search box that drops into the Grids tab.
+`/syndex` itself is a separate, thin landing page: what this is, headline
+counts, and a search box that searches the whole catalogue.
 Someone arriving from a paper needs orientation; someone who knows what they
 want should be one keystroke from the search. A wall of 156 rows serves
 neither.
 
 ### Tabs
 
-| Tab | Datasets | Columns |
+Tabs are shortcuts for the data-type filter on one `/syndex/search` page.
+Search terms and generic filters survive a tab change; incompatible specialist
+filters do not.
+
+| Tab | Filter | Columns |
 |---|---|---|
-| Grids | 156 | model, emission, age range, metallicity range, wavelengths, spectra/lines |
-| Dust grids | 3 | curve or emission, axes |
-| Instruments | 19 | filters, resolving power, PSF, noise, depth |
-| Other data | 62 | type filter, name, size, version |
+| All | none | type, filename, size, version |
+| Grids | `grid` | model, emission, age range, metallicity range, wavelengths, spectra/lines |
+| Dust grids | `dust_grid` | curve or emission, axes |
+| Instruments | `instrument` | filters, resolving power, PSF, noise, depth |
 
 Dust grids stay a separate tab despite holding three datasets. They are not
 grids and nothing that consumes a grid can consume one.
@@ -141,11 +132,7 @@ grid is stellar, every QSOSED grid is AGN — which is why the counts beside
 each are computed against the other active filters rather than against the
 whole tab.
 
-Every dataset on the **Other data** tab carries a description and nothing else
-that distinguishes it: no model, no axes, no filters. So that tab shows the
-description as a column. All 49 generation inputs are Maraston SEDs — 12 from
-2005, 8 from 2011, 9 from 2013 and 20 from 2024 — which their descriptions say
-and their names do not.
+Generic results stay compact; descriptions remain on dataset summary pages.
 
 ## The search interface
 
@@ -153,6 +140,11 @@ This is the substance of the portal, and its design follows from one
 measurement: **ten of the twelve grid axes appear on 13 grids or fewer.** Only
 `ages` (143 grids) and `metallicities` (152) are close to universal. A fixed
 panel listing every axis would therefore be mostly irrelevant rows.
+
+All facet groups use native collapsed disclosure controls. Data type and file
+size are always available. Selecting a grid, dust grid, or instrument type
+reveals only the facets supported by that type's structured metadata. File
+size uses stable buckets from under 10 MiB through over 10 GiB.
 
 So the axis filter starts empty and the user adds axes to it:
 
@@ -303,20 +295,17 @@ protecting.
 
 These block portal work or make it much less useful:
 
-1. **`synthesizer-download` cannot fetch a named dataset.** Its flags are
-   coarse groups (`--test-grids`, `--dust-grid`, `--all`) with no
-   `--dataset NAME` and no positional argument. Every dataset page wants to
-   print the command that fetches that dataset, and today there is no such
-   command; the honest instruction would be `--all`, which is 63 GiB. The fix
-   is small because `_resolve_release(dataset, release_id=None)` already turns
-   a catalogue name into a download: it needs a flag wired to it.
-2. **DNS for the apex**, plus GitHub Pages as origin and the `/syndex/*`
+`synthesizer-download --dataset NAME [NAME ...]` now accepts one or more
+catalogue names. Bulk selection in the results table emits that single command;
+`--release` remains available when exactly one dataset is named.
+
+1. **DNS for the apex**, plus GitHub Pages as origin and the `/syndex/*`
    Worker route.
-3. **The Cloudflare Gateway policy inspects `data.synthesizer-project.org`**,
+2. **The Cloudflare Gateway policy inspects `data.synthesizer-project.org`**,
    which breaks HTTPS to it from any local tool while the VPN is up. The
    browser will hit the same domain. Sort this before frontend work starts or
    whoever builds it will chase phantom fetch failures.
-4. **Model naming needs a tidy for facet labels.** `Draine & Li` and
+3. **Model naming needs a tidy for facet labels.** `Draine & Li` and
    `Draine & Li dust extinction curves` are the same model spelled two ways and
    would appear as two facet rows. `Bruzual & Charlot (2003), 2016 update` is a
    correct name but unusable as a label in a narrow rail, so models want a

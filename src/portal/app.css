@@ -118,6 +118,16 @@
   z-index: 0;
 }
 
+body > .landing-links {
+  position: absolute;
+  inset: 0 0 auto;
+}
+
+body > .landing-footer {
+  position: absolute;
+  inset: auto 0 0;
+}
+
 /* The org site's card: same radius, same translucent surface, same border. */
 @utility card {
   background-color: rgba(12, 24, 41, 0.55);
@@ -225,6 +235,21 @@
 @media (width >= 64rem) {
   .filter-sheet > summary {
     display: none;
+  }
+}
+
+.filter-sheet details > summary::after {
+  content: "▾";
+  margin-left: 0.5rem;
+}
+
+.filter-sheet details[open] > summary::after {
+  content: "▴";
+}
+
+@media (width >= 64rem) {
+  #catalogue-results {
+    max-height: max(calc(100vh - 13rem), var(--filter-height));
   }
 }
 

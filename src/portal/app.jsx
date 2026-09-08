@@ -49,10 +49,10 @@ import { BASE, Panel } from "./views.jsx";
 
 /** What a tab's rows are called in a count. */
 const NOUNS = {
+  search: "dataset",
   grids: "grid",
   dust: "dust grid",
   instruments: "instrument",
-  data: "dataset",
 };
 
 const app = new Hono().basePath(BASE);
@@ -114,9 +114,10 @@ app.get("/", async (c) => {
   );
 });
 
-app.get("/:tab{grids|dust|instruments|data}", async (c) => {
-  const tab = TABS.find((candidate) => candidate.id === c.req.param("tab"));
+app.get("/search", async (c) => {
   const filters = parseFilters(new URL(c.req.url).searchParams);
+  const tab =
+    TABS.find((candidate) => candidate.types?.includes(filters.type[0])) ?? TABS[0];
   const result = await search(c.env.DB, tab, filters);
   const panel = (
     <Panel tab={tab} filters={filters} result={result} noun={NOUNS[tab.id]} />
@@ -131,13 +132,28 @@ app.get("/:tab{grids|dust|instruments|data}", async (c) => {
   const counts = await tabCounts(c.env.DB);
   return page(
     c,
-    <Browse tab={tab} counts={counts}>
+    <Browse tab={tab} counts={counts} filters={filters}>
       {panel}
     </Browse>,
     // A filtered view is cheap to recompute and awkward to cache: the URL
     // carries the filters, so a cached copy would be one arbitrary search.
     { cache: isFiltered(filters) ? "no-store" : "public, max-age=60" },
   );
+});
+
+app.get("/:tab{grids|dust|instruments|data}", (c) => {
+  const params = new URL(c.req.url).searchParams;
+  const type = {
+    grids: "grid",
+    dust: "dust_grid",
+    instruments: "instrument",
+  }[c.req.param("tab")];
+  if (type === undefined) {
+    params.delete("type");
+  } else {
+    params.set("type", type);
+  }
+  return c.redirect(`${BASE}/search${params.size === 0 ? "" : `?${params}`}`, 308);
 });
 
 app.get("/datasets/:name", async (c) => {
@@ -163,7 +179,7 @@ app.get("/submit", async (c) =>
     c,
     <Submit
       counts={await tabCounts(c.env.DB)}
-      open={submissionsOpen(c.env)}
+      open={false}
       sitekey={c.env.TURNSTILE_SITEKEY}
     />,
     { cache: "no-store" },
@@ -171,84 +187,7 @@ app.get("/submit", async (c) =>
 );
 
 app.post("/submit", async (c) => {
-  // The form is small and every field is capped, so a body this large is
-  // not a submission and is refused before it is parsed.
-  const length = Number(c.req.header("content-length") ?? 0);
-  if (length > 64 * 1024) {
-    return c.text("Submission too large", 413);
-  }
-
-  if (!submissionsOpen(c.env)) {
-    return c.text("Submissions are not open.", 503);
-  }
-
-  const form = await c.req.parseBody();
-  const counts = await tabCounts(c.env.DB);
-
-  const passed = await verifyChallenge(
-    c.env,
-    String(form["cf-turnstile-response"] ?? ""),
-    c.req.header("cf-connecting-ip") ?? null,
-  );
-
-  const { values, errors } = await validate(c.env.DB, form);
-  if (!passed) {
-    errors.unshift(
-      "The anti-robot check did not pass. Reload the page and try again.",
-    );
-  }
-
-  if (errors.length > 0) {
-    return page(
-      c,
-      <Submit
-        counts={counts}
-        open
-        sitekey={c.env.TURNSTILE_SITEKEY}
-        values={values}
-        errors={errors}
-      />,
-      { status: 422, cache: "no-store" },
-    );
-  }
-
-  // The token is the only thing that will authorise the upload, so it comes
-  // from the platform's cryptographic source rather than from anything
-  // guessable like the row's own id.
-  const token = crypto.randomUUID();
-  const inserted = await c.env.DB.prepare(
-    `INSERT INTO submissions (
-       submitted_at, state, name, display_name, description, data_type,
-       licence, citations, upload_token, submitter_name, submitter_email,
-       notes
-     ) VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     RETURNING submission_id`,
-  )
-    .bind(
-      new Date().toISOString(),
-      values.name,
-      values.display_name,
-      values.description,
-      values.data_type,
-      values.licence,
-      values.citations,
-      token,
-      values.submitter_name,
-      values.submitter_email,
-      values.notes,
-    )
-    .first();
-
-  // Redirect rather than render, so reloading the upload page does not
-  // resubmit the metadata behind it.
-  console.log(
-    JSON.stringify({
-      message: "Submission registered",
-      submission_id: inserted.submission_id,
-      data_type: values.data_type,
-    }),
-  );
-  return c.redirect(`${BASE}/submit/${token}`, 303);
+  return c.text("Submissions are coming soon.", 503);
 });
 
 /**

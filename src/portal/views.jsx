@@ -10,7 +10,14 @@
  * results table. Nothing here runs in the browser.
  */
 
-import { AXIS_UNITS, MODEL_LABELS, RANGE_MODES, TABS, toQuery } from "./catalogue.js";
+import {
+  AXIS_UNITS,
+  MODEL_LABELS,
+  RANGE_MODES,
+  SIZE_BUCKETS,
+  TABS,
+  toQuery,
+} from "./catalogue.js";
 
 /** Where the portal lives, and where its stylesheet and htmx are served. */
 export const BASE = "/syndex";
@@ -23,6 +30,24 @@ export const BASE = "/syndex";
  * on the portal's host reaches GitHub Pages, not this Worker.
  */
 export const DATA_API = "https://data.synthesizer-project.org";
+
+const searchUrl = (filters, changes = {}) =>
+  `${BASE}/search${toQuery(filters, changes)}`;
+
+/** Changing type also drops specialist filters that do not apply to it. */
+const typeUrl = (filters, type) =>
+  searchUrl(filters, {
+    type: type === null ? [] : [type],
+    kind: [],
+    model: [],
+    emission: [],
+    content: [],
+    capability: [],
+    axes: [],
+    more: [],
+    sort: "",
+    direction: "asc",
+  });
 
 /*
  * One family, one request. The name matters: the org site asks for
@@ -48,10 +73,15 @@ export function num(value) {
   }
   const magnitude = Math.abs(value);
   if (magnitude >= 1e4 || magnitude < 1e-3) {
-    return value
+    const [coefficient, exponent] = value
       .toExponential(2)
       .replace(/\.?0+e/, "e")
-      .replace("e+", "e");
+      .split("e");
+    const superscript = String(Number(exponent)).replace(
+      /[-0-9]/g,
+      (digit) => "⁻⁰¹²³⁴⁵⁶⁷⁸⁹"["-0123456789".indexOf(digit)],
+    );
+    return `${coefficient === "1" ? "" : `${coefficient}×`}10${superscript}`;
   }
   return String(Number(value.toPrecision(4)));
 }
@@ -142,6 +172,17 @@ export const Badges = ({ row }) => (
   </>
 );
 
+/** Compact, accessible value for boolean table columns. */
+const Flag = ({ yes, label }) => (
+  <span
+    class={yes ? "text-accent-light" : "text-muted"}
+    title={`${label}: ${yes ? "yes" : "no"}`}
+  >
+    <span aria-hidden="true">{yes ? "✓" : "×"}</span>
+    <span class="sr-only">{yes ? "yes" : "no"}</span>
+  </span>
+);
+
 const Background = () => (
   <svg
     class="bg-layer"
@@ -199,8 +240,11 @@ export const Layout = ({
   title,
   counts = null,
   active = null,
+  filters = null,
   nav = counts !== null,
   bare = false,
+  footer = null,
+  showSubmit = true,
   children,
 }) => (
   <html lang="en">
@@ -215,6 +259,7 @@ export const Layout = ({
       {/* Vendored and pinned rather than loaded from a CDN, so the portal
           has one origin and one thing that can go down. */}
       <script src={`${BASE}/static/htmx.min.js`} defer></script>
+      <script src={`${BASE}/static/filters.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
       <Background />
@@ -232,8 +277,12 @@ export const Layout = ({
           it signposts the same places at full size, and a bar above that
           would only say them twice. */}
       {!bare && (
-      <header class="border-b border-line">
-        <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5">
+      <header class="relative border-b border-line">
+        <div
+          class={`mx-auto flex max-w-7xl flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${
+            showSubmit ? "pr-48" : ""
+          }`}
+        >
           <a
             href={BASE}
             class="text-xl font-medium tracking-tight text-text no-underline"
@@ -247,7 +296,13 @@ export const Layout = ({
             >
               {TABS.map((tab) => (
                 <a
-                  href={`${BASE}/${tab.id}`}
+                  href={
+                    filters === null
+                      ? `${BASE}/search${
+                          tab.types === null ? "" : `?type=${tab.types[0]}`
+                        }`
+                      : typeUrl(filters, tab.types?.[0] ?? null)
+                  }
                   aria-current={tab.id === active ? "page" : undefined}
                   class={`flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${
                     tab.id === active
@@ -263,14 +318,32 @@ export const Layout = ({
               ))}
             </nav>
           )}
-          <a
-            href={`${BASE}/submit`}
-            class="ml-auto text-sm text-accent-light no-underline hover:underline"
-          >
-            Submit a dataset
-          </a>
+          {showSubmit && (
+            <a
+              href={`${BASE}/submit`}
+              class="btn absolute top-4 right-6 text-xs no-underline"
+            >
+              Submit a dataset
+            </a>
+          )}
         </div>
       </header>
+      )}
+      {bare && (
+        <nav
+          aria-label="Syndex links"
+          class="landing-links flex w-full flex-wrap justify-end gap-2 px-6 pt-6"
+        >
+          <a
+            href="https://synthesizer-project.org/"
+            class="rounded-full border border-line bg-surface/70 px-4 py-2 text-xs text-muted no-underline transition-colors hover:border-line-hover hover:text-text"
+          >
+            Synthesizer project
+          </a>
+          <a href={`${BASE}/submit`} class="btn text-xs no-underline">
+            Submit a dataset
+          </a>
+        </nav>
       )}
       {/* On the landing page the content is centred in whatever room the
           viewport has, which is what stops a tall screen ending in a field
@@ -285,25 +358,7 @@ export const Layout = ({
       >
         {children}
       </main>
-      {bare ? (
-        <footer class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-center gap-x-7 gap-y-2 px-6 pb-10">
-          <a href={`${BASE}/submit`} class="label-caps no-underline hover:text-text">
-            Submit a dataset
-          </a>
-          <a
-            href={`${DATA_API}/v1/datasets`}
-            class="label-caps no-underline hover:text-text"
-          >
-            API
-          </a>
-          <a
-            href="https://synthesizer-project.org/"
-            class="label-caps no-underline hover:text-text"
-          >
-            Synthesizer project
-          </a>
-        </footer>
-      ) : (
+      {!bare && (
         <footer class="mx-auto w-full max-w-7xl px-6 pt-4 pb-12 text-sm text-muted">
           <div class="border-t border-line pt-6">
             Part of{" "}
@@ -313,6 +368,11 @@ export const Layout = ({
             . Files are served from{" "}
             <a href={`${DATA_API}/v1/datasets`}>the catalogue API</a>.
           </div>
+        </footer>
+      )}
+      {bare && footer !== null && (
+        <footer class="landing-footer w-full px-6 pb-8 text-center text-sm text-muted">
+          {footer}
         </footer>
       )}
     </body>
@@ -362,23 +422,23 @@ export const Facet = ({
     return null;
   }
 
-  // Anything already ticked stays visible: a checked box folded away is a
-  // filter the user cannot see they are running.
-  const ordered = [
-    ...offered.filter((value) => active.includes(value.value)),
-    ...offered.filter((value) => !active.includes(value.value)),
-  ];
   const expanded = filters.more.includes(name);
-  const visible = expanded ? ordered : ordered.slice(0, 6);
-  const hidden = ordered.length - visible.length;
+  const opened = filters.open.includes(name);
+  const visible = expanded ? offered : offered.slice(0, 6);
+  const hidden = offered.length - visible.length;
   const toggled = expanded
     ? filters.more.filter((group) => group !== name)
     : [...filters.more, name];
-  const href = `${BASE}/${tab.id}${toQuery(filters, { more: toggled })}`;
+  const href = searchUrl(filters, { more: toggled });
 
   return (
-    <fieldset class="border-0 py-4">
-      <legend class="label-caps mb-2">{legend}</legend>
+    <details class="border-0 py-4" data-filter-group={name} open={opened}>
+      <summary class="label-caps flex cursor-pointer items-center justify-between">
+        <span>{legend}</span>
+        {active.length > 0 && <span>{active.length} selected</span>}
+      </summary>
+      <fieldset class="mt-2 border-0">
+      <legend class="sr-only">{legend}</legend>
       <ul class="space-y-0.5 text-sm">
         {visible.map((value) => (
           <li>
@@ -409,7 +469,56 @@ export const Facet = ({
       )}
       {/* So that expanding a list survives ticking a box in it. */}
       {expanded && <input type="hidden" name="more" value={name} />}
-    </fieldset>
+      {opened && (
+        <input type="hidden" name="open" value={name} data-filter-open="" />
+      )}
+      </fieldset>
+    </details>
+  );
+};
+
+/** Single-select data type. Links can clear stale specialist filters safely. */
+const TypeFacet = ({ filters, values }) => {
+  const opened = filters.open.includes("type");
+  return (
+  <details class="py-4" data-filter-group="type" open={opened}>
+    <summary class="label-caps flex cursor-pointer items-center justify-between">
+      <span>Data type</span>
+      {filters.type.length > 0 && (
+        <span>{filters.type[0].replace(/_/g, " ")}</span>
+      )}
+    </summary>
+    <ul class="mt-2 space-y-0.5 text-sm">
+      <li>
+        <a
+          href={typeUrl(filters, null)}
+          hx-get={typeUrl(filters, null)}
+          class={filters.type.length === 0 ? "text-text" : "text-muted"}
+        >
+          All data
+        </a>
+      </li>
+      {values.map((value) => (
+        <li class="flex items-center gap-2 py-0.5">
+          <a
+            href={typeUrl(filters, value.value)}
+            hx-get={typeUrl(filters, value.value)}
+            aria-current={filters.type[0] === value.value ? "true" : undefined}
+            class={`min-w-0 flex-1 truncate ${
+              filters.type[0] === value.value ? "text-text" : "text-muted"
+            }`}
+            title={String(value.value)}
+          >
+            {value.value.replace(/_/g, " ")}
+          </a>
+          <span class="text-muted tabular-nums">{value.n}</span>
+        </li>
+      ))}
+    </ul>
+    {opened && (
+      <input type="hidden" name="open" value="type" data-filter-open="" />
+    )}
+  </details>
   );
 };
 
@@ -423,13 +532,21 @@ export const Facet = ({
 const AxisFilter = ({ tab, filters, axis, units }) => {
   const label = AXIS_UNITS[axis.name]?.label ?? units;
   const removed = filters.axes.filter((other) => other.name !== axis.name);
+  const group = `range.${axis.name}`;
+  const opened = filters.open.includes(group);
   return (
-    <div class="mb-3 rounded-lg border border-line bg-bg/40 p-3">
+    <div class="border-b border-dim py-2 last:border-0">
       <div class="flex items-baseline gap-2">
         <span class="flex-1 font-mono text-sm">{axis.name}</span>
         <a
-          href={`${BASE}/${tab.id}${toQuery(filters, { axes: removed })}`}
-          hx-get={`${BASE}/${tab.id}${toQuery(filters, { axes: removed })}`}
+          href={searchUrl(filters, {
+            axes: removed,
+            sort: filters.sort === `axis.${axis.name}` ? "" : filters.sort,
+          })}
+          hx-get={searchUrl(filters, {
+            axes: removed,
+            sort: filters.sort === `axis.${axis.name}` ? "" : filters.sort,
+          })}
           class="text-sm"
           aria-label={`Remove the ${axis.name} filter`}
         >
@@ -437,49 +554,61 @@ const AxisFilter = ({ tab, filters, axis, units }) => {
         </a>
       </div>
       <input type="hidden" name="axis" value={axis.name} />
-      <div class="mt-2 flex items-center gap-2 text-sm">
-        <label class="flex-1">
-          <span class="block text-xs text-muted">
-            min{label ? ` (${label})` : ""}
-          </span>
-          <input
-            type="number"
-            step="any"
-            id={`min-${axis.name}`}
-            name={`min.${axis.name}`}
-            value={axis.min === null ? "" : String(axis.min)}
-            class="w-full rounded-lg border border-muted bg-bg px-2 py-1"
-          />
-        </label>
-        <label class="flex-1">
-          <span class="block text-xs text-muted">
-            max{label ? ` (${label})` : ""}
-          </span>
-          <input
-            type="number"
-            step="any"
-            id={`max-${axis.name}`}
-            name={`max.${axis.name}`}
-            value={axis.max === null ? "" : String(axis.max)}
-            class="w-full rounded-lg border border-muted bg-bg px-2 py-1"
-          />
-        </label>
-      </div>
-      <fieldset class="mt-2 border-0">
-        <legend class="text-xs text-muted">Match</legend>
-        {Object.entries(RANGE_MODES).map(([mode, description]) => (
-          <label class="flex items-center gap-2 text-sm">
+      <details
+        class="mt-1"
+        data-filter-group={group}
+        open={opened}
+      >
+        <summary class="flex cursor-pointer items-center text-xs text-muted">
+          Select range
+        </summary>
+        <div class="mt-2 flex items-center gap-2 text-sm">
+          <label class="flex-1">
+            <span class="block text-xs text-muted">
+              min{label ? ` (${label})` : ""}
+            </span>
             <input
-              type="radio"
-              id={`mode-${axis.name}-${mode}`}
-              name={`mode.${axis.name}`}
-              value={mode}
-              checked={axis.mode === mode}
+              type="number"
+              step="any"
+              id={`min-${axis.name}`}
+              name={`min.${axis.name}`}
+              value={axis.min === null ? "" : String(axis.min)}
+              class="w-full rounded-lg border border-muted bg-bg px-2 py-1"
             />
-            {description}
           </label>
-        ))}
-      </fieldset>
+          <label class="flex-1">
+            <span class="block text-xs text-muted">
+              max{label ? ` (${label})` : ""}
+            </span>
+            <input
+              type="number"
+              step="any"
+              id={`max-${axis.name}`}
+              name={`max.${axis.name}`}
+              value={axis.max === null ? "" : String(axis.max)}
+              class="w-full rounded-lg border border-muted bg-bg px-2 py-1"
+            />
+          </label>
+        </div>
+        <fieldset class="mt-2 border-0">
+          <legend class="text-xs text-muted">Match</legend>
+          {Object.entries(RANGE_MODES).map(([mode, description]) => (
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                id={`mode-${axis.name}-${mode}`}
+                name={`mode.${axis.name}`}
+                value={mode}
+                checked={axis.mode === mode}
+              />
+              {description}
+            </label>
+          ))}
+        </fieldset>
+        {opened && (
+          <input type="hidden" name="open" value={group} data-filter-open="" />
+        )}
+      </details>
     </div>
   );
 };
@@ -505,10 +634,16 @@ const AxisPicker = ({ tab, filters, facets }) => {
         : (axis.units ?? ""),
     ]),
   );
+  const opened = filters.open.includes("axes");
 
   return (
-    <fieldset class="border-0 py-4">
-      <legend class="label-caps mb-2">Axes</legend>
+    <details class="py-4" data-filter-group="axes" open={opened}>
+      <summary class="label-caps flex cursor-pointer items-center justify-between">
+        <span>Axes</span>
+        {filters.axes.length > 0 && <span>{filters.axes.length} selected</span>}
+      </summary>
+      <fieldset class="mt-2 border-0">
+      <legend class="sr-only">Axes</legend>
       {filters.axes.map((axis) => (
         <AxisFilter
           tab={tab}
@@ -518,14 +653,14 @@ const AxisPicker = ({ tab, filters, facets }) => {
         />
       ))}
       {available.length > 0 && (
-        <label for="add-axis" class="block text-sm">
-          <span class="block text-xs text-muted">Add an axis</span>
+        <label for="add-axis" class="block pt-2 text-sm">
+          <span class="sr-only">Add an axis</span>
           <select
             id="add-axis"
             name="axis"
             class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
           >
-            <option value="">choose…</option>
+            <option value="">Axes</option>
             {available.map((axis) => (
               <option value={axis.value}>
                 {axis.value} ({axis.n})
@@ -534,33 +669,74 @@ const AxisPicker = ({ tab, filters, facets }) => {
           </select>
         </label>
       )}
-    </fieldset>
+      {opened && (
+        <input type="hidden" name="open" value="axes" data-filter-open="" />
+      )}
+      </fieldset>
+    </details>
   );
 };
 
 /** The filter rail: a labelled sheet on narrow screens, a column on wide. */
 const FilterRail = ({ tab, filters, facets }) => (
-  <details class="filter-sheet card mb-4 p-5 lg:mb-0 lg:self-start" open>
+  <div data-filter-column="" class="mb-4 lg:mb-0">
+    <button
+      type="button"
+      data-bulk-command=""
+      class="btn mb-3 w-full"
+      hidden
+    >
+      Get download command (<span data-selection-count="">0</span>)
+    </button>
+  <details class="filter-sheet card p-5" open>
     <summary class="label-caps cursor-pointer">Filters</summary>
     <form
       id="filters"
       method="get"
-      action={`${BASE}/${tab.id}`}
-      hx-get={`${BASE}/${tab.id}`}
+      action={`${BASE}/search`}
+      hx-get={`${BASE}/search`}
       hx-trigger="change, submit"
       class="mt-4 flex flex-col divide-y divide-line"
     >
-      <label for="q" class="block pb-4 text-sm">
-        <span class="label-caps mb-1 block">Search</span>
-        <input
-          type="search"
-          id="q"
-          name="q"
-          value={filters.q}
-          placeholder="name or description"
-          class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
-        />
-      </label>
+      <div class="pb-4">
+        <label for="q" class="block text-sm">
+          <span class="label-caps mb-1 block">Search</span>
+          <input
+            type="search"
+            id="q"
+            name="q"
+            value={filters.q}
+            placeholder="name or description"
+            class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
+          />
+        </label>
+        <button type="submit" class="btn mt-2 w-full">
+          Search
+        </button>
+      </div>
+
+      {filters.type.length > 0 && (
+        <input type="hidden" name="type" value={filters.type[0]} />
+      )}
+      {filters.sort !== "" && (
+        <>
+          <input type="hidden" name="sort" value={filters.sort} />
+          <input type="hidden" name="direction" value={filters.direction} />
+        </>
+      )}
+
+      <TypeFacet filters={filters} values={facets.type} />
+      <Facet
+        tab={tab}
+        filters={filters}
+        legend="File size"
+        name="size"
+        values={facets.size}
+        active={filters.size}
+        label={(value) =>
+          SIZE_BUCKETS.find((bucket) => bucket.value === value)?.label ?? value
+        }
+      />
 
       {tab.id === "grids" && (
         <Facet
@@ -617,30 +793,13 @@ const FilterRail = ({ tab, filters, facets }) => (
           label={(value) => ({ psf: "PSFs", noise: "noise maps", depth: "depths" })[value]}
         />
       )}
-      {tab.id === "data" && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Type"
-          name="type"
-          values={facets.type}
-          active={filters.type}
-          label={(value) => value.replace(/_/g, " ")}
-        />
-      )}
       {(tab.id === "grids" || tab.id === "dust") && (
         <AxisPicker tab={tab} filters={filters} facets={facets} />
       )}
 
-      {/* The rail works as a plain form when JavaScript does not run, so it
-          keeps a submit button; htmx makes it redundant, not unnecessary. */}
-      <div class="pt-4">
-        <button type="submit" class="btn w-full">
-          Apply filters
-        </button>
-      </div>
     </form>
   </details>
+  </div>
 );
 
 /**
@@ -651,6 +810,9 @@ const FilterRail = ({ tab, filters, facets }) => (
  * @returns {string} The label to show on the chip.
  */
 function chipLabel(key, value) {
+  if (key === "size") {
+    return SIZE_BUCKETS.find((bucket) => bucket.value === value)?.label ?? value;
+  }
   if (key === "model") {
     return modelLabel(value);
   }
@@ -666,8 +828,8 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
   const chip = (label, changes) =>
     chips.push(
       <a
-        href={`${BASE}/${tab.id}${toQuery(filters, changes)}`}
-        hx-get={`${BASE}/${tab.id}${toQuery(filters, changes)}`}
+        href={searchUrl(filters, changes)}
+        hx-get={searchUrl(filters, changes)}
         class="pill text-muted no-underline normal-case hover:border-line-hover hover:text-text"
       >
         {label} <span aria-hidden="true">×</span>
@@ -684,11 +846,23 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
     "emission",
     "content",
     "type",
+    "size",
     "capability",
   ]) {
     for (const value of filters[key]) {
       chip(chipLabel(key, value), {
-        [key]: filters[key].filter((other) => other !== value),
+        ...(key === "type"
+          ? {
+              type: [],
+              kind: [],
+              model: [],
+              emission: [],
+              content: [],
+              capability: [],
+              axes: [],
+              more: [],
+            }
+          : { [key]: filters[key].filter((other) => other !== value) }),
       });
     }
   }
@@ -706,7 +880,7 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
       </p>
       {chips}
       {chips.length > 0 && (
-        <a href={`${BASE}/${tab.id}`} hx-get={`${BASE}/${tab.id}`} class="text-sm">
+        <a href={`${BASE}/search`} hx-get={`${BASE}/search`} class="text-sm">
           clear all
         </a>
       )}
@@ -719,14 +893,14 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
 
 /** A dataset name, linking to its page. */
 const Name = ({ row }) => (
-  <div class="flex min-w-[18rem] flex-wrap items-center gap-x-2 gap-y-1">
+  <div class="min-w-[12rem]">
     <a
       href={`${BASE}/datasets/${encodeURIComponent(row.name)}`}
-      class="break-all no-underline hover:underline"
+      class="block max-w-[12rem] truncate no-underline hover:underline"
+      title={row.name}
     >
       {row.name}
     </a>
-    <Badges row={row} />
   </div>
 );
 
@@ -749,6 +923,8 @@ function axisColumns(filters, already) {
       label: axis.name,
       cell: (row, axes) => range(axes?.[axis.name]),
       numeric: true,
+      sort: `axis.${axis.name}`,
+      present: (row, axes) => axes?.[axis.name] !== undefined,
     }));
 }
 
@@ -759,52 +935,116 @@ function axisColumns(filters, already) {
  * is one rule and less code than a column picker: someone who filters on
  * spins wants to see the spins.
  */
-function columnsFor(tab, filters) {
+function columnsFor(tab, filters, rows, axesByRelease) {
+  const populated = (columns) =>
+    columns.filter(
+      (column) =>
+        column !== null &&
+        (column.present === undefined ||
+          rows.some((row) =>
+            column.present(row, axesByRelease.get(row.release_id)),
+          )),
+    );
   const wavelengths = {
     label: "wavelengths",
+    sort: "wavelengths",
     cell: (row) =>
       row.wavelength_min === null
         ? "—"
         : `${num(row.wavelength_min)}–${num(row.wavelength_max)} ${
             row.wavelength_units ?? ""
           }`,
+    present: (row) => row.wavelength_min !== null,
   };
-  const contents = {
-    label: "contents",
-    cell: (row) =>
-      [row.has_spectra === 1 ? "spectra" : null, row.has_lines === 1 ? "lines" : null]
-        .filter((part) => part !== null)
-        .join(", ") || "ionising only",
+  const fileSize = {
+    label: "size (MB)",
+    cell: (row) => `${(row.size_bytes / 1e6).toFixed(row.size_bytes < 1e7 ? 1 : 0)} MB`,
+    numeric: true,
+    sort: "size",
   };
-  const fileSize = { label: "size", cell: (row) => size(row.size_bytes), numeric: true };
+  const tags = rows.some(
+    (row) =>
+      row.known_bug === 1 ||
+      row.is_recommended === 1 ||
+      row.is_test === 1 ||
+      row.is_ci === 1,
+  )
+    ? {
+        label: "tags",
+        cell: (row) => (
+          <div class="flex flex-wrap gap-1">
+            <Badges row={row} />
+          </div>
+        ),
+        sort: "tags",
+      }
+    : null;
+  const photoionised = {
+    label: "reprocessed",
+    sort: "reprocessed",
+    cell: (row) => (
+      <Flag yes={row.emission_type === "photoionised"} label="Reprocessed" />
+    ),
+    present: (row) => row.emission_type !== null,
+  };
 
   if (tab.id === "grids") {
-    return [
-      { label: "name", cell: (row) => <Name row={row} /> },
-      { label: "model", cell: (row) => modelLabel(row.model_name) },
-      { label: "emission", cell: (row) => (row.emission_type ?? "—").replace(/_/g, " ") },
-      { label: "ages", cell: (row, axes) => range(axes?.ages), numeric: true },
-      { label: "metallicities", cell: (row, axes) => range(axes?.metallicities), numeric: true },
-      wavelengths,
-      contents,
-      ...axisColumns(filters, ["ages", "metallicities"]),
+    return populated([
+      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      {
+        label: "model",
+        cell: (row) => modelLabel(row.model_name),
+        sort: "model",
+        present: (row) => row.model_name !== null,
+      },
       fileSize,
-    ];
+      photoionised,
+      {
+        label: "ages",
+        cell: (row, axes) => range(axes?.ages),
+        numeric: true,
+        sort: "axis.ages",
+        present: (row, axes) => axes?.ages !== undefined,
+      },
+      {
+        label: "metallicities",
+        cell: (row, axes) => range(axes?.metallicities),
+        numeric: true,
+        sort: "axis.metallicities",
+        present: (row, axes) => axes?.metallicities !== undefined,
+      },
+      wavelengths,
+      ...axisColumns(filters, ["ages", "metallicities"]),
+      tags,
+    ]);
   }
 
   if (tab.id === "dust") {
-    return [
-      { label: "name", cell: (row) => <Name row={row} /> },
-      { label: "kind", cell: (row) => (row.emission_type ?? "—").replace(/_/g, " ") },
-      { label: "model", cell: (row) => modelLabel(row.model_name) },
+    return populated([
+      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      {
+        label: "kind",
+        cell: (row) => (row.emission_type ?? "—").replace(/_/g, " "),
+        sort: "emission",
+        present: (row) => row.emission_type !== null,
+      },
+      fileSize,
+      {
+        label: "model",
+        cell: (row) => modelLabel(row.model_name),
+        sort: "model",
+        present: (row) => row.model_name !== null,
+      },
       {
         label: "axes",
         cell: (row, axes) => Object.keys(axes ?? {}).join(", ") || "—",
+        sort: "axes",
+        present: (row, axes) => Object.keys(axes ?? {}).length > 0,
       },
       wavelengths,
       ...axisColumns(filters, []),
-      fileSize,
-    ];
+      tags,
+    ]);
   }
 
   if (tab.id === "instruments") {
@@ -818,56 +1058,75 @@ function columnsFor(tab, filters) {
         return 0;
       }
     };
-    return [
-      { label: "name", cell: (row) => <Name row={row} /> },
-      { label: "type", cell: (row) => (row.instrument_type ?? "—").replace(/_/g, " ") },
-      { label: "filters", cell: (row) => count(row.filter_codes_json), numeric: true },
+    return populated([
+      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      {
+        label: "type",
+        cell: (row) => (row.instrument_type ?? "—").replace(/_/g, " "),
+        sort: "instrument_type",
+        present: (row) => row.instrument_type !== null,
+      },
+      fileSize,
+      {
+        label: "filters",
+        cell: (row) => count(row.filter_codes_json),
+        numeric: true,
+        sort: "filters",
+        present: (row) => count(row.filter_codes_json) > 0,
+      },
       {
         label: "resolving power",
         cell: (row) => num(row.resolving_power),
         numeric: true,
+        sort: "resolving_power",
+        present: (row) => row.resolving_power !== null,
       },
-      { label: "PSF", cell: (row) => (row.psfs_json === null ? "—" : "yes") },
-      { label: "noise", cell: (row) => (row.noise_maps_json === null ? "—" : "yes") },
-      { label: "depth", cell: (row) => (row.depth_json === null ? "—" : "yes") },
-      fileSize,
-    ];
+      {
+        label: "PSF",
+        cell: (row) => <Flag yes={row.psfs_json !== null} label="PSF" />,
+        sort: "psf",
+        present: (row) => row.psfs_json !== null,
+      },
+      {
+        label: "noise",
+        cell: (row) => <Flag yes={row.noise_maps_json !== null} label="Noise" />,
+        sort: "noise",
+        present: (row) => row.noise_maps_json !== null,
+      },
+      {
+        label: "depth",
+        cell: (row) => <Flag yes={row.depth_json !== null} label="Depth" />,
+        sort: "depth",
+        present: (row) => row.depth_json !== null,
+      },
+      tags,
+    ]);
   }
 
-  return [
-    { label: "name", cell: (row) => <Name row={row} /> },
-    { label: "type", cell: (row) => row.data_type.replace(/_/g, " ") },
-    // The name of a generation input or a cache says almost nothing, and
-    // these are the one tab whose rows have no model, axes or filters to
-    // describe them. Every dataset here has a description, and it is the
-    // only thing that distinguishes one row from the next: all 49 generation
-    // inputs are Maraston SEDs, which the descriptions say and the names do
-    // not.
+  return populated([
+    { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
     {
-      label: "what it is",
-      cell: (row) => (
-        <span
-          class="line-clamp-2 block max-w-[34rem] text-muted"
-          title={row.description ?? ""}
-        >
-          {row.description ?? "—"}
-        </span>
-      ),
+      label: "type",
+      cell: (row) => row.data_type.replace(/_/g, " "),
+      sort: "type",
     },
     fileSize,
+    { label: "file", cell: (row) => row.filename, sort: "file" },
     {
       // The plan calls this column "version", which is what an id and a
       // publication date amount to for someone choosing a file.
       label: "version",
       cell: (row) => `${row.release_id} · ${date(row.published_at)}`,
       numeric: true,
+      sort: "version",
     },
-  ];
+    tags,
+  ]);
 }
 
 /** The results table, scrolling inside its own container. */
 const Results = ({ tab, filters, rows, axes }) => {
-  const columns = columnsFor(tab, filters);
+  const columns = columnsFor(tab, filters, rows, axes);
 
   // Horizontal scrolling is contained whatever the screen, so the page never
   // scrolls sideways. On a wide screen the rows scroll inside the card too,
@@ -875,33 +1134,68 @@ const Results = ({ tab, filters, rows, axes }) => {
   // narrow one the page scrolls normally rather than trapping a small
   // viewport inside a smaller box.
   return (
-    <div class="results card overflow-x-auto lg:max-h-[calc(100vh-13rem)] lg:overflow-auto">
-      <table class="w-full border-collapse text-sm">
+    <div id="catalogue-results" class="results card min-w-0 overflow-auto">
+      <table class="w-max border-collapse text-sm">
         <thead>
           <tr class="text-left">
-            {columns.map((column) => (
+            <th scope="col" class="border-b border-line px-4 py-3">
+              <input
+                type="checkbox"
+                data-select-all=""
+                aria-label="Select all visible datasets"
+              />
+            </th>
+            {columns.map((column) => {
+              const active = filters.sort === column.sort;
+              const direction = active && filters.direction === "asc" ? "desc" : "asc";
+              const href = searchUrl(filters, {
+                sort: column.sort,
+                direction,
+              });
+              return (
               <th
                 scope="col"
+                aria-sort={active ? `${filters.direction}ending` : "none"}
                 class={`label-caps border-b border-line px-4 py-3 ${
                   column.numeric ? "text-right" : ""
                 }`}
               >
-                {column.label}
+                <a
+                  href={href}
+                  hx-get={href}
+                  class="whitespace-nowrap text-inherit no-underline hover:text-text"
+                >
+                  {column.label}
+                  {active && (
+                    <span aria-hidden="true">
+                      {filters.direction === "asc" ? " ↑" : " ↓"}
+                    </span>
+                  )}
+                </a>
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colspan={columns.length} class="px-4 py-8 text-center text-muted">
+              <td colspan={columns.length + 1} class="px-4 py-8 text-center text-muted">
                 Nothing matches these filters. Loosen one, or{" "}
-                <a href={`${BASE}/${tab.id}`}>clear them all</a>.
+                <a href={`${BASE}/search`}>clear them all</a>.
               </td>
             </tr>
           )}
           {rows.map((row) => (
             <tr class="border-b border-dim transition-colors last:border-0">
+              <td class="px-4 py-2.5 align-baseline">
+                <input
+                  type="checkbox"
+                  value={row.name}
+                  data-dataset-select=""
+                  aria-label={`Select ${row.name}`}
+                />
+              </td>
               {columns.map((column) => (
                 <td
                   class={`px-4 py-2.5 align-baseline ${
@@ -934,12 +1228,33 @@ export const Panel = ({ tab, filters, result, noun }) => (
     hx-swap="outerHTML"
     hx-push-url="true"
     hx-indicator="#busy"
-    class="grid items-start gap-6 lg:grid-cols-[17rem_1fr]"
+    class="min-w-0"
   >
-    <FilterRail tab={tab} filters={filters} facets={result.facets} />
-    <section aria-label={`${noun} results`}>
-      <ActiveFilters tab={tab} filters={filters} total={result.total} noun={noun} />
+    <ActiveFilters tab={tab} filters={filters} total={result.total} noun={noun} />
+    <div
+      id="catalogue-grid"
+      class="grid min-w-0 items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]"
+    >
+      <FilterRail tab={tab} filters={filters} facets={result.facets} />
+      <section class="min-w-0" aria-label={`${noun} results`}>
       <Results tab={tab} filters={filters} rows={result.rows} axes={result.axes} />
-    </section>
+      </section>
+    </div>
+    <dialog
+      id="bulk-command"
+      class="card m-auto w-[min(42rem,calc(100%-2rem))] bg-surface p-6 text-text backdrop:bg-bg/80"
+    >
+      <form method="dialog" class="flex items-center gap-4">
+        <h2 class="flex-1 text-lg">Download selected datasets</h2>
+        <button class="btn-quiet px-3 py-1 text-xs">Close</button>
+      </form>
+      <p class="mt-3 text-sm text-muted">
+        Run this command to download the selected datasets.
+      </p>
+      <pre class="mt-4 max-h-80 overflow-auto rounded-lg border border-line bg-bg p-4 text-xs"><code data-bulk-command-text=""></code></pre>
+      <button type="button" data-copy-bulk-command="" class="btn mt-4 text-xs">
+        Copy commands
+      </button>
+    </dialog>
   </div>
 );

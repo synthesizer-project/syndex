@@ -25,7 +25,6 @@ const TAB_BLURBS = {
   grids: "Stellar and AGN, incident and photoionised",
   dust: "Attenuation curves and dust emission",
   instruments: "Filters, PSFs, noise and depths",
-  data: "Snapshots, generation inputs, caches",
 };
 
 /** Data types a submission may claim, as the catalogue spells them. */
@@ -90,34 +89,47 @@ function decode(text, fallback = null) {
 /**
  * The landing page.
  *
- * The org site's shape: one screen, centred, four signposts and nothing
+ * The org site's shape: one screen, centred, three signposts and nothing
  * else. Someone arriving from a paper needs orientation, and someone who
- * knows what they want should be one keystroke from the search, so the only
- * things here are the name, what it is, that search, the four places to go,
- * and one line saying how to fetch anything once found.
+ * knows what they want should be one keystroke from the search.
  */
 export const Landing = ({ counts, datasets, bytes }) => (
-  <Layout title="Syndex" counts={counts} nav={false} bare active={null}>
+  <Layout
+    title="Syndex"
+    counts={counts}
+    nav={false}
+    bare
+    active={null}
+    footer={
+      <>
+        {datasets} datasets · {size(bytes)}
+      </>
+    }
+  >
     <div class="rise text-center">
       <h1 class="mx-auto whitespace-nowrap text-[clamp(1rem,4.8vw,2.6rem)] leading-[1.25]">
         The Synthesizer Database
       </h1>
+      <p class="mx-auto mt-4 max-w-3xl text-sm leading-[1.7] text-muted sm:text-base">
+        An index of SPS and AGN grids, dust emission and attenuation models,
+        and instruments for the Synthesizer ecosystem.
+      </p>
 
       <form
         method="get"
-        action={`${BASE}/grids`}
+        action={`${BASE}/search`}
         role="search"
         class="mx-auto mt-8 flex max-w-md items-center gap-2"
       >
         <label for="landing-q" class="sr-only">
-          Search the grids
+          Search the catalogue
         </label>
         <input
           type="search"
           id="landing-q"
           name="q"
-          placeholder="bpass, fsps, qsosed…"
-          class="min-w-0 flex-1 rounded-full border border-muted bg-surface px-4 py-2 text-center text-sm placeholder:text-muted"
+          placeholder="name, description, type or filename…"
+          class="min-w-0 flex-1 rounded-full border border-muted bg-surface px-4 py-2 text-left text-sm placeholder:text-muted focus:placeholder:text-transparent"
         />
         <button type="submit" class="btn text-sm">
           Search
@@ -127,11 +139,11 @@ export const Landing = ({ counts, datasets, bytes }) => (
 
     <nav
       aria-label="Browse by data type"
-      class="rise mt-14 grid gap-4 [animation-delay:0.18s] sm:grid-cols-2 lg:grid-cols-4"
+      class="rise mt-14 grid gap-4 [animation-delay:0.18s] sm:grid-cols-3"
     >
-      {TABS.map((tab) => (
+      {TABS.filter((tab) => tab.types !== null).map((tab) => (
         <a
-          href={`${BASE}/${tab.id}`}
+          href={`${BASE}/search?type=${tab.types[0]}`}
           class="card card-link flex flex-col items-center px-5 pt-7 pb-6 text-center text-text no-underline"
         >
           <span
@@ -150,16 +162,17 @@ export const Landing = ({ counts, datasets, bytes }) => (
       ))}
     </nav>
 
-    <p class="rise mt-12 text-center text-xs leading-[1.9] text-muted [animation-delay:0.36s]">
-      {datasets} datasets · {size(bytes)} · fetch any of them with{" "}
-      <code class="text-text">synthesizer-download --dataset NAME</code>
-    </p>
   </Layout>
 );
 
 /** One tab: the shell around the rail and the table. */
-export const Browse = ({ tab, counts, children }) => (
-  <Layout title={tab.label} counts={counts} active={tab.id}>
+export const Browse = ({ tab, counts, filters, children }) => (
+  <Layout
+    title={tab.label}
+    counts={counts}
+    active={tab.id === "search" && filters.type.length > 0 ? null : tab.id}
+    filters={filters}
+  >
     <h1 class="sr-only">{tab.label}</h1>
     {children}
   </Layout>
@@ -250,12 +263,24 @@ const Releases = ({ dataset }) => (
   </div>
 );
 
+/**
+ * Shorten a BibTeX author list the way a reference list would.
+ *
+ * @param {string} authors Author field as stored, "Surname, A. and ...".
+ * @returns {string} First author, with "et al." when there are others.
+ */
+const firstAuthor = (authors) => {
+  const [first] = authors.split(" and ");
+  const surname = first.split(",")[0].trim();
+  return authors.includes(" and ") ? `${surname} et al.` : surname;
+};
+
 /** One dataset, with everything the catalogue holds about it. */
 export const Dataset = ({ dataset, counts }) => {
   const grid = dataset.grid;
   const instrument = dataset.instrument;
   const cloudy = decode(grid?.photoionisation_parameters_json, {});
-  const citations = decode(dataset.citations_json, []);
+  const citations = dataset.citations ?? [];
   const metadata = decode(dataset.metadata_json, {});
   const provenance = decode(dataset.provenance_json, {});
   const spectra = decode(grid?.available_spectra_json, []);
@@ -265,276 +290,325 @@ export const Dataset = ({ dataset, counts }) => {
     TABS.find((candidate) => candidate.types === null);
 
   return (
-    <Layout title={dataset.name} counts={counts} active={tab.id}>
+    <Layout
+      title={dataset.name}
+      counts={counts}
+      active={tab.id === "search" ? null : tab.id}
+    >
       <div class="mx-auto max-w-5xl">
-      <p class="text-sm">
-        <a href={`${BASE}/${tab.id}`} class="text-muted no-underline hover:text-text">
-          <span aria-hidden="true">&larr;</span> {tab.label}
-        </a>
-      </p>
-      <h1 class="mt-3 text-3xl leading-tight sm:text-4xl">
-        {dataset.display_name}
-      </h1>
-      <p class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span class="font-mono text-sm break-all text-muted">
-          {dataset.name}
-        </span>
-        <Badges row={dataset} />
-      </p>
-      {dataset.description !== null && (
-        <p class="mt-4 max-w-3xl leading-[1.65] text-muted">
-          {dataset.description}
+        <p class="text-sm">
+          <a
+            href={`${BASE}/search?type=${encodeURIComponent(dataset.data_type)}`}
+            class="text-muted no-underline hover:text-text"
+          >
+            <span aria-hidden="true">&larr;</span>{" "}
+            {tab.id === "search"
+              ? dataset.data_type.replace(/_/g, " ")
+              : tab.label}
+          </a>
         </p>
-      )}
-
-      {dataset.known_bug === 1 && (
-        <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
-          <strong class="text-accent-light">Known bug in this release.</strong>{" "}
-          {dataset.known_bug_description}
+        <h1 class="mt-3 text-3xl leading-tight sm:text-4xl">
+          {dataset.display_name}
+        </h1>
+        <p class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span class="font-mono text-sm break-all text-muted">
+            {dataset.name}
+          </span>
+          <Badges row={dataset} />
         </p>
-      )}
-
-      <div class="mt-6">
-
-      {dataset.release_id === null ? (
-        <Section title="Not yet published">
-          <p class="text-sm text-muted">
-            This dataset has no current release, so there is nothing to
-            download yet.
+        {dataset.description !== null && (
+          <p class="mt-4 max-w-3xl leading-[1.65] text-muted">
+            {dataset.description}
           </p>
-        </Section>
-      ) : (
-        <Section title="Get this dataset">
-          <Command>synthesizer-download --dataset {dataset.name}</Command>
-          <p class="mt-2 text-sm text-muted">
-            Verifies the download against the digest below. To pin this exact
-            release rather than following updates, add{" "}
-            <code>--release {dataset.release_id}</code>.
+        )}
+
+        {dataset.known_bug === 1 && (
+          <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
+            <strong class="text-accent-light">Known bug in this release.</strong>{" "}
+            {dataset.known_bug_description}
           </p>
-          <div class="mt-3">
-            <Fields
-              entries={[
-                ["filename", <span class="font-mono">{dataset.filename}</span>],
-                ["format", dataset.format],
-                ["size", size(dataset.size_bytes)],
-                [
-                  "sha256",
-                  <span class="font-mono text-xs break-all">
-                    {dataset.sha256}
-                  </span>,
-                ],
-                ["published", date(dataset.published_at)],
-                ["licence", dataset.licence],
-                [
-                  "synthesizer",
-                  dataset.synthesizer_min_version === null
-                    ? null
-                    : `${dataset.synthesizer_min_version} or newer${
-                        dataset.synthesizer_max_version === null
+        )}
+
+        <div class="mt-6">
+
+          {dataset.release_id === null ? (
+            <Section title="Not yet published">
+              <p class="text-sm text-muted">
+                This dataset has no current release, so there is nothing to
+                download yet.
+              </p>
+            </Section>
+          ) : (
+            <Section title="Get this dataset">
+              <Command>synthesizer-download --dataset {dataset.name}</Command>
+              <p class="mt-2 text-sm text-muted">
+                Verifies the download against the digest below. To pin this exact
+                release rather than following updates, add{" "}
+                <code>--release {dataset.release_id}</code>.
+              </p>
+              <div class="mt-3">
+                <Fields
+                  entries={[
+                    ["filename", <span class="font-mono">{dataset.filename}</span>],
+                    ["format", dataset.format],
+                    ["size", size(dataset.size_bytes)],
+                    [
+                      "sha256",
+                      <span class="font-mono text-xs break-all">
+                        {dataset.sha256}
+                      </span>,
+                    ],
+                    ["published", date(dataset.published_at)],
+                    ["licence", dataset.licence],
+                    [
+                      "synthesizer",
+                      dataset.synthesizer_min_version === null
+                        ? null
+                        : `${dataset.synthesizer_min_version} or newer${dataset.synthesizer_max_version === null
                           ? ""
                           : `, up to ${dataset.synthesizer_max_version}`
-                      }`,
-                ],
-                [
-                  "direct download",
-                  <a
-                    href={`${DATA_API}/v1/releases/${dataset.release_id}/download`}
-                  >
-                    {dataset.filename}
-                  </a>,
-                ],
-              ]}
-            />
-          </div>
-        </Section>
-      )}
+                        }`,
+                    ],
+                    [
+                      "direct download",
+                      <a
+                        href={`${DATA_API}/v1/releases/${dataset.release_id}/download`}
+                      >
+                        {dataset.filename}
+                      </a>,
+                    ],
+                  ]}
+                />
+              </div>
+            </Section>
+          )}
 
-      {grid !== null && (
-        <Section title="Grid">
-          <Fields
-            entries={[
-              ["kind", grid.grid_type],
-              ["emission", grid.emission_type?.replace(/_/g, " ")],
-              [
-                "model",
-                grid.model_name === null
-                  ? null
-                  : `${grid.model_name}${
-                      grid.model_version === null
+          {grid !== null && (
+            <Section title="Grid">
+              <Fields
+                entries={[
+                  ["kind", grid.grid_type],
+                  ["emission", grid.emission_type?.replace(/_/g, " ")],
+                  [
+                    "model",
+                    grid.model_name === null
+                      ? null
+                      : `${grid.model_name}${grid.model_version === null
                         ? ""
                         : ` ${grid.model_version}`
-                    }`,
-              ],
-              [
-                "wavelengths",
-                grid.wavelength_min === null
-                  ? null
-                  : `${num(grid.wavelength_min)}–${num(grid.wavelength_max)} ${
-                      grid.wavelength_units ?? ""
-                    }`,
-              ],
-              [
-                "photoionisation",
-                grid.photoionisation_code === null
-                  ? null
-                  : `${grid.photoionisation_code} ${
-                      grid.photoionisation_code_version ?? ""
-                    }`,
-              ],
-              [
-                "incident grid",
-                dataset.incident === null ? null : (
-                  <a
-                    href={`${BASE}/datasets/${encodeURIComponent(
-                      dataset.incident.name,
-                    )}`}
-                  >
-                    {dataset.incident.name}
-                  </a>
-                ),
-              ],
-              [
-                "spectra",
-                spectra.length === 0 ? null : spectra.join(", "),
-              ],
-              [
-                "lines",
-                lines.length === 0 ? null : `${lines.length} lines`,
-              ],
-            ]}
-          />
-          {Object.keys(decode(grid.model_parameters_json, {})).length > 0 && (
-            <>
-              <h3 class="mt-4 mb-2 text-xs tracking-widest text-muted uppercase">
-                Model parameters
-              </h3>
-              <Fields
-                entries={Object.entries(
-                  decode(grid.model_parameters_json, {}),
-                ).map(([key, value]) => [key, String(value)])}
+                      }`,
+                  ],
+                  [
+                    "wavelengths",
+                    grid.wavelength_min === null
+                      ? null
+                      : `${num(grid.wavelength_min)}–${num(grid.wavelength_max)} ${grid.wavelength_units ?? ""
+                      }`,
+                  ],
+                  [
+                    "photoionisation",
+                    grid.photoionisation_code === null
+                      ? null
+                      : `${grid.photoionisation_code} ${grid.photoionisation_code_version ?? ""
+                      }`,
+                  ],
+                  [
+                    "incident grid",
+                    dataset.incident === null ? null : (
+                      <a
+                        href={`${BASE}/datasets/${encodeURIComponent(
+                          dataset.incident.name,
+                        )}`}
+                      >
+                        {dataset.incident.name}
+                      </a>
+                    ),
+                  ],
+                  [
+                    "spectra",
+                    spectra.length === 0 ? null : spectra.join(", "),
+                  ],
+                  [
+                    "lines",
+                    lines.length === 0 ? null : `${lines.length} lines`,
+                  ],
+                ]}
               />
-            </>
+              {Object.keys(decode(grid.model_parameters_json, {})).length > 0 && (
+                <>
+                  <h3 class="mt-4 mb-2 text-xs tracking-widest text-muted uppercase">
+                    Model parameters
+                  </h3>
+                  <Fields
+                    entries={Object.entries(
+                      decode(grid.model_parameters_json, {}),
+                    ).map(([key, value]) => [key, String(value)])}
+                  />
+                </>
+              )}
+            </Section>
           )}
-        </Section>
-      )}
 
-      {dataset.axes.length > 0 && (
-        <Section title="Axes">
-          <Axes axes={dataset.axes} />
-        </Section>
-      )}
+          {dataset.axes.length > 0 && (
+            <Section title="Axes">
+              <Axes axes={dataset.axes} />
+            </Section>
+          )}
 
-      {Object.keys(cloudy).length > 0 && (
-        <Section title="Photoionisation parameters">
-          {/* Of 31 Cloudy keys only seven vary across the catalogue, so
+          {Object.keys(cloudy).length > 0 && (
+            <Section title="Photoionisation parameters">
+              {/* Of 31 Cloudy keys only seven vary across the catalogue, so
               these are shown rather than filtered on: a constant value is
               informative here and dead weight in a facet rail. */}
-          <Fields
-            entries={Object.entries(cloudy)
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([key, value]) => [key, String(value)])}
-          />
-        </Section>
-      )}
-
-      {instrument !== null && (
-        <Section title="Instrument">
-          <Fields
-            entries={[
-              ["type", instrument.instrument_type?.replace(/_/g, " ")],
-              ["label", instrument.label],
-              [
-                "filters",
-                decode(instrument.filter_codes_json, []).join(", ") || null,
-              ],
-              [
-                "wavelengths",
-                instrument.wavelength_min === null
-                  ? null
-                  : `${num(instrument.wavelength_min)}–${num(
-                      instrument.wavelength_max,
-                    )} ${instrument.wavelength_units ?? ""}`,
-              ],
-              [
-                "resolution",
-                instrument.resolution === null
-                  ? null
-                  : `${num(instrument.resolution)} ${
-                      instrument.resolution_units ?? ""
-                    }`,
-              ],
-              ["resolving power", num(instrument.resolving_power)],
-              [
-                "depths",
-                instrument.depth_json === null
-                  ? null
-                  : JSON.stringify(decode(instrument.depth_json)),
-              ],
-              [
-                "PSFs",
-                instrument.psfs_json === null
-                  ? null
-                  : JSON.stringify(decode(instrument.psfs_json)),
-              ],
-              [
-                "noise maps",
-                instrument.noise_maps_json === null
-                  ? null
-                  : JSON.stringify(decode(instrument.noise_maps_json)),
-              ],
-              [
-                "capabilities",
-                Object.entries(decode(instrument.capabilities_json, {}))
-                  .filter(([, able]) => able === true)
-                  .map(([name]) => name)
-                  .join(", ") || null,
-              ],
-            ]}
-          />
-        </Section>
-      )}
-
-      {(citations.length > 0 || Object.keys(metadata).length > 0) && (
-        <Section title="Citations and metadata">
-          {citations.length > 0 && (
-            <ul class="mb-3 list-disc pl-5 text-sm">
-              {citations.map((citation) => (
-                <li>{String(citation)}</li>
-              ))}
-            </ul>
+              <Fields
+                entries={Object.entries(cloudy)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, value]) => [key, String(value)])}
+              />
+            </Section>
           )}
-          <Fields
-            entries={Object.entries(metadata).map(([key, value]) => [
-              key,
-              typeof value === "object" ? JSON.stringify(value) : String(value),
-            ])}
-          />
-        </Section>
-      )}
 
-      {dataset.releases.length > 0 && (
-        <Section title="Releases">
-          <p class="mb-3 text-sm text-muted">
-            Older releases stay downloadable forever. A file that turns out to
-            be wrong is corrected by publishing a new release, not by editing
-            the old one, so anything pinned to a flagged release keeps
-            resolving and keeps saying what is wrong with it.
-          </p>
-          <Releases dataset={dataset} />
-        </Section>
-      )}
+          {instrument !== null && (
+            <Section title="Instrument">
+              <Fields
+                entries={[
+                  ["type", instrument.instrument_type?.replace(/_/g, " ")],
+                  ["label", instrument.label],
+                  [
+                    "filters",
+                    decode(instrument.filter_codes_json, []).join(", ") || null,
+                  ],
+                  [
+                    "wavelengths",
+                    instrument.wavelength_min === null
+                      ? null
+                      : `${num(instrument.wavelength_min)}–${num(
+                        instrument.wavelength_max,
+                      )} ${instrument.wavelength_units ?? ""}`,
+                  ],
+                  [
+                    "resolution",
+                    instrument.resolution === null
+                      ? null
+                      : `${num(instrument.resolution)} ${instrument.resolution_units ?? ""
+                      }`,
+                  ],
+                  ["resolving power", num(instrument.resolving_power)],
+                  [
+                    "depths",
+                    instrument.depth_json === null
+                      ? null
+                      : JSON.stringify(decode(instrument.depth_json)),
+                  ],
+                  [
+                    "PSFs",
+                    instrument.psfs_json === null
+                      ? null
+                      : JSON.stringify(decode(instrument.psfs_json)),
+                  ],
+                  [
+                    "noise maps",
+                    instrument.noise_maps_json === null
+                      ? null
+                      : JSON.stringify(decode(instrument.noise_maps_json)),
+                  ],
+                  [
+                    "capabilities",
+                    Object.entries(decode(instrument.capabilities_json, {}))
+                      .filter(([, able]) => able === true)
+                      .map(([name]) => name)
+                      .join(", ") || null,
+                  ],
+                ]}
+              />
+            </Section>
+          )}
 
-      {Object.keys(provenance).length > 0 && (
-        <Section title="Provenance">
-          <Fields
-            entries={Object.entries(provenance).map(([key, value]) => [
-              key,
-              typeof value === "object" ? JSON.stringify(value) : String(value),
-            ])}
-          />
-        </Section>
-      )}
-      </div>
+          {(citations.length > 0 || Object.keys(metadata).length > 0) && (
+            <Section title="Citations and metadata">
+              {citations.length > 0 && (
+                <>
+                  <p class="mb-3 text-sm text-muted">
+                    Cite all of these when using this grid: the model, the paper it
+                    was released in, and the code it was processed through.
+                  </p>
+                  <ul class="mb-3 list-none space-y-2 p-0 text-sm">
+                    {citations.map((citation) => (
+                      <li>
+                        {citation.authors ? (
+                          <span>{firstAuthor(citation.authors)} </span>
+                        ) : null}
+                        {citation.year ? <span>({citation.year}) </span> : null}
+                        {citation.title ? <span>{citation.title}. </span> : null}
+                        {citation.journal ? (
+                          <em class="text-muted">{citation.journal}. </em>
+                        ) : null}
+                        <a
+                          class="text-accent-light"
+                          href={`https://ui.adsabs.harvard.edu/abs/${encodeURIComponent(
+                            citation.bibcode,
+                          )}/abstract`}
+                        >
+                          ADS
+                        </a>
+                        {citation.doi ? (
+                          <>
+                            {" · "}
+                            <a
+                              class="text-accent-light"
+                              href={`https://doi.org/${citation.doi}`}
+                            >
+                              doi
+                            </a>
+                          </>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {dataset.release_id ? (
+                    <p class="mb-3 text-sm">
+                      <a
+                        class="text-accent-light"
+                        href={`${DATA_API}/v1/releases/${dataset.release_id}/citations.bib`}
+                      >
+                        Download all {citations.length} as BibTeX
+                      </a>
+                    </p>
+                  ) : null}
+                </>
+              )}
+              <Fields
+                entries={Object.entries(metadata).map(([key, value]) => [
+                  key,
+                  typeof value === "object" ? JSON.stringify(value) : String(value),
+                ])}
+              />
+            </Section>
+          )}
+
+          {dataset.releases.length > 0 && (
+            <Section title="Releases">
+              <p class="mb-3 text-sm text-muted">
+                Older releases stay downloadable forever. A file that turns out to
+                be wrong is corrected by publishing a new release, not by editing
+                the old one, so anything pinned to a flagged release keeps
+                resolving and keeps saying what is wrong with it.
+              </p>
+              <Releases dataset={dataset} />
+            </Section>
+          )}
+
+          {Object.keys(provenance).length > 0 && (
+            <Section title="Provenance">
+              <Fields
+                entries={Object.entries(provenance).map(([key, value]) => [
+                  key,
+                  typeof value === "object" ? JSON.stringify(value) : String(value),
+                ])}
+              />
+            </Section>
+          )}
+        </div>
       </div>
     </Layout>
   );
@@ -582,7 +656,7 @@ const Field = ({ label, name, value = "", hint = null, ...rest }) => (
  * the bucket, which is the only account of it that cannot be wrong.
  */
 export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
-  <Layout title="Submit a dataset" counts={counts} active={null}>
+  <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
     <h1 class="text-3xl sm:text-4xl">Submit a dataset</h1>
     <p class="mt-3 max-w-2xl text-muted">
       Describe the dataset, then send the file. A maintainer reads every
@@ -591,10 +665,16 @@ export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
     </p>
 
     {!open && (
-      <p role="status" class="mt-4 rounded border border-accent-light p-3">
-        Submissions are not open yet: this portal has no submissions bucket
-        configured. Email a maintainer instead.
-      </p>
+      <div
+        role="status"
+        class="card mt-5 max-w-2xl border-accent-light p-5"
+      >
+        <p class="label-caps text-accent-light">Coming soon</p>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          Dataset submission and upload are not open yet. Email a maintainer
+          in the meantime.
+        </p>
+      </div>
     )}
 
     {errors.length > 0 && (
@@ -674,7 +754,13 @@ export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
             value={values.citations}
             rows="3"
             maxlength="4000"
-            hint="One per line."
+            hint={
+              "ADS bibcodes, one per line, such as 2017PASA...34...58E. " +
+              "Include the model paper, the paper this grid was released in, " +
+              "and the photoionisation code if it was processed through one. " +
+              "The reference itself is fetched from ADS, so a bibcode is all " +
+              "that is needed."
+            }
           />
         </div>
         <Field
@@ -741,7 +827,7 @@ export const Upload = ({ counts, submission, credentials }) => {
   const complete = `${BASE}/submit/${submission.upload_token}/complete`;
 
   return (
-    <Layout title="Send the file" counts={counts} active={null}>
+    <Layout title="Send the file" counts={counts} active={null} showSubmit={false}>
       <h1 class="text-3xl sm:text-4xl">
         {uploaded ? "Submission complete" : "Send the file"}
       </h1>

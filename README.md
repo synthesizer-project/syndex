@@ -121,7 +121,7 @@ measurements behind them.
 
 ```bash
 npm install
-npm run dev      # builds the stylesheet, then wrangler dev
+npm run dev      # builds assets, applies local D1 migrations, then starts Wrangler
 npm run deploy   # builds the stylesheet, then wrangler deploy
 ```
 

@@ -461,7 +461,7 @@ const tests = {
       maximum: 1e10 * 1.98841586e30,
     });
 
-    assert.equal(asSolarMasses, "10⁶–10¹⁰ M☉");
+    assert.equal(asSolarMasses, "10^6–10^10 M☉");
     assert.equal(asKilogrammes, asSolarMasses);
   },
 
@@ -791,10 +791,16 @@ const tests = {
             {
               ...GRID_ROW,
               dataset_id: 1,
-              description: "A grid.",
+              description: "A grid.\nWith another line.",
               licence: "CC-BY-4.0",
               metadata_json: "{}",
-              provenance_json: "{}",
+              provenance_json: JSON.stringify({
+                source: "BPASS binary models",
+                hdf5: {
+                  date_created: "2025-09-27",
+                  synthesizer_version: "0.9.7",
+                },
+              }),
               current_release_id: 2,
               filename: "bpass.hdf5",
               sha256: "e47f",
@@ -814,6 +820,51 @@ const tests = {
               journal: "PASA",
             },
           ],
+          grid: [
+            {
+              grid_type: "sps",
+              emission_type: "photoionised",
+              model_name: "BPASS",
+              model_version: "2.2.1",
+              model_parameters_json:
+                '{"alpha":false,"imf_masses":[0.1,100],"sps_version":false}',
+              photoionisation_code: null,
+              photoionisation_code_version: null,
+              photoionisation_parameters_json: JSON.stringify({
+                geometry: "spherical",
+                hydrogen_density: 100,
+                ionisation_parameter: -2,
+                depletion_model: "default",
+                depletion_scale: 1,
+                grains: true,
+                cosmic_rays: true,
+              }),
+              available_spectra_json: "[]",
+              available_lines_json: '["H 1 1215.67A","O 3 5006.84A"]',
+              wavelength_min: null,
+              wavelength_max: null,
+              wavelength_units: null,
+              incident_release_id: null,
+            },
+          ],
+          releases: [
+            {
+              release_id: 2,
+              published_at: "2026-09-04T16:47:01.550420Z",
+              known_bug: 0,
+              known_bug_description: null,
+              size_bytes: 203126664,
+              sha256: "e47f",
+            },
+            {
+              release_id: 1,
+              published_at: "2025-01-02T00:00:00.000000Z",
+              known_bug: 1,
+              known_bug_description: "Superseded metadata.",
+              size_bytes: 200000000,
+              sha256: "abcd",
+            },
+          ],
         },
       }),
     };
@@ -828,12 +879,88 @@ const tests = {
       body,
       /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_2\.png"/,
     );
+    assert.match(body, /A grid\. With another line\./);
+    assert.match(body, /aria-label="Direct download bpass\.hdf5"/);
+    assert.match(body, /<span role="tooltip"[^>]*>Direct download bpass\.hdf5<\/span>/);
+    assert.match(
+      body,
+      new RegExp(
+        `<span role="tooltip"[^>]*>synthesizer-download --dataset ${GRID_ROW.name}<\/span>`,
+      ),
+    );
+    assert.match(body, /<div class="flex items-center justify-between gap-4">/);
+    assert.match(body, /<div class="flex gap-3">/);
+    assert.match(body, /<h1 class="mt-8 text-3xl/);
+    assert.doesNotMatch(body, /Download directly or use the command-line tool|>\|\|<\/span>/);
+    assert.doesNotMatch(body, />Get this dataset<\/h2>/);
     assert.match(body, new RegExp(`synthesizer-download --dataset ${GRID_ROW.name}`));
+    assert.match(
+      body,
+      new RegExp(`data-copy-command="synthesizer-download --dataset ${GRID_ROW.name}"`),
+    );
+    assert.doesNotMatch(body, /Verifies the download/);
+    assert.match(body, />File<\/h2>/);
+    assert.match(body, /&gt;= 1\.0\.0<\/dd>/);
+    assert.match(body, />SPS model parameters<\/h2>/);
+    assert.match(body, />hydrogen density<\/dt>/);
+    assert.doesNotMatch(body, />hydrogen_density<\/dt>/);
+    assert.match(body, />Available lines \(2\)<\/h2>/);
+    assert.match(body, /H 1 1215\.67 Å/);
+    assert.match(body, />imf masses<\/dt><dd[^>]*>0\.1, 100<\/dd>/);
+    assert.doesNotMatch(body, />alpha<\/dt>|>sps version<\/dt>/);
+    assert.match(body, /10<sup class="text-\[0\.72em\] leading-none">11<\/sup>/);
+    assert.match(
+      body,
+      />axis<\/th><th[^>]*>minimum<\/th><th[^>]*>maximum<\/th><th[^>]*>units<\/th><th[^>]*>points<\/th><th[^>]*>scale<\/th>/,
+    );
+    assert.match(body, />source<\/dt><dd[^>]*>BPASS binary models<\/dd>/);
+    assert.match(body, />HDF5 · date created<\/dt><dd[^>]*>2025-09-27<\/dd>/);
+    assert.match(body, />HDF5 · synthesizer version<\/dt><dd[^>]*>0\.9\.7<\/dd>/);
+    assert.doesNotMatch(body, /&quot;date_created&quot;/);
+    assert.match(body, /<div class="dataset-cards">/);
+    assert.match(body, /<dl class="fields grid grid-cols-\[max-content_1fr\]/);
+    assert.match(body, /<dl class="fields[^>]*many-fields">/);
+    assert.equal(body.match(/many-fields/g)?.length, 1);
+    assert.doesNotMatch(body, /full-card/);
+    const sections = [
+      "File",
+      "Grid",
+      "SPS model parameters",
+      "Axes",
+      "Photoionisation parameters",
+      "Available lines (2)",
+      "Releases",
+      "Citations and metadata",
+      "Provenance",
+    ].map((title) => body.indexOf(`>${title}</h2>`));
+    assert.ok(
+      sections.every((position, index) => index === 0 || position > sections[index - 1]),
+      "dataset sections follow their information hierarchy",
+    );
     // Downloads are absolute: /v1 on this host is the org site, not the API.
     assert.match(
       body,
-      /https:\/\/data\.synthesizer-project\.org\/v1\/releases\/2\/download/,
+      /href="https:\/\/data\.synthesizer-project\.org\/v1\/releases\/2\/download"[^>]*aria-label="Direct download bpass\.hdf5"/,
     );
+    assert.match(
+      body,
+      new RegExp(`data-copy-command="synthesizer-download --dataset ${GRID_ROW.name} --release 2"`),
+    );
+    assert.match(
+      body,
+      new RegExp(`data-copy-command="synthesizer-download --dataset ${GRID_ROW.name} --release 1"`),
+    );
+    assert.match(body, /aria-label="Direct download release 2"/);
+    assert.match(body, /aria-label="Direct download release 1"/);
+    assert.doesNotMatch(body, /synthesizer-download …/);
+    assert.equal(
+      body.match(/<rect x="8" y="8" width="14" height="14" rx="2"><\/rect>/g)
+        ?.length,
+      3,
+    );
+    assert.match(body, />download<\/th>/);
+    assert.doesNotMatch(body, />command<\/th>/);
+    assert.doesNotMatch(body, />sha256<\/th>/);
     // A reference list shows the first author and year, not the full list,
     // and links out to ADS and the doi rather than reprinting a bibcode.
     assert.match(body, /Eldridge et al\./);

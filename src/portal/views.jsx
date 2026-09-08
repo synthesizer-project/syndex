@@ -77,14 +77,25 @@ export function num(value) {
       .toExponential(2)
       .replace(/\.?0+e/, "e")
       .split("e");
-    const superscript = String(Number(exponent)).replace(
-      /[-0-9]/g,
-      (digit) => "⁻⁰¹²³⁴⁵⁶⁷⁸⁹"["-0123456789".indexOf(digit)],
-    );
-    return `${coefficient === "1" ? "" : `${coefficient}×`}10${superscript}`;
+    return `${coefficient === "1" ? "" : `${coefficient}×`}10^${Number(exponent)}`;
   }
   return String(Number(value.toPrecision(4)));
 }
+
+/** Render formatter exponent tokens with proper typographic superscripts. */
+export const Scientific = ({ children }) =>
+  String(children)
+    .split(/(10\^-?\d+)/g)
+    .map((part) => {
+      const exponent = part.match(/^10\^(-?\d+)$/)?.[1];
+      return exponent === undefined ? (
+        part
+      ) : (
+        <>
+          10<sup class="text-[0.72em] leading-none">{exponent}</sup>
+        </>
+      );
+    });
 
 /**
  * Format a file size in decimal units.
@@ -928,7 +939,7 @@ function axisColumns(filters, already) {
     .filter((axis) => !already.includes(axis.name))
     .map((axis) => ({
       label: axis.name,
-      cell: (row, axes) => range(axes?.[axis.name]),
+      cell: (row, axes) => <Scientific>{range(axes?.[axis.name])}</Scientific>,
       numeric: true,
       sort: `axis.${axis.name}`,
       present: (row, axes) => axes?.[axis.name] !== undefined,
@@ -955,12 +966,15 @@ function columnsFor(tab, filters, rows, axesByRelease) {
   const wavelengths = {
     label: "wavelengths",
     sort: "wavelengths",
-    cell: (row) =>
-      row.wavelength_min === null
-        ? "—"
-        : `${num(row.wavelength_min)}–${num(row.wavelength_max)} ${
-            row.wavelength_units ?? ""
-          }`,
+    cell: (row) => (
+      <Scientific>
+        {row.wavelength_min === null
+          ? "—"
+          : `${num(row.wavelength_min)}–${num(row.wavelength_max)} ${
+              row.wavelength_units ?? ""
+            }`}
+      </Scientific>
+    ),
     present: (row) => row.wavelength_min !== null,
   };
   const fileSize = {
@@ -1017,14 +1031,14 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       },
       {
         label: "ages",
-        cell: (row, axes) => range(axes?.ages),
+        cell: (row, axes) => <Scientific>{range(axes?.ages)}</Scientific>,
         numeric: true,
         sort: "axis.ages",
         present: (row, axes) => axes?.ages !== undefined,
       },
       {
         label: "metallicities",
-        cell: (row, axes) => range(axes?.metallicities),
+        cell: (row, axes) => <Scientific>{range(axes?.metallicities)}</Scientific>,
         numeric: true,
         sort: "axis.metallicities",
         present: (row, axes) => axes?.metallicities !== undefined,
@@ -1095,14 +1109,14 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       fileSize,
       {
         label: "filters",
-        cell: (row) => num(count(row.filter_codes_json)),
+        cell: (row) => <Scientific>{num(count(row.filter_codes_json))}</Scientific>,
         numeric: true,
         sort: "filters",
         present: (row) => count(row.filter_codes_json) > 0,
       },
       {
         label: "resolving power",
-        cell: (row) => num(row.resolving_power),
+        cell: (row) => <Scientific>{num(row.resolving_power)}</Scientific>,
         numeric: true,
         sort: "resolving_power",
         present: (row) => row.resolving_power !== null,

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "mkdir -p dist/assets/syndex/static && tailwindcss --input src/portal/app.css --output dist/assets/syndex/static/app.css --minify && cp node_modules/htmx.org/dist/htmx.min.js dist/assets/syndex/static/htmx.min.js && cp src/portal/filters.js src/portal/upload.js src/portal/syndex_logo_2.png dist/assets/syndex/static/",
     "deploy": "npm run build && wrangler deploy",
-    "dev": "npm run build && wrangler dev",
+    "dev": "npm run build && wrangler d1 migrations apply synthesizer-database --local && wrangler dev",
     "test": "node tests/worker_routes.mjs && node tests/portal_routes.mjs"
   },
   "dependencies": {

@@ -15,6 +15,7 @@ import {
   Command,
   DATA_API,
   Layout,
+  Scientific,
   date,
   num,
   size,
@@ -47,7 +48,11 @@ const Fields = ({ entries }) => {
     return null;
   }
   return (
-    <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
+    <dl
+      class={`fields grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm ${
+        rows.length > 6 ? "many-fields" : ""
+      }`}
+    >
       {rows.map(([label, value]) => (
         <>
           <dt class="label-caps pt-0.5">{label}</dt>
@@ -58,12 +63,90 @@ const Fields = ({ entries }) => {
   );
 };
 
+/** Flatten nested metadata into readable definition-list rows. */
+const expandedFields = (value, path = []) =>
+  Object.entries(value).flatMap(([key, child]) => {
+    const next = [...path, key];
+    if (child !== null && typeof child === "object" && !Array.isArray(child)) {
+      return expandedFields(child, next);
+    }
+    const label = next
+      .map((part) => part === "hdf5" ? "HDF5" : part.replace(/_/g, " "))
+      .join(" · ");
+    const display = Array.isArray(child)
+      ? child.join(", ")
+      : typeof child === "boolean"
+        ? child ? "yes" : "no"
+        : typeof child === "number" ? <Scientific>{num(child)}</Scientific> : child;
+    return [[label, display]];
+  });
+
 /** A titled block. */
 const Section = ({ title, children }) => (
   <section class="card mb-5 p-6">
     <h2 class="mb-4 text-xl">{title}</h2>
     {children}
   </section>
+);
+
+/** Standard overlapping-squares control for copying a command. */
+const CopyButton = ({ command, label = "Copy command", large = false }) => (
+  <button
+    type="button"
+    data-copy-command={command}
+    class={`group relative inline-flex shrink-0 cursor-pointer items-center justify-center border border-muted bg-bg text-text transition-colors hover:border-accent-light hover:text-accent-light ${
+      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
+    }`}
+    aria-label={label}
+  >
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      class={large ? "h-5 w-5" : "h-4 w-4"}
+    >
+      <rect x="8" y="8" width="14" height="14" rx="2" />
+      <path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4" />
+    </svg>
+    <span
+      role="tooltip"
+      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 max-w-[min(32rem,calc(100vw-3rem))] rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs whitespace-normal text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+    >
+      {command}
+    </span>
+  </button>
+);
+
+/** Standard download-arrow control. */
+const DownloadButton = ({ href, label, large = false }) => (
+  <a
+    href={href}
+    class={`group relative inline-flex shrink-0 items-center justify-center border border-muted bg-bg text-text no-underline transition-colors hover:border-accent-light hover:text-accent-light ${
+      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
+    }`}
+    aria-label={label}
+  >
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      class={large ? "h-5 w-5" : "h-4 w-4"}
+    >
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+    <span
+      role="tooltip"
+      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-line bg-surface px-3 py-2 text-xs whitespace-normal text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+    >
+      {label}
+    </span>
+  </a>
 );
 
 /**
@@ -191,7 +274,7 @@ const Axes = ({ axes }) => (
     <table class="w-full border-collapse text-sm">
       <thead>
         <tr class="text-left">
-          {["axis", "units", "scale", "points", "minimum", "maximum"].map(
+          {["axis", "minimum", "maximum", "units", "points", "scale"].map(
             (label) => (
               <th
                 scope="col"
@@ -207,15 +290,15 @@ const Axes = ({ axes }) => (
         {axes.map((axis) => (
           <tr class="border-b border-dim last:border-0">
             <td class="px-4 py-2">{axis.name}</td>
+            <td class="px-4 py-2 tabular-nums">
+              <Scientific>{num(axis.minimum)}</Scientific>
+            </td>
+            <td class="px-4 py-2 tabular-nums">
+              <Scientific>{num(axis.maximum)}</Scientific>
+            </td>
             <td class="px-4 py-2 text-muted">{axis.units ?? "—"}</td>
+            <td class="px-4 py-2 tabular-nums">{axis.count}</td>
             <td class="px-4 py-2 text-muted">{axis.scale}</td>
-            <td class="px-4 py-2 text-right tabular-nums">{axis.count}</td>
-            <td class="px-4 py-2 text-right tabular-nums">
-              {num(axis.minimum)}
-            </td>
-            <td class="px-4 py-2 text-right tabular-nums">
-              {num(axis.maximum)}
-            </td>
           </tr>
         ))}
       </tbody>
@@ -232,7 +315,7 @@ const Releases = ({ dataset }) => (
           {/* "ID" rather than "release": the number identifies a release, but
               nobody reading this page thinks in releases, and the column
               beside it is already the publication date. */}
-          {["ID", "published", "size", "sha256", ""].map((label) => (
+          {["ID", "published", "size", "download", ""].map((label) => (
             <th
               scope="col"
               class="label-caps border-b border-line px-4 py-2.5"
@@ -254,8 +337,17 @@ const Releases = ({ dataset }) => (
             <td class="px-4 py-2 text-right tabular-nums">
               {size(release.size_bytes)}
             </td>
-            <td class="px-4 py-2 font-mono text-xs break-all text-muted">
-              {release.sha256}
+            <td class="px-4 py-2">
+              <div class="flex items-center gap-2 whitespace-nowrap">
+                <DownloadButton
+                  href={`${DATA_API}/v1/releases/${release.release_id}/download`}
+                  label={`Direct download release ${release.release_id}`}
+                />
+                <CopyButton
+                  command={`synthesizer-download --dataset ${dataset.name} --release ${release.release_id}`}
+                  label={`Copy download command for release ${release.release_id}`}
+                />
+              </div>
             </td>
             <td class="px-4 py-2 whitespace-nowrap">
               {release.release_id === dataset.current_release_id && (
@@ -287,11 +379,35 @@ export const Dataset = ({ dataset, counts }) => {
   const grid = dataset.grid;
   const instrument = dataset.instrument;
   const cloudy = decode(grid?.photoionisation_parameters_json, {});
+  const modelParameters = Object.entries(
+    decode(grid?.model_parameters_json, {}),
+  ).filter(
+    ([, value]) =>
+      value !== false && value !== "" && value !== null && value !== undefined,
+  );
+  const modelParametersTitle =
+    grid?.grid_type === "sps"
+      ? "SPS model parameters"
+      : grid?.grid_type === "agn"
+        ? "AGN model parameters"
+        : "Model parameters";
   const citations = dataset.citations ?? [];
   const metadata = decode(dataset.metadata_json, {});
   const provenance = decode(dataset.provenance_json, {});
   const spectra = decode(grid?.available_spectra_json, []);
   const lines = decode(grid?.available_lines_json, []);
+  const description = dataset.description?.replace(/\s+/g, " ").trim() ?? "";
+  const compatibility = [
+    dataset.synthesizer_min_version === null
+      ? null
+      : `>= ${dataset.synthesizer_min_version}`,
+    dataset.synthesizer_max_version === null
+      ? null
+      : `<= ${dataset.synthesizer_max_version}`,
+  ]
+    .filter(Boolean)
+    .join(", ") || "Any version";
+  const downloadCommand = `synthesizer-download --dataset ${dataset.name}`;
   const tab =
     TABS.find((candidate) => candidate.types?.includes(dataset.data_type)) ??
     TABS.find((candidate) => candidate.types === null);
@@ -303,18 +419,36 @@ export const Dataset = ({ dataset, counts }) => {
       active={tab.id === "search" ? null : tab.id}
     >
       <div class="mx-auto max-w-5xl">
-        <p class="text-sm">
-          <a
-            href={`${BASE}/search?type=${encodeURIComponent(dataset.data_type)}`}
-            class="text-muted no-underline hover:text-text"
-          >
-            <span aria-hidden="true">&larr;</span>{" "}
-            {tab.id === "search"
-              ? dataset.data_type.replace(/_/g, " ")
-              : tab.label}
-          </a>
-        </p>
-        <h1 class="mt-3 text-3xl leading-tight sm:text-4xl">
+        <div class="flex items-center justify-between gap-4">
+          <p class="text-base font-medium">
+            <a
+              href={`${BASE}/search?type=${encodeURIComponent(dataset.data_type)}`}
+              class="inline-flex items-center gap-2 text-muted no-underline transition-colors hover:text-text"
+            >
+              <span aria-hidden="true" class="text-xl leading-none">&larr;</span>{" "}
+              <span>
+                {tab.id === "search"
+                  ? dataset.data_type.replace(/_/g, " ")
+                  : tab.label}
+              </span>
+            </a>
+          </p>
+          {dataset.release_id !== null && (
+            <div class="flex gap-3">
+              <DownloadButton
+                href={`${DATA_API}/v1/releases/${dataset.release_id}/download`}
+                label={`Direct download ${dataset.filename}`}
+                large
+              />
+              <CopyButton
+                command={downloadCommand}
+                label="Copy download command"
+                large
+              />
+            </div>
+          )}
+        </div>
+        <h1 class="mt-8 text-3xl leading-tight sm:text-4xl">
           {dataset.display_name}
         </h1>
         <p class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -323,9 +457,9 @@ export const Dataset = ({ dataset, counts }) => {
           </span>
           <Badges row={dataset} />
         </p>
-        {dataset.description !== null && (
-          <p class="mt-4 max-w-3xl leading-[1.65] text-muted">
-            {dataset.description}
+        {description !== "" && (
+          <p class="mt-4 leading-[1.65] text-muted">
+            {description}
           </p>
         )}
 
@@ -338,64 +472,35 @@ export const Dataset = ({ dataset, counts }) => {
 
         <div class="mt-6">
 
-          {dataset.release_id === null ? (
+          {dataset.release_id === null && (
             <Section title="Not yet published">
               <p class="text-sm text-muted">
                 This dataset has no current release, so there is nothing to
                 download yet.
               </p>
             </Section>
-          ) : (
-            <Section title="Get this dataset">
-              <Command>synthesizer-download --dataset {dataset.name}</Command>
-              <p class="mt-2 text-sm text-muted">
-                Verifies the download against the digest below. To pin this exact
-                release rather than following updates, add{" "}
-                <code>--release {dataset.release_id}</code>.
-              </p>
-              <div class="mt-3">
+          )}
+
+          <div class="dataset-cards">
+            {dataset.release_id !== null && (
+              <Section title="File">
                 <Fields
                   entries={[
                     ["filename", <span class="font-mono">{dataset.filename}</span>],
-                    ["format", dataset.format],
                     ["size", size(dataset.size_bytes)],
-                    [
-                      "sha256",
-                      <span class="font-mono text-xs break-all">
-                        {dataset.sha256}
-                      </span>,
-                    ],
+                    ["format", dataset.format],
                     ["published", date(dataset.published_at)],
-                    ["licence", dataset.licence],
-                    [
-                      "synthesizer",
-                      dataset.synthesizer_min_version === null
-                        ? null
-                        : `${dataset.synthesizer_min_version} or newer${dataset.synthesizer_max_version === null
-                          ? ""
-                          : `, up to ${dataset.synthesizer_max_version}`
-                        }`,
-                    ],
-                    [
-                      "direct download",
-                      <a
-                        href={`${DATA_API}/v1/releases/${dataset.release_id}/download`}
-                      >
-                        {dataset.filename}
-                      </a>,
-                    ],
+                    ["synthesizer version", compatibility],
                   ]}
                 />
-              </div>
-            </Section>
-          )}
+              </Section>
+            )}
 
           {grid !== null && (
             <Section title="Grid">
               <Fields
                 entries={[
                   ["kind", grid.grid_type],
-                  ["emission", grid.emission_type?.replace(/_/g, " ")],
                   [
                     "model",
                     grid.model_name === null
@@ -409,8 +514,11 @@ export const Dataset = ({ dataset, counts }) => {
                     "wavelengths",
                     grid.wavelength_min === null
                       ? null
-                      : `${num(grid.wavelength_min)}–${num(grid.wavelength_max)} ${grid.wavelength_units ?? ""
-                      }`,
+                      : (
+                        <Scientific>
+                          {`${num(grid.wavelength_min)}–${num(grid.wavelength_max)} ${grid.wavelength_units ?? ""}`}
+                        </Scientific>
+                      ),
                   ],
                   [
                     "photoionisation",
@@ -435,42 +543,18 @@ export const Dataset = ({ dataset, counts }) => {
                     "spectra",
                     spectra.length === 0 ? null : spectra.join(", "),
                   ],
-                  [
-                    "lines",
-                    lines.length === 0 ? null : `${lines.length} lines`,
-                  ],
                 ]}
               />
-              {Object.keys(decode(grid.model_parameters_json, {})).length > 0 && (
-                <>
-                  <h3 class="mt-4 mb-2 text-xs tracking-widest text-muted uppercase">
-                    Model parameters
-                  </h3>
-                  <Fields
-                    entries={Object.entries(
-                      decode(grid.model_parameters_json, {}),
-                    ).map(([key, value]) => [key, String(value)])}
-                  />
-                </>
-              )}
             </Section>
           )}
 
-          {dataset.axes.length > 0 && (
-            <Section title="Axes">
-              <Axes axes={dataset.axes} />
-            </Section>
-          )}
-
-          {Object.keys(cloudy).length > 0 && (
-            <Section title="Photoionisation parameters">
-              {/* Of 31 Cloudy keys only seven vary across the catalogue, so
-              these are shown rather than filtered on: a constant value is
-              informative here and dead weight in a facet rail. */}
+          {modelParameters.length > 0 && (
+            <Section title={modelParametersTitle}>
               <Fields
-                entries={Object.entries(cloudy)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([key, value]) => [key, String(value)])}
+                entries={modelParameters.map(([key, value]) => [
+                  key.replace(/_/g, " "),
+                  Array.isArray(value) ? value.join(", ") : String(value),
+                ])}
               />
             </Section>
           )}
@@ -489,18 +573,28 @@ export const Dataset = ({ dataset, counts }) => {
                     "wavelengths",
                     instrument.wavelength_min === null
                       ? null
-                      : `${num(instrument.wavelength_min)}–${num(
-                        instrument.wavelength_max,
-                      )} ${instrument.wavelength_units ?? ""}`,
+                      : (
+                        <Scientific>
+                          {`${num(instrument.wavelength_min)}–${num(
+                            instrument.wavelength_max,
+                          )} ${instrument.wavelength_units ?? ""}`}
+                        </Scientific>
+                      ),
                   ],
                   [
                     "resolution",
                     instrument.resolution === null
                       ? null
-                      : `${num(instrument.resolution)} ${instrument.resolution_units ?? ""
-                      }`,
+                      : (
+                        <Scientific>
+                          {`${num(instrument.resolution)} ${instrument.resolution_units ?? ""}`}
+                        </Scientific>
+                      ),
                   ],
-                  ["resolving power", num(instrument.resolving_power)],
+                  [
+                    "resolving power",
+                    <Scientific>{num(instrument.resolving_power)}</Scientific>,
+                  ],
                   [
                     "depths",
                     instrument.depth_json === null
@@ -528,6 +622,47 @@ export const Dataset = ({ dataset, counts }) => {
                   ],
                 ]}
               />
+            </Section>
+          )}
+
+          {dataset.axes.length > 0 && (
+            <Section title="Axes">
+              <Axes axes={dataset.axes} />
+            </Section>
+          )}
+
+          {Object.keys(cloudy).length > 0 && (
+            <Section title="Photoionisation parameters">
+              {/* Of 31 Cloudy keys only seven vary across the catalogue, so
+              these are shown rather than filtered on: a constant value is
+              informative here and dead weight in a facet rail. */}
+              <Fields
+                entries={Object.entries(cloudy)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, value]) => [key.replace(/_/g, " "), String(value)])}
+              />
+            </Section>
+          )}
+
+          {lines.length > 0 && (
+            <Section title={`Available lines (${lines.length})`}>
+              <ul class="grid max-h-96 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-1 overflow-y-auto pr-2 font-mono text-xs">
+                {lines.map((line) => (
+                  <li>{String(line).replace(/(\d)A$/, "$1 Å")}</li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
+          {dataset.releases.length > 0 && (
+            <Section title="Releases">
+              <p class="mb-3 text-sm text-muted">
+                Older releases stay downloadable forever. A file that turns out to
+                be wrong is corrected by publishing a new release, not by editing
+                the old one, so anything pinned to a flagged release keeps
+                resolving and keeps saying what is wrong with it.
+              </p>
+              <Releases dataset={dataset} />
             </Section>
           )}
 
@@ -593,28 +728,12 @@ export const Dataset = ({ dataset, counts }) => {
             </Section>
           )}
 
-          {dataset.releases.length > 0 && (
-            <Section title="Releases">
-              <p class="mb-3 text-sm text-muted">
-                Older releases stay downloadable forever. A file that turns out to
-                be wrong is corrected by publishing a new release, not by editing
-                the old one, so anything pinned to a flagged release keeps
-                resolving and keeps saying what is wrong with it.
-              </p>
-              <Releases dataset={dataset} />
-            </Section>
-          )}
-
           {Object.keys(provenance).length > 0 && (
             <Section title="Provenance">
-              <Fields
-                entries={Object.entries(provenance).map(([key, value]) => [
-                  key,
-                  typeof value === "object" ? JSON.stringify(value) : String(value),
-                ])}
-              />
+              <Fields entries={expandedFields(provenance)} />
             </Section>
           )}
+          </div>
         </div>
       </div>
     </Layout>

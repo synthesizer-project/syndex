@@ -104,6 +104,19 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const commandCopy = event.target.closest("[data-copy-command]");
+  if (commandCopy !== null) {
+    try {
+      await navigator.clipboard.writeText(commandCopy.dataset.copyCommand);
+      commandCopy.setAttribute("aria-label", "Copied");
+      commandCopy.querySelector("[role=tooltip]").textContent = "Copied";
+      commandCopy.classList.add("text-accent-light");
+    } catch {
+      commandCopy.setAttribute("aria-label", "Copy unavailable");
+      commandCopy.querySelector("[role=tooltip]").textContent = "Copy unavailable";
+    }
+  }
+
   if (event.target.closest("[data-bulk-command]")) {
     const commands = `synthesizer-download --dataset ${[
       ...selectedDatasets,

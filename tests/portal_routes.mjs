@@ -536,8 +536,12 @@ const tests = {
     assert.match(body, />Select range<\/summary>/);
     assert.match(body, />reprocessed<\/a><\/th>/);
     assert.match(body, /title="Reprocessed: yes"/);
+    assert.match(body, />spectra<\/a><\/th>/);
+    assert.match(body, /title="Spectra: yes"/);
+    assert.match(body, />lines<\/a><\/th>/);
+    assert.match(body, /title="Lines: yes"/);
     assert.doesNotMatch(body, />contents<\/th>/);
-    assert.match(body, />tags<\/a><\/th><\/tr>/);
+    assert.match(body, />tags<\/th><\/tr>/);
   },
 
   async "a long facet list puts its toggle after the values"() {
@@ -582,7 +586,8 @@ const tests = {
     assert.match(body, /Submit a dataset/);
     assert.match(body, /Synthesizer project/);
     assert.doesNotMatch(body, />API<\/a>/);
-    assert.match(body, /<footer class="landing-footer[^>]*>240 datasets · 67 GiB/);
+    assert.match(body, /src="\/syndex\/static\/syndex_logo_2\.png"[^>]*class="mx-auto/);
+    assert.match(body, /<footer class="landing-footer[^>]*>240 datasets · 72 GB/);
   },
 
   async "generic search includes current file fields"() {
@@ -611,9 +616,9 @@ const tests = {
     );
 
     const rows = statement(issued, "ORDER BY d.name");
-    assert.match(rows.sql, /f\.size_bytes < 10485760/);
+    assert.match(rows.sql, /f\.size_bytes < 10000000/);
     assert.match(rows.sql, / OR /);
-    assert.match(rows.sql, /f\.size_bytes >= 10737418240/);
+    assert.match(rows.sql, /f\.size_bytes >= 10000000000/);
   },
 
   async "shopping-style filter groups start collapsed"() {
@@ -640,7 +645,36 @@ const tests = {
 
     assert.match(body, /results card min-w-0 overflow-auto/);
     assert.match(body, /grid min-w-0 items-start/);
+    assert.match(body, />size<\/a><\/th>/);
+    assert.match(body, />203 MB<\/td>/);
+    assert.match(body, />published<\/a><\/th>/);
+    assert.match(body, />2026-09-04<\/td>/);
+    assert.doesNotMatch(body, /size \(MB\)/);
+    assert.doesNotMatch(body, />version<\/a><\/th>/);
     assert.doesNotMatch(body, />what it is<\/th>/);
+    assert.doesNotMatch(body, />file<\/a><\/th>/);
+  },
+
+  async "dust columns do not repeat their data type"() {
+    const dust = {
+      ...GRID_ROW,
+      name: "dust-curve",
+      data_type: "dust_grid",
+      grid_type: "dust",
+      emission_type: "dust_attenuation",
+      model_name: null,
+      has_spectra: 0,
+      has_lines: 1,
+    };
+    const { body } = await call("/syndex/search?type=dust_grid", {
+      DB: stubDb({ rows: { datasets: [dust] } }),
+    });
+
+    assert.match(body, />emission<\/a><\/th>/);
+    assert.match(body, />attenuation<\/td>/);
+    assert.doesNotMatch(body, />dust attenuation<\/td>/);
+    assert.match(body, /title="Spectra: no"/);
+    assert.match(body, /title="Lines: yes"/);
   },
 
   async "an empty tags column is omitted"() {
@@ -707,11 +741,11 @@ const tests = {
     const rows = statement(issued, "ORDER BY f.size_bytes DESC");
     assert.match(rows.sql, /ORDER BY f\.size_bytes DESC, d\.name ASC/);
     assert.match(body, /aria-sort="descending"/);
-    assert.match(body, /size \(MB\).* ↓/s);
+    assert.match(body, />size<span aria-hidden="true"> ↓<\/span>/);
     assert.match(body, /sort=size&amp;direction=asc/);
     assert.match(body, /<input type="hidden" name="sort" value="size"\/>/);
     assert.match(body, /<input type="hidden" name="direction" value="desc"\/>/);
-    assert.match(body, /name<\/a><\/th>.*model<\/a><\/th>.*size \(MB\)<span/s);
+    assert.match(body, /name<\/a><\/th>.*model<\/a><\/th>.*size<span/s);
   },
 
   async "filter disclosure and value order survive a search"() {
@@ -790,6 +824,10 @@ const tests = {
     );
 
     assert.equal(status, 200);
+    assert.match(
+      body,
+      /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_2\.png"/,
+    );
     assert.match(body, new RegExp(`synthesizer-download --dataset ${GRID_ROW.name}`));
     // Downloads are absolute: /v1 on this host is the org site, not the API.
     assert.match(
@@ -844,7 +882,7 @@ const tests = {
     );
 
     assert.equal(status, 200);
-    assert.match(body, /1\.0 GiB/);
+    assert.match(body, /1\.1 GB/);
     // The picker is inert until the script reveals it, so a browser with no
     // JavaScript is never shown a control that could not work.
     assert.match(body, /<input type="file" id="pick" hidden/);

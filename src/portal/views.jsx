@@ -87,7 +87,7 @@ export function num(value) {
 }
 
 /**
- * Format a file size in the binary units the catalogue is quoted in.
+ * Format a file size in decimal units.
  *
  * @param {number | null} bytes Size in bytes.
  * @returns {string} Human-readable size.
@@ -96,11 +96,11 @@ export function size(bytes) {
   if (bytes === null || bytes === undefined) {
     return "—";
   }
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const units = ["B", "kB", "MB", "GB", "TB"];
   let index = 0;
   let value = bytes;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
+  while (value >= 1000 && index < units.length - 1) {
+    value /= 1000;
     index += 1;
   }
   return `${index === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[index]}`;
@@ -279,14 +279,21 @@ export const Layout = ({
       {!bare && (
       <header class="relative border-b border-line">
         <div
-          class={`mx-auto flex max-w-7xl flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${
+          class={`flex w-full flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${
             showSubmit ? "pr-48" : ""
           }`}
         >
           <a
             href={BASE}
-            class="text-xl font-medium tracking-tight text-text no-underline"
+            class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
           >
+            <img
+              src={`${BASE}/static/syndex_logo_2.png`}
+              alt=""
+              width="824"
+              height="862"
+              class="h-9 w-auto"
+            />
             Syndex
           </a>
           {nav && (
@@ -957,8 +964,8 @@ function columnsFor(tab, filters, rows, axesByRelease) {
     present: (row) => row.wavelength_min !== null,
   };
   const fileSize = {
-    label: "size (MB)",
-    cell: (row) => `${(row.size_bytes / 1e6).toFixed(row.size_bytes < 1e7 ? 1 : 0)} MB`,
+    label: "size",
+    cell: (row) => size(row.size_bytes),
     numeric: true,
     sort: "size",
   };
@@ -976,7 +983,6 @@ function columnsFor(tab, filters, rows, axesByRelease) {
             <Badges row={row} />
           </div>
         ),
-        sort: "tags",
       }
     : null;
   const photoionised = {
@@ -999,6 +1005,16 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       },
       fileSize,
       photoionised,
+      {
+        label: "spectra",
+        sort: "spectra",
+        cell: (row) => <Flag yes={row.has_spectra === 1} label="Spectra" />,
+      },
+      {
+        label: "lines",
+        sort: "lines",
+        cell: (row) => <Flag yes={row.has_lines === 1} label="Lines" />,
+      },
       {
         label: "ages",
         cell: (row, axes) => range(axes?.ages),
@@ -1023,12 +1039,22 @@ function columnsFor(tab, filters, rows, axesByRelease) {
     return populated([
       { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
       {
-        label: "kind",
-        cell: (row) => (row.emission_type ?? "—").replace(/_/g, " "),
+        label: "emission",
+        cell: (row) => (row.emission_type ?? "—").replace(/^dust_/, "").replace(/_/g, " "),
         sort: "emission",
         present: (row) => row.emission_type !== null,
       },
       fileSize,
+      {
+        label: "spectra",
+        sort: "spectra",
+        cell: (row) => <Flag yes={row.has_spectra === 1} label="Spectra" />,
+      },
+      {
+        label: "lines",
+        sort: "lines",
+        cell: (row) => <Flag yes={row.has_lines === 1} label="Lines" />,
+      },
       {
         label: "model",
         cell: (row) => modelLabel(row.model_name),
@@ -1069,7 +1095,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       fileSize,
       {
         label: "filters",
-        cell: (row) => count(row.filter_codes_json),
+        cell: (row) => num(count(row.filter_codes_json)),
         numeric: true,
         sort: "filters",
         present: (row) => count(row.filter_codes_json) > 0,
@@ -1111,14 +1137,10 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       sort: "type",
     },
     fileSize,
-    { label: "file", cell: (row) => row.filename, sort: "file" },
     {
-      // The plan calls this column "version", which is what an id and a
-      // publication date amount to for someone choosing a file.
-      label: "version",
-      cell: (row) => `${row.release_id} · ${date(row.published_at)}`,
-      numeric: true,
-      sort: "version",
+      label: "published",
+      cell: (row) => date(row.published_at),
+      sort: "published",
     },
     tags,
   ]);
@@ -1146,32 +1168,34 @@ const Results = ({ tab, filters, rows, axes }) => {
               />
             </th>
             {columns.map((column) => {
-              const active = filters.sort === column.sort;
+              const sortable = column.sort !== undefined;
+              const active = sortable && filters.sort === column.sort;
               const direction = active && filters.direction === "asc" ? "desc" : "asc";
-              const href = searchUrl(filters, {
-                sort: column.sort,
-                direction,
-              });
+              const href = sortable
+                ? searchUrl(filters, { sort: column.sort, direction })
+                : null;
               return (
               <th
                 scope="col"
-                aria-sort={active ? `${filters.direction}ending` : "none"}
+                aria-sort={sortable ? (active ? `${filters.direction}ending` : "none") : undefined}
                 class={`label-caps border-b border-line px-4 py-3 ${
                   column.numeric ? "text-right" : ""
                 }`}
               >
-                <a
-                  href={href}
-                  hx-get={href}
-                  class="whitespace-nowrap text-inherit no-underline hover:text-text"
-                >
-                  {column.label}
-                  {active && (
-                    <span aria-hidden="true">
-                      {filters.direction === "asc" ? " ↑" : " ↓"}
-                    </span>
-                  )}
-                </a>
+                {sortable ? (
+                  <a
+                    href={href}
+                    hx-get={href}
+                    class="whitespace-nowrap text-inherit no-underline hover:text-text"
+                  >
+                    {column.label}
+                    {active && (
+                      <span aria-hidden="true">
+                        {filters.direction === "asc" ? " ↑" : " ↓"}
+                      </span>
+                    )}
+                  </a>
+                ) : column.label}
               </th>
               );
             })}

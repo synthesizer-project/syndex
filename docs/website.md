@@ -117,9 +117,9 @@ filters do not.
 
 | Tab | Filter | Columns |
 |---|---|---|
-| All | none | type, filename, size, version |
-| Grids | `grid` | model, emission, age range, metallicity range, wavelengths, spectra/lines |
-| Dust grids | `dust_grid` | curve or emission, axes |
+| All | none | type, size, published date |
+| Grids | `grid` | model, reprocessed, spectra, lines, age range, metallicity range, wavelengths |
+| Dust grids | `dust_grid` | emission, size, spectra, lines, model, axes, wavelengths |
 | Instruments | `instrument` | filters, resolving power, PSF, noise, depth |
 
 Dust grids stay a separate tab despite holding three datasets. They are not
@@ -144,7 +144,7 @@ panel listing every axis would therefore be mostly irrelevant rows.
 All facet groups use native collapsed disclosure controls. Data type and file
 size are always available. Selecting a grid, dust grid, or instrument type
 reveals only the facets supported by that type's structured metadata. File
-size uses stable buckets from under 10 MiB through over 10 GiB.
+size uses stable buckets from under 10 MB through over 10 GB.
 
 So the axis filter starts empty and the user adds axes to it:
 

@@ -107,6 +107,13 @@ export const Landing = ({ counts, datasets, bytes }) => (
     }
   >
     <div class="rise text-center">
+      <img
+        src={`${BASE}/static/syndex_logo_2.png`}
+        alt=""
+        width="824"
+        height="862"
+        class="mx-auto mb-7 h-auto w-[clamp(9rem,22vw,15rem)]"
+      />
       <h1 class="mx-auto whitespace-nowrap text-[clamp(1rem,4.8vw,2.6rem)] leading-[1.25]">
         The Synthesizer Database
       </h1>

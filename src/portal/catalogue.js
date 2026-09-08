@@ -19,35 +19,35 @@ export const TABS = [
   { id: "instruments", label: "Instruments", types: ["instrument"] },
 ];
 
-const MiB = 1024 ** 2;
-const GiB = 1024 ** 3;
+const MB = 1000 ** 2;
+const GB = 1000 ** 3;
 
 /** Stable, human-scale file-size ranges used by the generic size facet. */
 export const SIZE_BUCKETS = [
   {
     value: "under_10_mib",
-    label: "Under 10 MiB",
-    sql: `f.size_bytes < ${10 * MiB}`,
+    label: "Under 10 MB",
+    sql: `f.size_bytes < ${10 * MB}`,
   },
   {
     value: "10_100_mib",
-    label: "10–100 MiB",
-    sql: `f.size_bytes >= ${10 * MiB} AND f.size_bytes < ${100 * MiB}`,
+    label: "10–100 MB",
+    sql: `f.size_bytes >= ${10 * MB} AND f.size_bytes < ${100 * MB}`,
   },
   {
     value: "100_mib_1_gib",
-    label: "100 MiB–1 GiB",
-    sql: `f.size_bytes >= ${100 * MiB} AND f.size_bytes < ${GiB}`,
+    label: "100 MB–1 GB",
+    sql: `f.size_bytes >= ${100 * MB} AND f.size_bytes < ${GB}`,
   },
   {
     value: "1_10_gib",
-    label: "1–10 GiB",
-    sql: `f.size_bytes >= ${GiB} AND f.size_bytes < ${10 * GiB}`,
+    label: "1–10 GB",
+    sql: `f.size_bytes >= ${GB} AND f.size_bytes < ${10 * GB}`,
   },
   {
     value: "over_10_gib",
-    label: "Over 10 GiB",
-    sql: `f.size_bytes >= ${10 * GiB}`,
+    label: "Over 10 GB",
+    sql: `f.size_bytes >= ${10 * GB}`,
   },
 ];
 
@@ -129,20 +129,20 @@ export function parseFilters(params) {
     "name",
     "model",
     "reprocessed",
+    "spectra",
+    "lines",
     "emission",
     "wavelengths",
     "axes",
     "size",
     "type",
-    "file",
-    "version",
+    "published",
     "instrument_type",
     "filters",
     "resolving_power",
     "psf",
     "noise",
     "depth",
-    "tags",
   ]);
   const axes = [];
   for (const name of new Set(list("axis"))) {
@@ -496,13 +496,14 @@ function ordering(filters) {
         name: "d.name",
         model: "g.model_name",
         reprocessed: "g.emission_type = 'photoionised'",
+        spectra: "g.has_spectra",
+        lines: "g.has_lines",
         emission: "g.emission_type",
         wavelengths: "g.wavelength_min",
         axes: "(SELECT COUNT(*) FROM grid_axes a WHERE a.release_id = r.release_id)",
         size: "f.size_bytes",
         type: "d.data_type",
-        file: "f.filename",
-        version: "r.published_at",
+        published: "r.published_at",
         instrument_type: "i.instrument_type",
         filters: "json_array_length(i.filter_codes_json)",
         resolving_power: "i.resolving_power",

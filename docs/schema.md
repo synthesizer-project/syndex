@@ -181,6 +181,61 @@ locations are deliberately not recorded: the R2 path and SHA-256 already
 identify the bytes, and a source URL for a service being retired would be
 dead metadata on every release.
 
+## Citations
+
+```sql
+CREATE TABLE citations (
+    citation_id INTEGER PRIMARY KEY,
+    bibcode TEXT UNIQUE,
+    doi TEXT,
+    bibtex TEXT NOT NULL,
+    authors TEXT,
+    title TEXT,
+    year INTEGER,
+    journal TEXT,
+    added_at TEXT NOT NULL
+);
+
+CREATE TABLE file_citations (
+    file_id INTEGER NOT NULL REFERENCES files(file_id),
+    citation_id INTEGER NOT NULL REFERENCES citations(citation_id),
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (file_id, citation_id)
+);
+```
+
+A grid is not usable in a paper without knowing what to cite for it, and the
+answer is rarely one reference: a BPASS grid needs the BPASS model papers, the
+paper the grid itself was released in, and the Cloudy release it was processed
+through.
+
+**Citations attach to files, not to datasets or models.** A file is the artifact
+somebody downloads and cites, and it is the level at which the answer varies.
+Two releases of one dataset can need different references, and the c25.00 grids
+cite a different Cloudy release from their c23.01 siblings despite sharing a
+model. Anything coarser cannot express that.
+
+Each paper is stored once and pointed at, so the release paper shared by every
+grid is a single row rather than the same fact recorded 163 times. `position`
+carries the citation order, which by convention runs model, then release, then
+processing code.
+
+`bibcode` is unique but deliberately not the primary key, because bibcodes
+change: an arXiv bibcode becomes a journal one on publication, and ADS
+canonicalises without warning. One such correction was already needed here, the
+2025 Cloudy release resolving to `2025RMxAA..61c.120G` rather than the spelling
+first recorded. A surrogate key means that is a single-field update rather than
+a rewrite of every junction row.
+
+`bibtex` is stored verbatim, as ADS returned it, and is the authoritative
+record. The extracted `authors`, `title`, `year` and `journal` exist only so
+that rendering a citation needs no BibTeX parser in the Worker or the portal;
+ADS journal macros such as `\mnras` are normalised on the way in.
+
+`datasets.citations_json` predates this and is unused. It is left in place so
+that applying this migration cannot break a deployed Worker that still selects
+it; a later migration can drop it.
+
 ## Grid Metadata
 
 One row for each grid release; non-grid datasets have no row:

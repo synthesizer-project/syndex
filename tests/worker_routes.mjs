@@ -53,8 +53,11 @@ function stubDb({ rows = [], bindings = [], batchResults = [] } = {}) {
         all: async () => ({ results: rows }),
       };
     },
+    // Supplied results are padded out to the number of statements, so a test
+    // pins only the queries it cares about and adding a query elsewhere in the
+    // Worker does not break unrelated tests.
     batch: async (statements) =>
-      batchResults.length > 0 ? batchResults : statements.map(() => ({ results: [] })),
+      statements.map((_, index) => batchResults[index] ?? { results: [] }),
   };
 }
 
@@ -587,6 +590,83 @@ const tests = {
     // The cause is logged, never returned to the caller.
     assert.equal(body.error, "Internal error");
   },
+  async "citations are returned as a pasteable bibtex file"() {
+    const bibtex = "@ARTICLE{2003MNRAS.344.1000B,\n  title = {Stellar population synthesis}\n}";
+    let call = 0;
+    const env = {
+      DB: {
+        prepare() {
+          return {
+            bind() {
+              return this;
+            },
+            // The first query resolves the release, the second its citations.
+            first: async () => ({ release_id: 7, dataset: "bc03-2003" }),
+            all: async () => ({ results: [{ bibtex }, { bibtex: "@ARTICLE{x,\n}" }] }),
+          };
+        },
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/7/citations.bib`),
+      env,
+    );
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /x-bibtex/);
+    assert.match(
+      response.headers.get("content-disposition"),
+      /filename="bc03-2003\.bib"/,
+    );
+    assert.ok(body.startsWith("@ARTICLE{2003MNRAS.344.1000B,"), "verbatim bibtex");
+    assert.ok(body.includes("@ARTICLE{x,"), "every entry is included");
+    void call;
+  },
+
+  async "a release with no citations returns a comment, not an empty file"() {
+    const env = {
+      DB: {
+        prepare() {
+          return {
+            bind() {
+              return this;
+            },
+            first: async () => ({ release_id: 9, dataset: "lonely-grid" }),
+            all: async () => ({ results: [] }),
+          };
+        },
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/9/citations.bib`),
+      env,
+    );
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(body, /^% No citations recorded for lonely-grid release 9\./);
+  },
+
+  async "a bibtex request for an unknown release is a 404"() {
+    const env = {
+      DB: {
+        prepare() {
+          return {
+            bind() {
+              return this;
+            },
+            first: async () => null,
+            all: async () => ({ results: [] }),
+          };
+        },
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/404/citations.bib`),
+      env,
+    );
+    assert.equal(response.status, 404);
+  },
+
 };
 
 let failures = 0;

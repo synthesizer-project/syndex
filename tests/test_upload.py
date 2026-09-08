@@ -1070,3 +1070,110 @@ def test_filenames_without_a_cloudy_version_are_ignored():
     assert upload.check_photoionisation_version(
         Path("maraston24-Te00_kroupa.hdf5"), "c23.01"
     ) == []
+
+
+CITATION = {
+    "bibcode": "2003MNRAS.344.1000B",
+    "bibtex": "@ARTICLE{2003MNRAS.344.1000B,\n  title = {Stellar population synthesis}\n}",
+    "doi": "10.1046/j.1365-8711.2003.06897.x",
+    "authors": "Bruzual, G. and Charlot, S.",
+    "title": "Stellar population synthesis at the resolution of 2003",
+    "year": 2003,
+    "journal": "MNRAS",
+}
+RELEASE_PAPER = {
+    "bibcode": "2026arXiv260727467V",
+    "bibtex": "@ARTICLE{2026arXiv260727467V,\n  title = {Stellar photoionisation}\n}",
+    "doi": None,
+    "authors": "Vijayan, A. P.",
+    "title": "Stellar photoionisation modelling in SYNTHESIZER",
+    "year": 2026,
+    "journal": "arXiv e-prints",
+}
+
+
+def _publish(database, plan):
+    with database:
+        for statement in upload.d1_statements(plan):
+            database.execute(statement["sql"], statement["params"])
+
+
+def _plan_with_citations(tmp_path, name, citations):
+    path = tmp_path / f"{name}.dat"
+    path.write_text(name)
+    plan = upload.build_plan(
+        upload.SourceFile(path, path.name),
+        {"data_type": "simulation_data", "name": name},
+        {},
+    )
+    plan["citations"] = citations
+    return plan
+
+
+def test_a_paper_cited_by_two_files_is_stored_once(tmp_path):
+    """The release paper is shared by every grid; it must not be duplicated."""
+    database = migrated_database()
+    _publish(database, _plan_with_citations(tmp_path, "one", [CITATION, RELEASE_PAPER]))
+    _publish(database, _plan_with_citations(tmp_path, "two", [RELEASE_PAPER]))
+
+    (citations,) = database.execute("SELECT COUNT(*) FROM citations").fetchone()
+    (links,) = database.execute("SELECT COUNT(*) FROM file_citations").fetchone()
+    assert citations == 2, "two distinct papers"
+    assert links == 3, "three file-to-paper links"
+
+    shared = database.execute(
+        "SELECT COUNT(*) FROM file_citations fc JOIN citations c "
+        "ON c.citation_id = fc.citation_id WHERE c.bibcode = ?",
+        (RELEASE_PAPER["bibcode"],),
+    ).fetchone()[0]
+    assert shared == 2, "one row, cited by both files"
+
+
+def test_citation_order_is_preserved(tmp_path):
+    """Position records the conventional citation order."""
+    database = migrated_database()
+    _publish(database, _plan_with_citations(tmp_path, "ordered", [CITATION, RELEASE_PAPER]))
+
+    rows = database.execute(
+        "SELECT c.bibcode FROM file_citations fc JOIN citations c "
+        "ON c.citation_id = fc.citation_id ORDER BY fc.position"
+    ).fetchall()
+    assert [row[0] for row in rows] == [CITATION["bibcode"], RELEASE_PAPER["bibcode"]]
+
+
+def test_republishing_refreshes_citation_metadata(tmp_path):
+    """A corrected record from ADS should update the stored one, not duplicate it."""
+    database = migrated_database()
+    _publish(database, _plan_with_citations(tmp_path, "refresh", [CITATION]))
+    corrected = dict(CITATION, title="A corrected title", year=2004)
+    _publish(database, _plan_with_citations(tmp_path, "refresh", [corrected]))
+
+    rows = database.execute("SELECT title, year FROM citations").fetchall()
+    assert rows == [("A corrected title", 2004)]
+
+
+def test_a_file_with_no_citations_writes_nothing(tmp_path):
+    database = migrated_database()
+    _publish(database, _plan_with_citations(tmp_path, "bare", []))
+    assert database.execute("SELECT COUNT(*) FROM citations").fetchone()[0] == 0
+    assert database.execute("SELECT COUNT(*) FROM file_citations").fetchone()[0] == 0
+
+
+def test_bibtex_fields_are_extracted():
+    """Enough is parsed to render a citation without a BibTeX parser."""
+    entries = upload.parse_bibtex_entries(
+        '@ARTICLE{2018MNRAS.480.1247K,\n'
+        '       author = {{Kubota}, Aya and {Done}, Chris},\n'
+        '        title = "{A physical model of the broad-band continuum}",\n'
+        '      journal = {\\mnras},\n'
+        '         year = 2018,\n'
+        '          doi = {10.1093/mnras/sty1890},\n'
+        '}\n'
+    )
+    (record,) = entries.values()
+    assert record["bibcode"] == "2018MNRAS.480.1247K"
+    assert record["year"] == 2018
+    assert record["journal"] == "MNRAS", "the ADS macro must be readable"
+    assert record["doi"] == "10.1093/mnras/sty1890"
+    assert "Kubota" in record["authors"]
+    assert record["title"].startswith("A physical model")

@@ -184,6 +184,21 @@ resolvable for anything pinned to it. When the flag is set,
 metadata is affected, and that a corrected release exists. A client resolving a
 pinned release should surface this rather than ignore it.
 
+Each release carries a `citations` array, ordered as a paper's bibliography
+would be: the model, then the release, then the processing code. Every entry
+holds `bibcode`, `doi`, `authors`, `title`, `year`, `journal` and the verbatim
+`bibtex`, so a client can render a reference without parsing anything.
+
+## `GET /v1/releases/{id}/citations.bib`
+
+Returns that release's citations as a BibTeX document, `content-type:
+application/x-bibtex`, with a filename derived from the dataset. The stored
+entries are returned exactly as ADS produced them, since retyping references
+out of a JSON payload is where citation errors come from. A release with no
+recorded citations returns a BibTeX comment saying so rather than an empty
+file, because a gap in the catalogue is not an error.
+
+
 ## `GET /v1/datasets/{name}/releases`
 
 Lists every release of one dataset, newest publication first, each with

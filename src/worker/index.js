@@ -110,7 +110,7 @@ async function listDatasets(db, url) {
       `SELECT d.name, d.display_name, d.description, d.data_type, d.is_test,
               d.is_ci, d.is_recommended, d.licence,
               r.release_id, r.published_at,
-              f.filename, f.format, f.size_bytes, f.sha256,
+              f.file_id, f.filename, f.format, f.size_bytes, f.sha256,
               g.has_spectra, g.has_lines
        FROM datasets d
        LEFT JOIN releases r ON r.release_id = d.current_release_id
@@ -173,9 +173,68 @@ async function listDatasets(db, url) {
  * @param {string} origin Origin of the incoming request.
  * @returns {Promise<Record<string, unknown>>} The release object.
  */
+/**
+ * Serve a release's citations as a BibTeX file.
+ *
+ * A grid is not usable in a paper without its references, and retyping them
+ * from a JSON payload is exactly the sort of transcription that introduces
+ * errors. The stored BibTeX is returned verbatim, so what a user pastes into
+ * their bibliography is what ADS produced.
+ *
+ * @param {D1Database} db Catalogue database.
+ * @param {string} releaseId Release identifier from the path.
+ * @returns {Promise<Response>} A BibTeX document, or an error response.
+ */
+async function releaseCitations(db, releaseId) {
+  const numeric = Number(releaseId);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    return error(400, "Release id must be a positive integer");
+  }
+
+  const release = await db
+    .prepare(
+      `SELECT r.release_id, d.name AS dataset
+       FROM releases r
+       JOIN datasets d ON d.dataset_id = r.dataset_id
+       WHERE r.release_id = ?`,
+    )
+    .bind(numeric)
+    .first();
+  if (release === null) {
+    return error(404, `No release with id '${releaseId}'`);
+  }
+
+  const { results } = await db
+    .prepare(
+      `SELECT c.bibtex
+       FROM releases r
+       JOIN file_citations fc ON fc.file_id = r.file_id
+       JOIN citations c ON c.citation_id = fc.citation_id
+       WHERE r.release_id = ? ORDER BY fc.position, c.year`,
+    )
+    .bind(numeric)
+    .all();
+
+  // A release with nothing recorded is a gap in the catalogue rather than an
+  // error, so say so in a comment instead of returning an empty file.
+  const body = results.length
+    ? results.map((row) => row.bibtex.trim()).join("\n\n") + "\n"
+    : `% No citations recorded for ${release.dataset} release ${numeric}.\n`;
+
+  return new Response(body, {
+    headers: {
+      "content-type": "application/x-bibtex; charset=utf-8",
+      "content-disposition": `attachment; filename="${release.dataset}.bib"`,
+      "access-control-allow-origin": "*",
+      "cache-control": "public, max-age=3600",
+    },
+  });
+}
+
+
 async function releasePayload(db, row, origin) {
   const releaseId = row.release_id;
-  const [grid, axes, instrument] = await db.batch([
+  const [grid, axes, instrument, citations] = await db.batch([
     db
       .prepare("SELECT * FROM grid_metadata WHERE release_id = ?")
       .bind(releaseId),
@@ -187,6 +246,17 @@ async function releasePayload(db, row, origin) {
       )
       .bind(releaseId),
     db.prepare("SELECT * FROM instruments WHERE release_id = ?").bind(releaseId),
+    // Citations hang off the file rather than the release, because that is the
+    // artifact being cited and two releases can need different references.
+    db
+      .prepare(
+        `SELECT c.bibcode, c.doi, c.authors, c.title, c.year, c.journal,
+                c.bibtex
+         FROM file_citations fc
+         JOIN citations c ON c.citation_id = fc.citation_id
+         WHERE fc.file_id = ? ORDER BY fc.position, c.year`,
+      )
+      .bind(row.file_id),
   ]);
 
   const gridRow = decodeRow(grid.results[0] ?? null, [
@@ -223,6 +293,7 @@ async function releasePayload(db, row, origin) {
       size_bytes: row.size_bytes,
       sha256: row.sha256,
     },
+    citations: citations.results.map((citation) => decodeRow(citation)),
     download_url: `${origin}/v1/releases/${releaseId}/download`,
     grid: gridRow,
     instrument: instrumentRow,
@@ -258,7 +329,7 @@ async function listReleases(db, name, origin) {
       `SELECT r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
-              f.filename, f.format, f.size_bytes, f.sha256
+              f.file_id, f.filename, f.format, f.size_bytes, f.sha256
        FROM releases r
        JOIN files f ON f.file_id = r.file_id
        WHERE r.dataset_id = ?
@@ -314,7 +385,7 @@ async function getRelease(db, releaseId, origin) {
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
               r.provenance_json,
-              f.filename, f.format, f.size_bytes, f.sha256,
+              f.file_id, f.filename, f.format, f.size_bytes, f.sha256,
               d.name AS dataset, d.data_type, d.current_release_id
        FROM releases r
        JOIN files f ON f.file_id = r.file_id
@@ -359,7 +430,7 @@ async function getDataset(db, name, origin) {
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
               r.provenance_json,
-              f.filename, f.r2_path, f.format, f.size_bytes, f.sha256
+              f.file_id, f.filename, f.r2_path, f.format, f.size_bytes, f.sha256
        FROM datasets d
        LEFT JOIN releases r ON r.release_id = d.current_release_id
        LEFT JOIN files f ON f.file_id = r.file_id
@@ -609,6 +680,11 @@ export default {
       const download = /^\/v1\/releases\/([^/]+)\/download$/.exec(path);
       if (download !== null) {
         return await downloadRelease(env, request, download[1]);
+      }
+
+      const citations = /^\/v1\/releases\/([^/]+)\/citations\.bib$/.exec(path);
+      if (citations !== null) {
+        return await releaseCitations(env.DB, citations[1]);
       }
 
       const release = /^\/v1\/releases\/([^/]+)$/.exec(path);

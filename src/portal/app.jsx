@@ -75,6 +75,7 @@ app.use(trimTrailingSlash());
 function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
   return c.html(`<!doctype html>\n${node.toString()}`, status, {
     "cache-control": cache,
+    vary: "HX-Request",
   });
 }
 
@@ -86,7 +87,10 @@ function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
  * @returns {Response} An HTML response with no document around it.
  */
 function fragment(c, node) {
-  return c.html(node.toString(), 200, { "cache-control": "no-store" });
+  return c.html(node.toString(), 200, {
+    "cache-control": "no-store",
+    vary: "HX-Request",
+  });
 }
 
 app.get("/", async (c) => {

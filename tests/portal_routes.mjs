@@ -308,6 +308,9 @@ const tests = {
     const portal = await call("/syndex/grids", env);
     assert.equal(portal.status, 200);
     assert.match(portal.headers.get("content-type"), /text\/html/);
+    assert.equal(portal.headers.get("vary"), "HX-Request");
+    assert.match(portal.body, /class="bg-layer"/);
+    assert.match(portal.body, /viewBox="0 0 1440 900"/);
 
     // Nothing else moved: the API still owns every other path, including the
     // 404 for the root.
@@ -544,6 +547,7 @@ const tests = {
     // The rail is swapped with the table: its counts describe the search.
     assert.match(body, /id="filters"/);
     assert.equal(headers.get("cache-control"), "no-store");
+    assert.equal(headers.get("vary"), "HX-Request");
   },
 
   async "a dataset page prints the command that fetches it"() {

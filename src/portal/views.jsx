@@ -142,6 +142,53 @@ export const Badges = ({ row }) => (
   </>
 );
 
+const Background = () => (
+  <svg
+    class="bg-layer"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 1440 900"
+    preserveAspectRatio="xMidYMid slice"
+    aria-hidden="true"
+  >
+    <circle cx="82" cy="78" r="3.5" fill="white" opacity="0.28" />
+    <circle cx="375" cy="155" r="2.5" fill="white" opacity="0.22" />
+    <circle cx="638" cy="48" r="4" fill="white" opacity="0.26" />
+    <circle cx="935" cy="175" r="2.5" fill="white" opacity="0.20" />
+    <circle cx="1160" cy="72" r="3.5" fill="white" opacity="0.24" />
+    <circle cx="1385" cy="195" r="2" fill="white" opacity="0.18" />
+    <circle cx="195" cy="490" r="3" fill="white" opacity="0.20" />
+    <circle cx="58" cy="695" r="4" fill="white" opacity="0.24" />
+    <circle cx="415" cy="830" r="2.5" fill="white" opacity="0.20" />
+    <circle cx="785" cy="865" r="3" fill="white" opacity="0.18" />
+    <circle cx="1110" cy="748" r="3.5" fill="white" opacity="0.22" />
+    <circle cx="1340" cy="650" r="2.5" fill="white" opacity="0.20" />
+    <circle cx="1425" cy="835" r="2" fill="white" opacity="0.18" />
+    <circle cx="575" cy="445" r="2.5" fill="white" opacity="0.16" />
+    <circle cx="1240" cy="415" r="3" fill="white" opacity="0.20" />
+    <circle cx="862" cy="630" r="2" fill="white" opacity="0.16" />
+    <circle cx="42" cy="335" r="2.5" fill="white" opacity="0.18" />
+    <circle cx="1065" cy="310" r="2" fill="white" opacity="0.18" />
+    <circle cx="705" cy="280" r="2" fill="white" opacity="0.14" />
+    <circle cx="1395" cy="440" r="2" fill="white" opacity="0.16" />
+    {[
+      [148, 142, 10, "0.13"],
+      [720, 85, 7, "0.11"],
+      [1255, 215, 9, "0.12"],
+      [318, 728, 8, "0.10"],
+      [1088, 762, 10, "0.11"],
+      [545, 195, 6, "0.09"],
+      [980, 85, 8, "0.10"],
+    ].map(([x, y, scale, opacity]) => (
+      <path
+        transform={`translate(${x},${y}) scale(${scale})`}
+        fill="white"
+        opacity={opacity}
+        d="M 0,-1 L .1,-.1 L 1,0 L .1,.1 L 0,1 L -.1,.1 L -1,0 L -.1,-.1 Z"
+      />
+    ))}
+  </svg>
+);
+
 /**
  * The page shell: fonts, stylesheet, htmx, header, tabs.
  *
@@ -170,6 +217,7 @@ export const Layout = ({
       <script src={`${BASE}/static/htmx.min.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
+      <Background />
       {/* There is only something to skip when there is a header above the
           content to skip past. */}
       {!bare && (

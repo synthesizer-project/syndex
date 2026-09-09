@@ -174,6 +174,79 @@ async function listDatasets(db, url) {
  * @returns {Promise<Record<string, unknown>>} The release object.
  */
 /**
+ * Serve a release's preview image.
+ *
+ * The bucket is private, so the image cannot be linked directly and has to be
+ * proxied. Previews are content addressed and never change for a given file,
+ * so they are safe to cache hard and to serve with an immutable directive.
+ *
+ * @param {object} env Worker bindings.
+ * @param {Request} request Incoming request, for conditional handling.
+ * @param {string} releaseId Release identifier from the path.
+ * @returns {Promise<Response>} The PNG, or an error response.
+ */
+async function releasePreview(env, request, releaseId) {
+  const numeric = Number(releaseId);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    return error(400, "Release id must be a positive integer");
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT f.preview_path
+     FROM releases r JOIN files f ON f.file_id = r.file_id
+     WHERE r.release_id = ?`,
+  )
+    .bind(numeric)
+    .first();
+
+  if (row === null) {
+    return error(404, `No release with id '${releaseId}'`);
+  }
+  if (row.preview_path === null) {
+    // A file with nothing indicative to plot is a deliberate absence, not a
+    // failure, so say so plainly rather than returning a broken image.
+    return error(404, "No preview for this release");
+  }
+
+  const object =
+    request.method === "HEAD"
+      ? await env.FILES.head(row.preview_path)
+      : await env.FILES.get(row.preview_path, { onlyIf: request.headers });
+
+  if (object === null) {
+    console.error(
+      JSON.stringify({
+        message: "R2 object missing for a recorded preview",
+        release_id: numeric,
+        preview_path: row.preview_path,
+      }),
+    );
+    return error(502, "Preview is unavailable");
+  }
+
+  // A 304 from onlyIf has no body.
+  if (!("body" in object)) {
+    return new Response(null, { status: 304 });
+  }
+
+  return new Response(object.body, {
+    headers: {
+      "content-type": "image/png",
+      "content-length": String(object.size),
+      "etag": object.httpEtag,
+      "access-control-allow-origin": "*",
+      // The object is content addressed but this URL is not: it names a
+      // release, and regenerating a preview repoints that release at new
+      // bytes. Marking it immutable therefore pinned stale plots in browsers
+      // for a year. An hour with revalidation keeps it cheap -- the ETag
+      // changes with the object, so a re-check costs a 304.
+      "cache-control": "public, max-age=3600, must-revalidate",
+    },
+  });
+}
+
+
+/**
  * Serve a release's citations as a BibTeX file.
  *
  * A grid is not usable in a paper without its references, and retyping them
@@ -680,6 +753,11 @@ export default {
       const download = /^\/v1\/releases\/([^/]+)\/download$/.exec(path);
       if (download !== null) {
         return await downloadRelease(env, request, download[1]);
+      }
+
+      const preview = /^\/v1\/releases\/([^/]+)\/preview\.png$/.exec(path);
+      if (preview !== null) {
+        return await releasePreview(env, request, preview[1]);
       }
 
       const citations = /^\/v1\/releases\/([^/]+)\/citations\.bib$/.exec(path);

@@ -14,6 +14,7 @@ import {
   Badges,
   Command,
   DATA_API,
+  Flag,
   Layout,
   Scientific,
   date,
@@ -27,6 +28,18 @@ const TAB_BLURBS = {
   dust: "Attenuation curves and dust emission",
   instruments: "Filters, PSFs, noise and depths",
 };
+
+const CAPABILITIES = [
+  "can_do_photometry",
+  "can_do_imaging",
+  "can_do_psf_imaging",
+  "can_do_noisy_imaging",
+  "can_do_spectroscopy",
+  "can_do_noisy_spectroscopy",
+  "can_do_resolved_spectroscopy",
+  "can_do_psf_spectroscopy",
+  "can_do_noisy_resolved_spectroscopy",
+];
 
 /** Data types a submission may claim, as the catalogue spells them. */
 export const DATA_TYPES = [
@@ -90,7 +103,14 @@ const Section = ({ title, children }) => (
 );
 
 /** Standard overlapping-squares control for copying a command. */
-const CopyButton = ({ command, label = "Copy command", large = false }) => (
+const CopyButton = ({
+  command,
+  label = "Copy command",
+  filename,
+  large = false,
+  sizeBytes,
+  sizeLabel,
+}) => (
   <button
     type="button"
     data-copy-command={command}
@@ -98,6 +118,9 @@ const CopyButton = ({ command, label = "Copy command", large = false }) => (
       large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
     }`}
     aria-label={label}
+    data-download-filename={filename}
+    data-download-size={sizeBytes}
+    data-download-size-label={sizeLabel}
   >
     <svg
       aria-hidden="true"
@@ -112,7 +135,7 @@ const CopyButton = ({ command, label = "Copy command", large = false }) => (
     </svg>
     <span
       role="tooltip"
-      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 max-w-[min(32rem,calc(100vw-3rem))] rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs whitespace-normal text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[calc(100vw-3rem)] rounded-lg border border-line bg-surface px-3.5 py-2 font-mono text-xs whitespace-nowrap text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
     >
       {command}
     </span>
@@ -120,13 +143,23 @@ const CopyButton = ({ command, label = "Copy command", large = false }) => (
 );
 
 /** Standard download-arrow control. */
-const DownloadButton = ({ href, label, large = false }) => (
+const DownloadButton = ({
+  href,
+  label,
+  filename,
+  large = false,
+  sizeBytes,
+  sizeLabel,
+}) => (
   <a
     href={href}
     class={`group relative inline-flex shrink-0 items-center justify-center border border-muted bg-bg text-text no-underline transition-colors hover:border-accent-light hover:text-accent-light ${
       large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
     }`}
     aria-label={label}
+    data-download-filename={filename}
+    data-download-size={sizeBytes}
+    data-download-size-label={sizeLabel}
   >
     <svg
       aria-hidden="true"
@@ -142,7 +175,7 @@ const DownloadButton = ({ href, label, large = false }) => (
     </svg>
     <span
       role="tooltip"
-      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-line bg-surface px-3 py-2 text-xs whitespace-normal text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[calc(100vw-3rem)] rounded-lg border border-line bg-surface px-3.5 py-2 text-xs whitespace-nowrap text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
     >
       {label}
     </span>
@@ -342,10 +375,16 @@ const Releases = ({ dataset }) => (
                 <DownloadButton
                   href={`${DATA_API}/v1/releases/${release.release_id}/download`}
                   label={`Direct download release ${release.release_id}`}
+                  filename={dataset.filename}
+                  sizeBytes={release.size_bytes}
+                  sizeLabel={size(release.size_bytes)}
                 />
                 <CopyButton
                   command={`synthesizer-download --dataset ${dataset.name} --release ${release.release_id}`}
                   label={`Copy download command for release ${release.release_id}`}
+                  filename={dataset.filename}
+                  sizeBytes={release.size_bytes}
+                  sizeLabel={size(release.size_bytes)}
                 />
               </div>
             </td>
@@ -374,6 +413,38 @@ const firstAuthor = (authors) => {
   return authors.includes(" and ") ? `${surname} et al.` : surname;
 };
 
+/**
+ * Describe what a preview plot shows.
+ *
+ * The plots carry no caption of their own, so the page states it. Everything
+ * needed is already recorded, which is why the image does not have to.
+ *
+ * @param {object} dataset A dataset row with its preview_kind and grid.
+ * @returns {string} A short caption.
+ */
+const previewCaption = (dataset) => {
+  if (dataset.preview_kind === "filters") {
+    return "Filter transmission curves, coloured by pivot wavelength.";
+  }
+  if (dataset.preview_kind === "ionising") {
+    return "Ionising luminosity across the first two grid axes.";
+  }
+  const what =
+    dataset.grid?.emission_type === "incident"
+      ? "incident spectra"
+      : "transmitted plus nebular spectra";
+  return `Every one of this grid's ${what}, coloured by luminosity.`;
+};
+
+/**
+ * Alternative text for a preview, for anyone not seeing the image.
+ *
+ * @param {object} dataset A dataset row.
+ * @returns {string} A description of the plot.
+ */
+const previewAlt = (dataset) =>
+  `${previewCaption(dataset)} ${dataset.display_name}.`;
+
 /** One dataset, with everything the catalogue holds about it. */
 export const Dataset = ({ dataset, counts }) => {
   const grid = dataset.grid;
@@ -396,7 +467,10 @@ export const Dataset = ({ dataset, counts }) => {
   const provenance = decode(dataset.provenance_json, {});
   const spectra = decode(grid?.available_spectra_json, []);
   const lines = decode(grid?.available_lines_json, []);
+  const instrumentFilters = decode(instrument?.filter_codes_json, []);
+  const capabilities = decode(instrument?.capabilities_json, {});
   const description = dataset.description?.replace(/\s+/g, " ").trim() ?? "";
+  const hasPreview = dataset.preview_path !== null && dataset.release_id !== null;
   const compatibility = [
     dataset.synthesizer_min_version === null
       ? null
@@ -438,11 +512,17 @@ export const Dataset = ({ dataset, counts }) => {
               <DownloadButton
                 href={`${DATA_API}/v1/releases/${dataset.release_id}/download`}
                 label={`Direct download ${dataset.filename}`}
+                filename={dataset.filename}
+                sizeBytes={dataset.size_bytes}
+                sizeLabel={size(dataset.size_bytes)}
                 large
               />
               <CopyButton
                 command={downloadCommand}
                 label="Copy download command"
+                filename={dataset.filename}
+                sizeBytes={dataset.size_bytes}
+                sizeLabel={size(dataset.size_bytes)}
                 large
               />
             </div>
@@ -457,10 +537,38 @@ export const Dataset = ({ dataset, counts }) => {
           </span>
           <Badges row={dataset} />
         </p>
-        {description !== "" && (
-          <p class="mt-4 leading-[1.65] text-muted">
-            {description}
-          </p>
+        {(description !== "" || hasPreview) && (
+          <div
+            class={`mt-6 mb-5 grid gap-5 ${
+              description !== "" && hasPreview
+                ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,378px)]"
+                : ""
+            }`}
+          >
+            {description !== "" && (
+              <section class="card p-6">
+                <p class="leading-[1.65] text-muted">{description}</p>
+              </section>
+            )}
+            {hasPreview && (
+              <figure class="preview-thumb">
+                <a
+                  href={`${DATA_API}/v1/releases/${dataset.release_id}/preview.png`}
+                  data-preview
+                  aria-label="Open the full size plot"
+                >
+                  <img
+                    src={`${DATA_API}/v1/releases/${dataset.release_id}/preview.png`}
+                    alt={previewAlt(dataset)}
+                    loading="lazy"
+                    width="640"
+                    height="400"
+                  />
+                </a>
+                <figcaption>{previewCaption(dataset)}</figcaption>
+              </figure>
+            )}
+          </div>
         )}
 
         {dataset.known_bug === 1 && (
@@ -566,10 +674,6 @@ export const Dataset = ({ dataset, counts }) => {
                   ["type", instrument.instrument_type?.replace(/_/g, " ")],
                   ["label", instrument.label],
                   [
-                    "filters",
-                    decode(instrument.filter_codes_json, []).join(", ") || null,
-                  ],
-                  [
                     "wavelengths",
                     instrument.wavelength_min === null
                       ? null
@@ -593,7 +697,9 @@ export const Dataset = ({ dataset, counts }) => {
                   ],
                   [
                     "resolving power",
-                    <Scientific>{num(instrument.resolving_power)}</Scientific>,
+                    instrument.resolving_power === null
+                      ? null
+                      : <Scientific>{num(instrument.resolving_power)}</Scientific>,
                   ],
                   [
                     "depths",
@@ -613,15 +719,32 @@ export const Dataset = ({ dataset, counts }) => {
                       ? null
                       : JSON.stringify(decode(instrument.noise_maps_json)),
                   ],
-                  [
-                    "capabilities",
-                    Object.entries(decode(instrument.capabilities_json, {}))
-                      .filter(([, able]) => able === true)
-                      .map(([name]) => name)
-                      .join(", ") || null,
-                  ],
                 ]}
               />
+            </Section>
+          )}
+
+          {instrument !== null && (
+            <Section title="Capabilities">
+              <Fields
+                entries={CAPABILITIES.map((name) => {
+                  const label = name.replace("can_do_", "").replace(/_/g, " ");
+                  return [
+                    label,
+                    <Flag yes={capabilities[name] === true} label={label} />,
+                  ];
+                })}
+              />
+            </Section>
+          )}
+
+          {instrumentFilters.length > 0 && (
+            <Section title={`Filters (${instrumentFilters.length})`}>
+              <ul class="grid max-h-96 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-1 overflow-y-auto pr-2 font-mono text-xs">
+                {instrumentFilters.map((filter) => (
+                  <li>{filter}</li>
+                ))}
+              </ul>
             </Section>
           )}
 
@@ -667,7 +790,7 @@ export const Dataset = ({ dataset, counts }) => {
           )}
 
           {(citations.length > 0 || Object.keys(metadata).length > 0) && (
-            <Section title="Citations and metadata">
+            <Section title="Citations">
               {citations.length > 0 && (
                 <>
                   <p class="mb-3 text-sm text-muted">

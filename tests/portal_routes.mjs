@@ -584,10 +584,10 @@ const tests = {
     assert.doesNotMatch(body, /synthesizer-download --dataset NAME/);
     assert.match(body, /aria-label="Syndex links"/);
     assert.match(body, /Submit a dataset/);
-    assert.match(body, /Synthesizer project/);
+    assert.match(body, /synthesizer-project\.github\.io/);
     assert.doesNotMatch(body, />API<\/a>/);
     assert.match(body, /src="\/syndex\/static\/syndex_logo_2\.png"[^>]*class="mx-auto/);
-    assert.match(body, /<footer class="landing-footer[^>]*>240 datasets · 72 GB/);
+    assert.match(body, /<footer class="landing-footer[^>]*>[\s\S]*240 datasets · 72 GB/);
   },
 
   async "generic search includes current file fields"() {
@@ -930,7 +930,7 @@ const tests = {
       "Photoionisation parameters",
       "Available lines (2)",
       "Releases",
-      "Citations and metadata",
+      "Citations",
       "Provenance",
     ].map((title) => body.indexOf(`>${title}</h2>`));
     assert.ok(
@@ -956,7 +956,7 @@ const tests = {
     assert.equal(
       body.match(/<rect x="8" y="8" width="14" height="14" rx="2"><\/rect>/g)
         ?.length,
-      3,
+      4,
     );
     assert.match(body, />download<\/th>/);
     assert.doesNotMatch(body, />command<\/th>/);
@@ -968,6 +968,61 @@ const tests = {
     assert.match(body, /ui\.adsabs\.harvard\.edu\/abs\/2017PASA\.\.\.34\.\.\.58E/);
     assert.match(body, /doi\.org\/10\.1017\/pasa\.2017\.51/);
     assert.match(body, /releases\/2\/citations\.bib/);
+  },
+
+  async "instrument filters get their own card"() {
+    const name = "jwst-nircam";
+    const { body } = await call(`/syndex/datasets/${name}`, {
+      DB: stubDb({
+        rows: {
+          datasets: [{
+            ...GRID_ROW,
+            dataset_id: 3,
+            name,
+            display_name: "JWST NIRCam",
+            data_type: "instrument",
+            description: "NIRCam photometric instrument.",
+            metadata_json: "{}",
+            provenance_json: "{}",
+            current_release_id: 2,
+            filename: "nircam.hdf5",
+            synthesizer_min_version: null,
+            synthesizer_max_version: null,
+            preview_path: null,
+          }],
+          grid: [],
+          axes: [],
+          releases: [],
+          instrument: [{
+            instrument_type: "photometric_imager",
+            label: "NIRCam",
+            filter_codes_json: '["F090W","F150W","F200W"]',
+            wavelength_min: 0.6,
+            wavelength_max: 5,
+            wavelength_units: "μm",
+            resolution: null,
+            resolution_units: null,
+            resolving_power: null,
+            depth_json: null,
+            psfs_json: null,
+            noise_maps_json: null,
+            capabilities_json: JSON.stringify({
+              can_do_photometry: true,
+              can_do_imaging: true,
+            }),
+          }],
+        },
+      }),
+    });
+
+    assert.match(body, />Instrument<\/h2>/);
+    assert.match(body, />Filters \(3\)<\/h2>/);
+    assert.match(body, /<li>F090W<\/li><li>F150W<\/li><li>F200W<\/li>/);
+    assert.match(body, />Capabilities<\/h2>/);
+    assert.match(body, /title="photometry: yes"/);
+    assert.match(body, /title="spectroscopy: no"/);
+    assert.doesNotMatch(body, />filters<\/dt>/);
+    assert.doesNotMatch(body, />resolving power<\/dt>/);
   },
 
   async "a dataset that is not there says so as a page"() {
@@ -1186,6 +1241,74 @@ const tests = {
     assert.equal(status, 500);
     assert.doesNotMatch(body, /D1 exploded/);
   },
+  async "a dataset page shows its preview as a clickable thumbnail"() {
+    const env = {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              description: "A grid.",
+              metadata_json: "{}",
+              provenance_json: "{}",
+              current_release_id: 2,
+              filename: "bpass.hdf5",
+              sha256: "e47f",
+              preview_path: "preview/abc123/bpass.png",
+              preview_kind: "spectra",
+              synthesizer_min_version: "1.0.0",
+              synthesizer_max_version: null,
+              deprecated_at: null,
+              known_bug_description: null,
+            },
+          ],
+        },
+      }),
+    };
+    const { status, body } = await call(
+      `/syndex/datasets/${GRID_ROW.name}`,
+      env,
+    );
+    assert.equal(status, 200);
+    // Served through the API, since the bucket is private.
+    assert.match(body, /v1\/releases\/2\/preview\.png/);
+    // Marked for the overlay, and still a plain link without JavaScript.
+    assert.match(body, /data-preview/);
+    // The caption the plot itself no longer carries.
+    assert.match(body, /coloured by luminosity/);
+  },
+
+  async "a dataset with no preview shows no thumbnail"() {
+    const env = {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              description: "A grid.",
+              metadata_json: "{}",
+              provenance_json: "{}",
+              current_release_id: 2,
+              filename: "bpass.hdf5",
+              sha256: "e47f",
+              preview_path: null,
+              preview_kind: null,
+              synthesizer_min_version: "1.0.0",
+              synthesizer_max_version: null,
+              deprecated_at: null,
+              known_bug_description: null,
+            },
+          ],
+        },
+      }),
+    };
+    const { body } = await call(`/syndex/datasets/${GRID_ROW.name}`, env);
+    assert.doesNotMatch(body, /preview\.png/);
+    assert.doesNotMatch(body, /preview-thumb/);
+  },
+
 };
 
 let failures = 0;

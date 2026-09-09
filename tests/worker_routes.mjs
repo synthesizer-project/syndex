@@ -667,6 +667,55 @@ const tests = {
     assert.equal(response.status, 404);
   },
 
+  async "a preview is served as an immutable png"() {
+    const env = {
+      DB: stubDb({ rows: [{ preview_path: "preview/abc/grid.png" }] }),
+      FILES: {
+        get: async () => ({
+          body: "png-bytes",
+          size: 9,
+          httpEtag: '"abc"',
+        }),
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/preview.png`),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/png");
+    // This URL names a release, not a digest, and a regenerated preview
+    // repoints it at new bytes -- so it must revalidate rather than being
+    // pinned in browsers as immutable.
+    assert.doesNotMatch(response.headers.get("cache-control"), /immutable/);
+    assert.match(response.headers.get("cache-control"), /must-revalidate/);
+  },
+
+  async "a file with no preview says so rather than serving a broken image"() {
+    const env = {
+      DB: stubDb({ rows: [{ preview_path: null }] }),
+      FILES: { get: async () => null },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/preview.png`),
+      env,
+    );
+    assert.equal(response.status, 404);
+    assert.match(JSON.stringify(response), /.*/);
+  },
+
+  async "a recorded preview missing from R2 is a server fault"() {
+    const env = {
+      DB: stubDb({ rows: [{ preview_path: "preview/abc/grid.png" }] }),
+      FILES: { get: async () => null },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/preview.png`),
+      env,
+    );
+    assert.equal(response.status, 502);
+  },
+
 };
 
 let failures = 0;

@@ -123,11 +123,6 @@ body > .landing-links {
   inset: 0 0 auto;
 }
 
-body > .landing-footer {
-  position: absolute;
-  inset: auto 0 0;
-}
-
 /* The org site's card: same radius, same translucent surface, same border. */
 @utility card {
   background-color: rgba(12, 24, 41, 0.55);
@@ -249,7 +244,7 @@ body > .landing-footer {
 
 @media (width >= 64rem) {
   #catalogue-results {
-    max-height: max(calc(100vh - 13rem), var(--filter-height));
+    max-height: max(calc(100dvh - 17rem), var(--filter-height));
   }
 }
 
@@ -297,4 +292,105 @@ body > .landing-footer {
 }
 #busy.htmx-request {
   visibility: visible;
+}
+
+/* Preview plots use their own card beside the description and open at full size. */
+.preview-thumb {
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.5rem 0.25rem;
+  background: var(--color-surface);
+}
+
+.preview-thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+}
+
+.preview-thumb a:focus-visible {
+  outline: 2px solid var(--color-accent-light);
+  outline-offset: 2px;
+}
+
+.preview-thumb figcaption {
+  margin-top: 0.4rem;
+  color: var(--color-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+/* Stack description and preview cards on narrow screens. */
+@media (max-width: 40rem) {
+  .preview-thumb {
+    width: 100%;
+  }
+}
+
+/* The enlarged view. A native dialog gives the focus trap, the Escape key and
+ * the inert background for free, so none of that is reimplemented. */
+.preview-overlay {
+  /* A modal dialog is centred by the user agent through margin: auto on a
+   * fixed, inset-0 box. Tailwind's preflight sets margin: 0 on every element,
+   * which removes that and pins the dialog to the top left, so the centring
+   * has to be restored explicitly. */
+  margin: auto;
+  max-width: min(96vw, 1100px);
+  max-height: 92vh;
+  border: 1px solid var(--color-line-hover);
+  border-radius: 0.75rem;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.preview-overlay::backdrop {
+  background: rgba(3, 8, 16, 0.82);
+}
+
+body:has(dialog[open]) {
+  overflow: hidden;
+}
+
+dialog[open] {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.preview-overlay {
+  position: fixed;
+}
+
+.preview-overlay img {
+  display: block;
+  max-width: 100%;
+  max-height: 78vh;
+  height: auto;
+  margin: 0 auto;
+}
+
+.preview-overlay figcaption {
+  padding: 0.75rem 1.25rem 1rem;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.preview-overlay .preview-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.preview-overlay .preview-close:hover {
+  color: var(--color-text);
 }

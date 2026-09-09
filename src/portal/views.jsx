@@ -184,7 +184,7 @@ export const Badges = ({ row }) => (
 );
 
 /** Compact, accessible value for boolean table columns. */
-const Flag = ({ yes, label }) => (
+export const Flag = ({ yes, label }) => (
   <span
     class={yes ? "text-accent-light" : "text-muted"}
     title={`${label}: ${yes ? "yes" : "no"}`}
@@ -271,6 +271,7 @@ export const Layout = ({
           has one origin and one thing that can go down. */}
       <script src={`${BASE}/static/htmx.min.js`} defer></script>
       <script src={`${BASE}/static/filters.js`} defer></script>
+      <script src={`${BASE}/static/preview.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
       <Background />
@@ -352,12 +353,6 @@ export const Layout = ({
           aria-label="Syndex links"
           class="landing-links flex w-full flex-wrap justify-end gap-2 px-6 pt-6"
         >
-          <a
-            href="https://synthesizer-project.org/"
-            class="rounded-full border border-line bg-surface/70 px-4 py-2 text-xs text-muted no-underline transition-colors hover:border-line-hover hover:text-text"
-          >
-            Synthesizer project
-          </a>
           <a href={`${BASE}/submit`} class="btn text-xs no-underline">
             Submit a dataset
           </a>
@@ -371,28 +366,113 @@ export const Layout = ({
         class={
           bare
             ? "mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-6 py-12"
-            : "mx-auto w-full max-w-7xl px-6 py-8"
+            : "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-6 py-8"
         }
       >
         {children}
       </main>
-      {!bare && (
-        <footer class="mx-auto w-full max-w-7xl px-6 pt-4 pb-12 text-sm text-muted">
-          <div class="border-t border-line pt-6">
-            Part of{" "}
-            <a href="https://synthesizer-project.org/">
-              the Synthesizer project
-            </a>
-            . Files are served from{" "}
-            <a href={`${DATA_API}/v1/datasets`}>the catalogue API</a>.
+      <footer
+        class={`${
+          bare
+            ? "landing-footer w-full px-6 pb-8 text-center"
+            : "mx-auto w-full max-w-7xl px-6 pt-4 pb-12"
+        } text-sm text-muted`}
+      >
+          <div class={`${bare ? "" : "border-t border-line pt-6"} text-center`}>
+          {footer !== null && <div class="mb-5">{footer}</div>}
+          <a
+            href="https://synthesizer-project.github.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 text-sm font-normal tracking-[0.12em] text-muted uppercase no-underline transition-colors hover:text-text"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+              class="h-5 w-5"
+            >
+              <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+            </svg>
+            synthesizer-project.github.io
+          </a>
+        </div>
+      </footer>
+      <dialog
+        id="bulk-command"
+        class="card m-auto w-[min(46rem,calc(100%-2rem))] overflow-visible border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
+      >
+        <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
+          <div class="min-w-0 flex-1">
+            <p data-command-eyebrow class="label-caps mb-2 text-accent-light">Ready to run</p>
+            <h2 data-command-title class="text-2xl leading-tight">Download command</h2>
+            <p data-command-intro class="mt-2 text-sm text-muted">Copied to your clipboard</p>
           </div>
-        </footer>
-      )}
-      {bare && footer !== null && (
-        <footer class="landing-footer w-full px-6 pb-8 text-center text-sm text-muted">
-          {footer}
-        </footer>
-      )}
+          <div>
+            <button
+              type="button"
+              data-close-command-dialog
+              aria-label="Close"
+              class="btn-quiet inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full text-2xl leading-none"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+        <div data-command-content class="flex flex-col">
+          <div data-command-size-panel class="border-y border-line bg-bg/55 px-6 py-5 sm:px-8">
+            <p data-command-filename class="font-mono text-sm break-all text-text" hidden></p>
+            <p data-bulk-size class="mt-3 text-3xl font-medium text-accent-light tabular-nums"></p>
+            <p data-command-size-label class="label-caps mt-1">Download size</p>
+          </div>
+          <div data-command-box class="px-6 pt-5 pb-6 sm:px-8 sm:pb-8">
+            <div class="relative">
+              <pre class="max-h-72 min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-line bg-bg p-4 pr-20 text-sm leading-relaxed"><code data-bulk-command-text=""></code></pre>
+              <button
+                type="button"
+                data-copy-bulk-command=""
+                aria-label="Copy command"
+                class="group absolute top-3 right-3 inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg border border-muted bg-surface text-text shadow-lg transition-colors hover:border-accent-light hover:text-accent-light"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                  <rect x="8" y="8" width="14" height="14" rx="2" />
+                  <path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4" />
+                </svg>
+                <span role="tooltip" class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max rounded-lg border border-line bg-surface px-3 py-2 text-xs text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100">Copy command</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </dialog>
+      <dialog
+        id="download-notice"
+        class="card m-auto w-[min(34rem,calc(100%-2rem))] overflow-hidden border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
+      >
+        <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
+          <div class="min-w-0 flex-1">
+            <p class="label-caps mb-2 text-accent-light">Direct download</p>
+            <h2 class="text-2xl leading-tight">Ready to download?</h2>
+          </div>
+          <button
+            type="button"
+            data-close-download-notice
+            aria-label="Close"
+            class="btn-quiet inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full text-2xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="border-y border-line bg-bg/55 px-6 py-5 sm:px-8">
+          <p data-download-filename class="font-mono text-sm break-all text-text"></p>
+          <p data-download-size-value class="mt-3 text-3xl font-medium text-accent-light tabular-nums"></p>
+          <p class="label-caps mt-1">Download size</p>
+        </div>
+        <div class="flex items-center justify-end gap-3 px-6 py-5 sm:px-8">
+          <button type="button" data-close-download-notice class="btn-quiet cursor-pointer px-4 py-2 text-sm">Cancel</button>
+          <button type="button" data-confirm-download class="btn cursor-pointer px-5 py-2 text-sm">Download</button>
+        </div>
+      </dialog>
     </body>
   </html>
 );
@@ -1230,6 +1310,7 @@ const Results = ({ tab, filters, rows, axes }) => {
                 <input
                   type="checkbox"
                   value={row.name}
+                  data-size={row.size_bytes}
                   data-dataset-select=""
                   aria-label={`Select ${row.name}`}
                 />
@@ -1278,21 +1359,5 @@ export const Panel = ({ tab, filters, result, noun }) => (
       <Results tab={tab} filters={filters} rows={result.rows} axes={result.axes} />
       </section>
     </div>
-    <dialog
-      id="bulk-command"
-      class="card m-auto w-[min(42rem,calc(100%-2rem))] bg-surface p-6 text-text backdrop:bg-bg/80"
-    >
-      <form method="dialog" class="flex items-center gap-4">
-        <h2 class="flex-1 text-lg">Download selected datasets</h2>
-        <button class="btn-quiet px-3 py-1 text-xs">Close</button>
-      </form>
-      <p class="mt-3 text-sm text-muted">
-        Run this command to download the selected datasets.
-      </p>
-      <pre class="mt-4 max-h-80 overflow-auto rounded-lg border border-line bg-bg p-4 text-xs"><code data-bulk-command-text=""></code></pre>
-      <button type="button" data-copy-bulk-command="" class="btn mt-4 text-xs">
-        Copy commands
-      </button>
-    </dialog>
   </div>
 );

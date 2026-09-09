@@ -773,7 +773,8 @@ export async function dataset(db, name) {
       `SELECT d.*, r.release_id, r.published_at, r.deprecated_at,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description, r.provenance_json,
-              f.file_id, f.filename, f.format, f.size_bytes, f.sha256
+              f.file_id, f.filename, f.format, f.size_bytes, f.sha256,
+              f.preview_path, f.preview_kind
        FROM datasets d
        LEFT JOIN releases r ON r.release_id = d.current_release_id
        LEFT JOIN files f ON f.file_id = r.file_id

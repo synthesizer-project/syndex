@@ -154,12 +154,14 @@ Two constraints are worth recording for anyone attempting this again:
 Each release was repointed at its corrected object and the old object deleted,
 so every dataset still has exactly one release and one stored copy. The
 reconciliation afterwards showed 247 file rows against 247 objects with no
-orphans and no size disagreements.
+orphans and no size disagreements. The catalogue has since grown to 248
+releases and each previewed file adds a second object, so a reconciliation
+today compares 248 file rows and 182 preview paths against 430 objects.
 
 A separate grid recorded `23.01` without the `c` prefix while its file was
 correct, so that one was a catalogue-side fix with no object to rewrite. The
-Cloudy versions in the catalogue are now `c23.01` on 70 grids and `c25.00` on
-three.
+Cloudy versions on current releases are now `c23.01` on 71 grids and `c25.00`
+on three, with six Yggdrasil grids recording no photoionisation code at all.
 
 `syndex-upload` now warns when a filename says `cloudy-cXX.YY` and the file
 records something else, comparing loosely enough that a missing `c` prefix is
@@ -167,7 +169,7 @@ not treated as a disagreement.
 
 ## Incident links
 
-64 of the 77 photoionised grids record the incident grid they were derived
+67 of the 80 photoionised grids record the incident grid they were derived
 from. Six of those links were added after the migration, once querying the
 whole catalogue revealed they had never been set.
 

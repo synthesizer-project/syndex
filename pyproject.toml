@@ -19,6 +19,7 @@ test = ["pytest>=8"]
 [project.scripts]
 syndex-upload = "syndex.upload:main"
 syndex-plots = "syndex.plots:main"
+syndex-previews = "syndex.previews:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

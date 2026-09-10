@@ -803,7 +803,8 @@ export async function dataset(db, name) {
     db
       .prepare(
         `SELECT r.release_id, r.published_at, r.known_bug,
-                r.known_bug_description, f.size_bytes, f.sha256
+                r.known_bug_description, r.synthesizer_min_version,
+                r.synthesizer_max_version, f.size_bytes, f.sha256
          FROM releases r JOIN files f ON f.file_id = r.file_id
          WHERE r.dataset_id = ?
          ORDER BY r.published_at DESC, r.release_id DESC`,

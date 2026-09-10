@@ -341,14 +341,22 @@ const Axes = ({ axes }) => (
 
 /** Every release of a dataset, so a result can be pinned to one. */
 const Releases = ({ dataset }) => (
-  <div class="results overflow-x-auto">
+  <div>
     <table class="w-full border-collapse text-sm">
       <thead>
         <tr class="text-left">
           {/* "ID" rather than "release": the number identifies a release, but
               nobody reading this page thinks in releases, and the column
               beside it is already the publication date. */}
-          {["ID", "published", "size", "download", ""].map((label) => (
+          {[
+            "ID",
+            "published",
+            "size",
+            "minimum version",
+            "maximum version",
+            "download",
+            "",
+          ].map((label) => (
             <th
               scope="col"
               class="label-caps border-b border-line px-4 py-2.5"
@@ -369,6 +377,12 @@ const Releases = ({ dataset }) => (
             <td class="px-4 py-2 text-muted">{date(release.published_at)}</td>
             <td class="px-4 py-2 text-right tabular-nums">
               {size(release.size_bytes)}
+            </td>
+            <td class="px-4 py-2 whitespace-nowrap text-muted">
+              {release.synthesizer_min_version ?? "—"}
+            </td>
+            <td class="px-4 py-2 whitespace-nowrap text-muted">
+              {release.synthesizer_max_version ?? "—"}
             </td>
             <td class="px-4 py-2">
               <div class="flex items-center gap-2 whitespace-nowrap">
@@ -482,6 +496,10 @@ export const Dataset = ({ dataset, counts }) => {
     .filter(Boolean)
     .join(", ") || "Any version";
   const downloadCommand = `synthesizer-download --dataset ${dataset.name}`;
+  const previewVersion = dataset.preview_path?.split("/")[1];
+  const previewUrl = `${DATA_API}/v1/releases/${dataset.release_id}/preview.png${
+    previewVersion ? `?v=${encodeURIComponent(previewVersion)}` : ""
+  }`;
   const tab =
     TABS.find((candidate) => candidate.types?.includes(dataset.data_type)) ??
     TABS.find((candidate) => candidate.types === null);
@@ -553,12 +571,12 @@ export const Dataset = ({ dataset, counts }) => {
             {hasPreview && (
               <figure class="preview-thumb">
                 <a
-                  href={`${DATA_API}/v1/releases/${dataset.release_id}/preview.png`}
+                  href={previewUrl}
                   data-preview
                   aria-label="Open the full size plot"
                 >
                   <img
-                    src={`${DATA_API}/v1/releases/${dataset.release_id}/preview.png`}
+                    src={previewUrl}
                     alt={previewAlt(dataset)}
                     loading="lazy"
                     width="640"

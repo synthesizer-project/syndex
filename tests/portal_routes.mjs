@@ -853,6 +853,8 @@ const tests = {
               published_at: "2026-09-04T16:47:01.550420Z",
               known_bug: 0,
               known_bug_description: null,
+              synthesizer_min_version: "1.0.0",
+              synthesizer_max_version: null,
               size_bytes: 203126664,
               sha256: "e47f",
             },
@@ -861,6 +863,8 @@ const tests = {
               published_at: "2025-01-02T00:00:00.000000Z",
               known_bug: 1,
               known_bug_description: "Superseded metadata.",
+              synthesizer_min_version: "0.9.0",
+              synthesizer_max_version: "0.9.9",
               size_bytes: 200000000,
               sha256: "abcd",
             },
@@ -959,6 +963,8 @@ const tests = {
       4,
     );
     assert.match(body, />download<\/th>/);
+    assert.match(body, />minimum version<\/th><th[^>]*>maximum version<\/th>/);
+    assert.match(body, />0\.9\.0<\/td><td[^>]*>0\.9\.9<\/td>/);
     assert.doesNotMatch(body, />command<\/th>/);
     assert.doesNotMatch(body, />sha256<\/th>/);
     // A reference list shows the first author and year, not the full list,
@@ -1273,6 +1279,7 @@ const tests = {
     assert.equal(status, 200);
     // Served through the API, since the bucket is private.
     assert.match(body, /v1\/releases\/2\/preview\.png/);
+    assert.match(body, /preview\.png\?v=abc123/);
     // Marked for the overlay, and still a plain link without JavaScript.
     assert.match(body, /data-preview/);
     // The caption the plot itself no longer carries.

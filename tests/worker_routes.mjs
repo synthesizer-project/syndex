@@ -667,7 +667,7 @@ const tests = {
     assert.equal(response.status, 404);
   },
 
-  async "a preview is served as an immutable png"() {
+  async "a preview is served with a revalidating cache directive"() {
     const env = {
       DB: stubDb({ rows: [{ preview_path: "preview/abc/grid.png" }] }),
       FILES: {
@@ -702,6 +702,108 @@ const tests = {
     );
     assert.equal(response.status, 404);
     assert.match(JSON.stringify(response), /.*/);
+  },
+
+  async "a HEAD for a preview is a 200 with headers, not a 304"() {
+    // R2's head() yields an object with no body, which is not the same thing
+    // as a failed precondition: reading them alike made every HEAD a 304.
+    const env = {
+      DB: stubDb({ rows: [{ preview_path: "preview/abc/grid.png" }] }),
+      FILES: {
+        head: async () => ({ size: 9, httpEtag: '"abc"' }),
+        get: async () => {
+          throw new Error("HEAD must not fetch the body");
+        },
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/preview.png`, { method: "HEAD" }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-length"), "9");
+    assert.equal(response.headers.get("etag"), '"abc"');
+  },
+
+  async "a failed precondition on a preview is still a 304"() {
+    const env = {
+      DB: stubDb({ rows: [{ preview_path: "preview/abc/grid.png" }] }),
+      FILES: { get: async () => ({ size: 9, httpEtag: '"abc"' }) },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/preview.png`, {
+        headers: { "if-none-match": '"abc"' },
+      }),
+      env,
+    );
+    assert.equal(response.status, 304);
+  },
+
+  async "a release id is digits or it is nothing"() {
+    // Number() accepts all of these, so the handlers that used it resolved
+    // 0x10 to release 16 while the handlers that did not returned a 400.
+    const env = { DB: stubDb({ rows: [] }), FILES: { get: async () => null } };
+    for (const id of ["0x10", "1e3", "1.0", " 1", "-1", "0", "abc"]) {
+      for (const path of [
+        `/v1/releases/${id}`,
+        `/v1/releases/${id}/download`,
+        `/v1/releases/${id}/preview.png`,
+        `/v1/releases/${id}/citations.bib`,
+      ]) {
+        const response = await worker.fetch(
+          new Request(`${ORIGIN}${encodeURI(path)}`),
+          env,
+        );
+        assert.equal(response.status, 400, `${path} should be rejected`);
+      }
+    }
+  },
+
+  async "an unparseable limit falls back rather than binding NaN"() {
+    const bindings = [];
+    const env = { DB: stubDb({ rows: [], bindings }) };
+    await worker.fetch(new Request(`${ORIGIN}/v1/datasets?limit=abc`), env);
+    assert.equal(bindings[0][6], 100);
+
+    bindings.length = 0;
+    await worker.fetch(new Request(`${ORIGIN}/v1/datasets?limit=99999`), env);
+    assert.equal(bindings[0][6], 1000);
+
+    bindings.length = 0;
+    await worker.fetch(new Request(`${ORIGIN}/v1/datasets?limit=7.9`), env);
+    assert.equal(bindings[0][6], 7);
+  },
+
+  async "a filename cannot smuggle a header into content-disposition"() {
+    const env = {
+      DB: stubDb({
+        rows: [
+          {
+            r2_path: "grid/abc/x.hdf5",
+            filename: 'evil"\r\nx-injected: 1.hdf5',
+            size_bytes: 4,
+            sha256: "f".repeat(64),
+          },
+        ],
+      }),
+      FILES: {
+        get: async () => ({
+          body: "bytes",
+          httpEtag: '"e"',
+          writeHttpMetadata() {},
+        }),
+      },
+    };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/v1/releases/3/download`),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-injected"), null);
+    const disposition = response.headers.get("content-disposition");
+    // The only quotes left are the two that delimit the parameter.
+    assert.equal(disposition.match(/"/g).length, 2);
+    assert.doesNotMatch(disposition, /[\r\n]/);
   },
 
   async "a recorded preview missing from R2 is a server fault"() {

@@ -533,9 +533,9 @@ const tests = {
     );
     assert.match(body, /<button type="submit" class="btn mt-2 w-full">Search<\/button>/);
     assert.doesNotMatch(body, /Apply filters/);
-    assert.match(body, />Select range<\/summary>/);
-    assert.match(body, />reprocessed<\/a><\/th>/);
-    assert.match(body, /title="Reprocessed: yes"/);
+    assert.match(body, />select range<\/summary>/);
+    assert.match(body, />photoionised<\/a><\/th>/);
+    assert.match(body, /title="Photoionised: yes"/);
     assert.match(body, />spectra<\/a><\/th>/);
     assert.match(body, /title="Spectra: yes"/);
     assert.match(body, />lines<\/a><\/th>/);
@@ -578,7 +578,7 @@ const tests = {
   async "the landing search and copy describe the whole catalogue"() {
     const { body } = await call("/syndex", { DB: stubDb() });
 
-    assert.match(body, /An index of SPS and AGN grids/);
+    assert.match(body, /An index of stellar population synthesis \(SPS\) and AGN grids/);
     assert.match(body, /action="\/syndex\/search"/);
     assert.match(body, /name, description, type or filename/);
     assert.doesNotMatch(body, /synthesizer-download --dataset NAME/);
@@ -640,12 +640,14 @@ const tests = {
     assert.match(body, /data-bulk-command-text=""/);
   },
 
-  async "the result table owns both scroll directions"() {
+  async "the result table scrolls horizontally and grows vertically"() {
     const { body } = await call("/syndex/search", { DB: stubDb() });
 
-    assert.match(body, /results card min-w-0 overflow-auto/);
+    assert.match(body, /results card min-w-0 overflow-x-auto/);
     assert.match(body, /grid min-w-0 items-start/);
     assert.match(body, />size<\/a><\/th>/);
+    assert.match(body, />format<\/a><\/th>/);
+    assert.match(body, />hdf5<\/td>/);
     assert.match(body, />203 MB<\/td>/);
     assert.match(body, />published<\/a><\/th>/);
     assert.match(body, />2026-09-04<\/td>/);
@@ -783,6 +785,18 @@ const tests = {
     assert.equal(headers.get("vary"), "HX-Request");
   },
 
+  async "dataset links preserve the filtered result URL"() {
+    const { body } = await call(
+      "/syndex/search?type=grid&model=BPASS&content=lines",
+      { DB: stubDb() },
+    );
+
+    assert.match(
+      body,
+      /return=%2Fsyndex%2Fsearch%3Fmodel%3DBPASS%26content%3Dlines%26type%3Dgrid/,
+    );
+  },
+
   async "a dataset page prints the command that fetches it"() {
     const env = {
       DB: stubDb({
@@ -873,8 +887,9 @@ const tests = {
       }),
     };
 
+    const returnTo = "/syndex/search?model=BPASS&content=lines&type=grid";
     const { status, body } = await call(
-      `/syndex/datasets/${GRID_ROW.name}`,
+      `/syndex/datasets/${GRID_ROW.name}?return=${encodeURIComponent(returnTo)}`,
       env,
     );
 
@@ -884,6 +899,10 @@ const tests = {
       /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_2\.png"/,
     );
     assert.match(body, /A grid\. With another line\./);
+    assert.match(
+      body,
+      /href="\/syndex\/search\?model=BPASS&amp;content=lines&amp;type=grid"/,
+    );
     assert.match(body, /aria-label="Direct download bpass\.hdf5"/);
     assert.match(body, /<span role="tooltip"[^>]*>Direct download bpass\.hdf5<\/span>/);
     assert.match(
@@ -1046,8 +1065,10 @@ const tests = {
     // it has nowhere to put.
     const env = { DB: stubDb() };
     const { body } = await call("/syndex/submit", env);
-    assert.match(body, />Coming soon<\/p>/);
-    assert.match(body, /Dataset submission and upload are not open yet/);
+    assert.match(body, />Not open yet<\/p>/);
+    assert.match(body, /not accepting uploads yet/);
+    // A closed door still has to say where to knock.
+    assert.match(body, /github\.com\/synthesizer-project\/synthesizer\/issues/);
     assert.doesNotMatch(
       body,
       /href="\/syndex\/submit" class="btn absolute/,
@@ -1057,7 +1078,7 @@ const tests = {
     assert.equal((await postSubmission(env)).status, 503);
     const configured = submissionEnv();
     const configuredPage = await call("/syndex/submit", configured);
-    assert.match(configuredPage.body, />Coming soon<\/p>/);
+    assert.match(configuredPage.body, />Not open yet<\/p>/);
     assert.doesNotMatch(configuredPage.body, /<form/);
     assert.equal((await postSubmission(configured)).status, 503);
   },
@@ -1070,7 +1091,7 @@ const tests = {
     );
 
     assert.equal(status, 200);
-    assert.match(body, /1\.1 GB/);
+    assert.match(body, /1 GB/);
     // The picker is inert until the script reveals it, so a browser with no
     // JavaScript is never shown a control that could not work.
     assert.match(body, /<input type="file" id="pick" hidden/);

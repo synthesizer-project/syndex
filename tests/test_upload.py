@@ -898,9 +898,7 @@ def test_singular_axis_names_are_reported():
 
 def test_compound_units_are_not_mistaken_for_the_base_unit():
     """'yr**2' shares a prefix with 'yr' and must not pass as a time unit."""
-    (warning,) = upload.check_axis_conventions(
-        [{"name": "ages", "units": "yr**2"}]
-    )
+    (warning,) = upload.check_axis_conventions([{"name": "ages", "units": "yr**2"}])
     assert "yr**2" in warning
 
 
@@ -919,8 +917,14 @@ def test_conventional_axes_produce_no_warnings():
 
 def test_unknown_axes_are_left_alone():
     """A new axis must not be blocked by a list that has not heard of it."""
-    assert upload.check_axis_conventions([{"name": "qpah", "units": "dimensionless"}]) == []
-    assert upload.check_axis_conventions([{"name": "alpha", "units": "dimensionless"}]) == []
+    assert (
+        upload.check_axis_conventions([{"name": "qpah", "units": "dimensionless"}])
+        == []
+    )
+    assert (
+        upload.check_axis_conventions([{"name": "alpha", "units": "dimensionless"}])
+        == []
+    )
 
 
 class FlakyMultipartClient:
@@ -1061,15 +1065,21 @@ def test_filename_and_recorded_cloudy_version_must_agree():
 
 def test_a_missing_c_prefix_is_not_a_disagreement():
     """One grid recorded '23.01'; that is a spelling difference, not a bug."""
-    assert upload.check_photoionisation_version(
-        Path("bpass_cloudy-c23.01-sps.hdf5"), "23.01"
-    ) == []
+    assert (
+        upload.check_photoionisation_version(
+            Path("bpass_cloudy-c23.01-sps.hdf5"), "23.01"
+        )
+        == []
+    )
 
 
 def test_filenames_without_a_cloudy_version_are_ignored():
-    assert upload.check_photoionisation_version(
-        Path("maraston24-Te00_kroupa.hdf5"), "c23.01"
-    ) == []
+    assert (
+        upload.check_photoionisation_version(
+            Path("maraston24-Te00_kroupa.hdf5"), "c23.01"
+        )
+        == []
+    )
 
 
 CITATION = {
@@ -1132,7 +1142,9 @@ def test_a_paper_cited_by_two_files_is_stored_once(tmp_path):
 def test_citation_order_is_preserved(tmp_path):
     """Position records the conventional citation order."""
     database = migrated_database()
-    _publish(database, _plan_with_citations(tmp_path, "ordered", [CITATION, RELEASE_PAPER]))
+    _publish(
+        database, _plan_with_citations(tmp_path, "ordered", [CITATION, RELEASE_PAPER])
+    )
 
     rows = database.execute(
         "SELECT c.bibcode FROM file_citations fc JOIN citations c "
@@ -1162,13 +1174,13 @@ def test_a_file_with_no_citations_writes_nothing(tmp_path):
 def test_bibtex_fields_are_extracted():
     """Enough is parsed to render a citation without a BibTeX parser."""
     entries = upload.parse_bibtex_entries(
-        '@ARTICLE{2018MNRAS.480.1247K,\n'
-        '       author = {{Kubota}, Aya and {Done}, Chris},\n'
+        "@ARTICLE{2018MNRAS.480.1247K,\n"
+        "       author = {{Kubota}, Aya and {Done}, Chris},\n"
         '        title = "{A physical model of the broad-band continuum}",\n'
-        '      journal = {\\mnras},\n'
-        '         year = 2018,\n'
-        '          doi = {10.1093/mnras/sty1890},\n'
-        '}\n'
+        "      journal = {\\mnras},\n"
+        "         year = 2018,\n"
+        "          doi = {10.1093/mnras/sty1890},\n"
+        "}\n"
     )
     (record,) = entries.values()
     assert record["bibcode"] == "2018MNRAS.480.1247K"

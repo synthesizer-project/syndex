@@ -1,10 +1,16 @@
-# Data Service Schema
+# Data service schema
 
 R2 stores immutable files. D1 is the authoritative catalogue containing file
 locations, release history, complete extracted metadata, and publication state.
 
-The executable schema lives in [`migrations/0001_initial.sql`](../migrations/0001_initial.sql).
-SQL below explains that migration and must be updated with it.
+The executable schema is the ordered migrations in
+[`migrations/`](../migrations). The `CREATE TABLE` blocks below are composites
+showing each table as it now stands, with the columns later migrations added
+folded in, and must be updated whenever a migration is. Column order here is
+logical rather than physical: SQLite appends an `ALTER TABLE ADD COLUMN`
+column to the end of the row, so `is_ci`, `has_spectra`, `has_lines`,
+`known_bug`, `known_bug_description`, `preview_path` and `preview_kind` sit
+last on disk.
 
 ## Concepts
 
@@ -19,7 +25,7 @@ Physical format is independent of semantic type. For example, a Synthesizer
 grid and a CAMELS snapshot are both HDF5 files but have `data_type = grid` and
 `data_type = simulation_data`, respectively.
 
-## R2 Layout
+## R2 layout
 
 ```text
 {prefix}/{sha256}/{filename}
@@ -53,11 +59,17 @@ datasets
   +-- releases
         |
         +-- files
+        |     |
+        |     +-- file_citations -> citations
+        |
         +-- grid_metadata
         |     |
         |     +-- incident_release_id -> releases
         |
         +-- grid_axes
+        +-- instruments
+
+submissions        (contributed, unreviewed; no foreign keys into the above)
 ```
 
 ## Files
@@ -71,9 +83,24 @@ CREATE TABLE files (
     r2_path TEXT NOT NULL UNIQUE,
     format TEXT NOT NULL,
     size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
-    sha256 TEXT NOT NULL UNIQUE CHECK (length(sha256) = 64)
+    sha256 TEXT NOT NULL UNIQUE CHECK (length(sha256) = 64),
+    preview_path TEXT,
+    preview_kind TEXT
+        CHECK (preview_kind IN ('spectra', 'filters', 'ionising'))
 );
 ```
+
+`preview_path` names an indicative plot in R2, content addressed under a
+`preview/` prefix; only the path is recorded here, because D1 holds metadata
+rather than bytes. `preview_kind` says what the plot shows, so a page can
+caption it without inferring anything from the data type.
+
+Previews attach to files for the same reason citations do: the file is what the
+plot depicts, and a corrected file needs its own plot rather than inheriting a
+stale one. 182 of the 248 releases have one. The rest are neither grids nor
+instruments and have nothing indicative to draw, so both columns stay null —
+a deliberate absence rather than a gap to backfill. `syndex-previews`
+generates them.
 
 ## Datasets
 
@@ -111,7 +138,9 @@ throughout: `data_type = dust_grid`, an R2 prefix of `dust-grid/`, and
 `emission_type` of `dust_attenuation` or `dust_emission`. Both `grid` and
 `dust_grid` still populate `grid_metadata` and `grid_axes`, because the
 underlying HDF5 layout is shared. `data_type` is detected structurally: any
-file whose resolved `grid_type` is `dust` is published as `dust_grid`. `is_test` and `is_ci` are independent of data type and of each other:
+file whose resolved `grid_type` is `dust` is published as `dust_grid`.
+
+`is_test` and `is_ci` are independent of data type and of each other:
 
 - `is_test` marks data that is **deliberately reduced or incomplete** — a
   handful of points per axis, a synthetic fixture — and therefore not suitable
@@ -124,8 +153,12 @@ every CI run and are complete, science-grade files, so they are `is_ci = 1`
 and `is_test = 0`. Conversely a deliberately reduced grid that CI never
 touches is `is_test = 1` and `is_ci = 0`.
 
-Current release and scientific recommendation remain separate decisions
-again.
+Current release and scientific recommendation remain separate decisions.
+
+`licence` and `is_recommended` are curated fields, and both are currently
+unset on every dataset: nothing carries a licence and nothing is marked
+recommended. They are the place those decisions will be recorded, not a
+signal a client can read anything into yet.
 
 `metadata_json` retains data-type-specific curated metadata for non-grid assets
 without forcing them into grid tables. Promote a field to a column only when it
@@ -145,7 +178,8 @@ CREATE TABLE releases (
     synthesizer_min_version TEXT,
     synthesizer_max_version TEXT,
     provenance_json TEXT NOT NULL DEFAULT '{}',
-    known_bug INTEGER NOT NULL DEFAULT 0,
+    known_bug INTEGER NOT NULL DEFAULT 0
+        CHECK (known_bug IN (0, 1)),
     known_bug_description TEXT
 );
 ```
@@ -236,7 +270,7 @@ ADS journal macros such as `\mnras` are normalised on the way in.
 that applying this migration cannot break a deployed Worker that still selects
 it; a later migration can drop it.
 
-## Grid Metadata
+## Grid metadata
 
 One row for each grid release; non-grid datasets have no row:
 
@@ -280,7 +314,7 @@ Model and photoionisation parameters remain separate JSON objects because keys
 vary between models and processing codes. `incident_release_id` links a
 photoionised release to the exact incident release used to produce it.
 
-## Grid Axes
+## Grid axes
 
 One row per axis in a grid release:
 
@@ -340,10 +374,10 @@ CREATE TABLE instruments (
 Metadata is extracted structurally from the Synthesizer instrument
 serialisation layout, the same way grid metadata is extracted from grid
 files, without importing Synthesizer or constructing real instrument
-objects. The four concrete `instrument_type` values and every field they can
-carry are taken directly from `synthesizer.instruments`
-(`PhotometricInstrument`, `PhotometricImager`, `SpectroscopicInstrument`,
-`IntegratedFieldUnit`):
+objects. The five `instrument_type` values — four concrete classes plus a
+collection of them — and every field they can carry are taken directly from
+`synthesizer.instruments` (`PhotometricInstrument`, `PhotometricImager`,
+`SpectroscopicInstrument`, `IntegratedFieldUnit`, `InstrumentCollection`):
 
 | `instrument_type` | Synthesizer class | Carries |
 |---|---|---|
@@ -386,11 +420,100 @@ lighter-weight layout used by Synthesizer's premade instrument cache files
 currently downloadable premade cache file to always be a
 `photometric_imager` — filters, optionally resolution, optionally PSFs).
 
-## Deferred Normalization
+## Deferred normalisation
 
 Aliases and download groups remain in `synthesizer-download`. Spectra, lines,
 and variable parameter dictionaries remain JSON until concrete query or scale
 requirements justify separate tables.
+
+## Submissions
+
+Contributed datasets, before anyone has opened them. Nothing here is part of
+the catalogue: a submission is a request, and publishing it is a separate act
+performed by `syndex-upload` on the reviewer's machine.
+
+```sql
+CREATE TABLE submissions (
+    submission_id INTEGER PRIMARY KEY,
+    submitted_at TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending', 'approved', 'rejected')),
+    reviewed_at TEXT,
+    reviewer_note TEXT,
+
+    name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    data_type TEXT NOT NULL,
+    licence TEXT,
+    citations TEXT,
+
+    upload_token TEXT NOT NULL UNIQUE,
+    filename TEXT,
+    r2_key TEXT,
+    uploaded_at TEXT,
+    uploaded_size_bytes INTEGER,
+
+    declared_sha256 TEXT
+        CHECK (declared_sha256 IS NULL OR length(declared_sha256) = 64),
+
+    submitter_name TEXT NOT NULL,
+    submitter_email TEXT NOT NULL,
+    notes TEXT
+);
+```
+
+The bytes never pass through the Worker. `upload_token` is minted at
+registration and is the only thing that authorises a write; it names one
+prefix of a separate submissions bucket, and the submitter may put one file
+under it. `filename` and `uploaded_size_bytes` are recorded from R2 rather
+than from the form, so nothing here depends on the submitter having described
+the file correctly. `declared_sha256` is unchecked at this stage: the digest
+is verified where the bytes are opened, by the same publishing path that
+verifies every other release. Approving a submission records a decision and
+publishes nothing.
+
+The submission flow is currently shut; see "Why it is shut" in
+[`website.md`](website.md).
+
+## Indexes
+
+Eleven, three of them partial. The partial ones exist because the question
+being asked is always about a small subset, so indexing the whole column would
+cost more to maintain than it saves.
+
+```sql
+CREATE INDEX releases_dataset_id ON releases(dataset_id);
+CREATE INDEX grid_metadata_classification
+    ON grid_metadata(grid_type, emission_type);
+CREATE INDEX datasets_classification ON datasets(data_type, is_test);
+CREATE INDEX instruments_instrument_type ON instruments(instrument_type);
+CREATE INDEX datasets_is_ci ON datasets(is_ci);
+CREATE INDEX grid_metadata_content ON grid_metadata(has_spectra, has_lines);
+CREATE INDEX releases_known_bug ON releases(known_bug) WHERE known_bug = 1;
+CREATE INDEX submissions_pending ON submissions(state, submitted_at);
+CREATE UNIQUE INDEX submissions_pending_name ON submissions(name)
+    WHERE state = 'pending';
+CREATE INDEX file_citations_citation ON file_citations(citation_id);
+CREATE INDEX files_preview ON files(preview_path) WHERE preview_path IS NOT NULL;
+```
+
+| Index | Serves |
+|---|---|
+| `releases_dataset_id` | Listing a dataset's release history |
+| `grid_metadata_classification` | The portal's stellar/AGN and emission facets |
+| `datasets_classification` | Every tab, which is a `data_type` filter |
+| `instruments_instrument_type` | The instruments tab's type facet |
+| `datasets_is_ci` | The CI badge, and Synthesizer's own test fixtures |
+| `grid_metadata_content` | The spectra and lines facets |
+| `releases_known_bug` | Finding flagged releases; only three rows qualify |
+| `submissions_pending` | The review queue, oldest question first |
+| `submissions_pending_name` | A constraint rather than a lookup: only one submission may be pending under a given name, so two contributors cannot collide into a reviewer's lap |
+| `file_citations_citation` | "Which files cite this paper?" |
+| `files_preview` | Reconciling preview objects against the bucket |
+
+`grid_axes` has no index of its own: it holds 405 rows, so an axis filter is
+an `EXISTS` subquery over a table small enough to scan.
 
 ## Recovery
 

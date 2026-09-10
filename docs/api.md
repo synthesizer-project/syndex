@@ -8,9 +8,14 @@ D1 is authoritative for catalogue metadata and R2 for file bytes. The Worker
 queries both through bindings and never parses HDF5.
 
 The base URL is `https://data.synthesizer-project.org`, bound as a Worker
-custom domain so Cloudflare manages its DNS record and certificate.
-`workers.dev` is disabled in [`wrangler.jsonc`](../wrangler.jsonc), so this is
-the only public hostname serving the catalogue.
+custom domain so Cloudflare manages its DNS record and certificate. The bare
+root is not a route and returns `404`; every endpoint is under `/v1`.
+
+`workers.dev` stays enabled in [`wrangler.jsonc`](../wrangler.jsonc) as a
+fallback entrypoint, because security products routinely block or
+TLS-intercept newly registered domains; `synthesizer-download` falls back to
+that hostname when the branded one cannot be reached. Since `download_url` is
+built from the request origin, the API behaves identically on both.
 
 ## Conventions
 
@@ -19,10 +24,14 @@ supported; anything else returns `405`. Every response carries
 `Access-Control-Allow-Origin: *`, so the catalogue website can call the API
 directly from a browser.
 
-Columns stored as serialized JSON in D1 are decoded before being returned, and
-their `_json` suffix is dropped. `citations_json` is returned as `citations`
-holding a real array, not a string. SQLite integer booleans are returned as
+Columns stored as serialised JSON in D1 are decoded before being returned, and
+their `_json` suffix is dropped, so `metadata_json` comes back as a real
+`metadata` object rather than a string. SQLite integer booleans are returned as
 `true`/`false`.
+
+A release id must be written as digits. `Number()` would accept `0x10`, `1e3`,
+`1.0` and a leading space, so the check is deliberately stricter than parsing:
+anything but digits is a `400`, on every endpoint that takes one.
 
 `download_url` is absolute, built from the origin the request arrived on, so a
 client can use it verbatim rather than rejoining it to a configured base. The
@@ -33,9 +42,13 @@ Errors are `{"error": "explanation"}` with an appropriate status code.
 
 | Status | Meaning |
 |---|---|
-| `400` | Malformed path parameter, such as a non-integer release id |
-| `404` | Unknown route, dataset name, or release id |
+| `204` | `OPTIONS` preflight |
+| `206` | Partial content, for a satisfied `Range` request |
+| `304` | The client's `ETag` still matches |
+| `400` | Malformed path parameter, such as a release id that is not digits |
+| `404` | Unknown route, dataset name, or release id, or a release with no preview |
 | `405` | Unsupported HTTP method |
+| `416` | A `Range` outside the file |
 | `500` | Unhandled error; details are logged, not returned |
 | `502` | D1 references an R2 object that is no longer present |
 
@@ -54,7 +67,7 @@ Lists datasets with summary information from the current release.
 | `is_ci` | `true` or `false`; downloaded by Synthesizer's CI or not | all |
 | `has_spectra` | `true` or `false`; grids carrying spectra or not | all |
 | `has_lines` | `true` or `false`; grids carrying line luminosities or not | all |
-| `limit` | Page size, clamped to 1–1000 | `100` |
+| `limit` | Page size, truncated and clamped to 1–1000; anything unparseable falls back to the default | `100` |
 | `after` | Dataset name to continue after, from a previous `cursor` | start |
 
 Datasets are ordered by name. `cursor` is the last name in a full page, or
@@ -69,14 +82,18 @@ Datasets are ordered by name. `cursor` is the last name in a full page, or
       "description": "Production dust emission grid...",
       "data_type": "dust_grid",
       "is_test": false,
+      "is_ci": false,
       "is_recommended": false,
       "licence": null,
       "release_id": 5,
       "published_at": "2026-09-04T16:47:01.631937Z",
+      "file_id": 5,
       "filename": "draine_li_dust_emission_grid_MW_3p1.hdf5",
       "format": "hdf5",
       "size_bytes": 139567192,
       "sha256": "dd59c8acc469918877c8444634d013a81d12dd68d1e9ac34d9b00b13529e9349",
+      "has_spectra": true,
+      "has_lines": false,
       "download_url": "https://data.synthesizer-project.org/v1/releases/5/download"
     }
   ],
@@ -86,8 +103,9 @@ Datasets are ordered by name. `cursor` is the last name in a full page, or
 
 A dataset with no current release still appears, with null release fields
 including a null `download_url`. `has_spectra` and `has_lines` appear only for
-grids; other data types omit them. Filtering on either restricts the listing
-to grids, since only grids have contents to report.
+`grid` and `dust_grid` datasets; other data types omit them. Filtering on
+either restricts the listing to those, since nothing else has contents to
+report.
 
 ## `GET /v1/datasets/{name}`
 
@@ -106,6 +124,7 @@ by `axis_index` and include complete `values`.
   "display_name": "BPASS 2.2.1 Cloudy SPS test grid",
   "data_type": "grid",
   "is_test": true,
+  "is_ci": true,
   "is_recommended": false,
   "licence": null,
   "citations": [],
@@ -152,7 +171,10 @@ by `axis_index` and include complete `values`.
       "wavelength_min": 0.000129662,
       "wavelength_max": 299293000000.0,
       "wavelength_units": "Å",
+      "has_spectra": true,
+      "has_lines": true,
       "incident_release_id": null,
+      "incident_release_url": null,
       "axes": [
         {
           "axis_index": 0,
@@ -166,7 +188,18 @@ by `axis_index` and include complete `values`.
         }
       ]
     },
-    "instrument": null
+    "instrument": null,
+    "citations": [
+      {
+        "bibcode": "2017PASA...34...58E",
+        "doi": "10.1017/pasa.2017.51",
+        "authors": "Eldridge, J. J.; Stanway, E. R.; ...",
+        "title": "Binary Population and Spectral Synthesis Version 2.1",
+        "year": 2017,
+        "journal": "PASA",
+        "bibtex": "@ARTICLE{2017PASA...34...58E, ... }"
+      }
+    ]
   }
 }
 ```
@@ -189,6 +222,13 @@ would be: the model, then the release, then the processing code. Every entry
 holds `bibcode`, `doi`, `authors`, `title`, `year`, `journal` and the verbatim
 `bibtex`, so a client can render a reference without parsing anything.
 
+Two different fields are called `citations`, and only one of them matters. The
+one at the top level is the legacy `datasets.citations_json` column: it is `[]`
+on every row and is kept only so this migration could not break a deployed
+client. The citations to use are per release, under `current_release.citations`,
+because a citation belongs to the file somebody downloads rather than to the
+dataset name — two releases of one dataset can need different references.
+
 ## `GET /v1/releases/{id}/citations.bib`
 
 Returns that release's citations as a BibTeX document, `content-type:
@@ -198,11 +238,36 @@ out of a JSON payload is where citation errors come from. A release with no
 recorded citations returns a BibTeX comment saying so rather than an empty
 file, because a gap in the catalogue is not an error.
 
+Entries are ordered by their recorded position and then by year, which is the
+same order as the JSON `citations` array. `cache-control` is
+`public, max-age=3600, must-revalidate`: this URL names a release rather than
+the bytes, and a corrected citation must not stay stale.
+
+## `GET /v1/releases/{id}/preview.png`
+
+Returns the release's indicative preview plot, `content-type: image/png`. The
+bucket is private, so the image is proxied rather than linked.
+
+Not every release has one. A file with nothing indicative to draw returns `404`
+with `{"error": "No preview for this release"}`, which is a deliberate absence
+rather than a failure; 182 of the 248 releases carry a preview. A recorded
+preview that R2 no longer holds is a `502`.
+
+`cache-control` is `public, max-age=3600, must-revalidate` rather than
+`immutable`. The object is content addressed, but this URL is not: it names a
+release, and regenerating a preview repoints that release at new bytes, so
+marking it immutable would pin a stale plot in browsers for a year. The `ETag`
+changes with the object, so revalidating costs a `304`. `HEAD` returns the same
+headers with no body, and `If-None-Match` returns `304`.
+
 
 ## `GET /v1/datasets/{name}/releases`
 
 Lists every release of one dataset, newest publication first, each with
-`is_current`, its file details, and urls for the release and its bytes.
+`is_current`, `known_bug`, its version bounds, its file details, and urls for
+the release and its bytes. This is the endpoint a client uses to choose a
+release, so it carries the bug flag rather than making the client fetch each
+release to find it.
 
 A dataset gains releases as its file is regenerated: the BPASS 2.2.1 Cloudy
 grid, for example, has an earlier release and a later one that adds star
@@ -218,16 +283,36 @@ exist and pins deliberately to one.
     {
       "release_id": 9,
       "published_at": "2026-09-06T12:00:00Z",
+      "deprecated_at": null,
+      "known_bug": false,
+      "known_bug_description": null,
       "is_current": true,
-      "file": { "filename": "...updated-star-fraction.hdf5", "sha256": "..." },
+      "synthesizer_min_version": null,
+      "synthesizer_max_version": null,
+      "file": {
+        "filename": "...updated-star-fraction.hdf5",
+        "format": "hdf5",
+        "size_bytes": 203126664,
+        "sha256": "..."
+      },
       "url": "https://data.synthesizer-project.org/v1/releases/9",
       "download_url": "https://data.synthesizer-project.org/v1/releases/9/download"
     },
     {
       "release_id": 2,
       "published_at": "2026-09-01T12:00:00Z",
+      "deprecated_at": null,
+      "known_bug": true,
+      "known_bug_description": "Superseded: the star fraction data was absent.",
       "is_current": false,
-      "file": { "filename": "...cloudy-c23.01-sps.hdf5", "sha256": "..." },
+      "synthesizer_min_version": null,
+      "synthesizer_max_version": null,
+      "file": {
+        "filename": "...cloudy-c23.01-sps.hdf5",
+        "format": "hdf5",
+        "size_bytes": 201203344,
+        "sha256": "..."
+      },
       "url": "https://data.synthesizer-project.org/v1/releases/2",
       "download_url": "https://data.synthesizer-project.org/v1/releases/2/download"
     }
@@ -309,9 +394,10 @@ installation.
 
 ## Deferred
 
-`GET /v1/facets` appears in [`plan.md`](plan.md) but is not implemented. It
-serves catalogue browsing rather than downloading, so it is deferred until the
-website needs it.
+`GET /v1/facets` is not being built. The portal server-renders its pages and
+computes facet counts from D1 through the binding, so an endpoint with no
+caller outside the site would be speculative. See
+[`website.md`](website.md).
 
 Multipart range responses are not served: a request for several ranges at
 once receives the whole file instead. No client here needs them, and a

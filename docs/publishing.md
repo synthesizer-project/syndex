@@ -1,18 +1,18 @@
-# Publishing and Migration
+# Publishing and migration
 
 This guide is for maintainers publishing files to Syndex. Read it before
 running `syndex-upload` without `--dry-run`.
 
-The remote database has the initial schema applied and the catalogue API is
+The remote database has all seven migrations applied and the catalogue API is
 deployed, so publication and its final API verification both work. Dry-run
 first regardless: publication writes immutable objects.
 
-## How Publication Works
+## How publication works
 
 For every file, `syndex-upload`:
 
 1. Detects its physical format from its contents where possible.
-2. Recognizes Synthesizer grids from their HDF5 structure.
+2. Recognises Synthesizer grids from their HDF5 structure.
 3. Combines command-line defaults with per-file metadata.
 4. Extracts grid axes, spectra names, line IDs, wavelength coverage, model
    metadata, photoionisation metadata, and the file's self-reported generation
@@ -23,6 +23,15 @@ For every file, `syndex-upload`:
 8. Verifies R2 size and SHA-256 metadata.
 9. Registers all catalogue rows using one transactional D1 batch.
 10. Optionally verifies the result through the public API.
+
+Previews are not part of this. A newly published grid has no thumbnail until
+`syndex-previews` is run for it, which is a separate step because it reads the
+whole file back out of R2:
+
+```bash
+uv run syndex-previews --only NAME --output-dir plots   # judge the plot
+uv run syndex-previews --apply                          # upload and record it
+```
 
 R2 and D1 cannot share a transaction. Uploading R2 first prevents D1 from ever
 pointing to a missing object. If D1 registration fails, an unreferenced R2
@@ -43,7 +52,7 @@ Run the command through the project environment:
 uv run syndex-upload --help
 ```
 
-## Format and Type
+## Format and type
 
 Physical format and semantic data type are different:
 
@@ -66,7 +75,7 @@ must be supplied by command-line default or per-file metadata.
 Directories may contain mixed formats and semantic types. A homogeneous batch
 can use command-line defaults; a mixed batch should use a metadata file.
 
-## Dry Run
+## Dry run
 
 Always dry-run a batch first:
 
@@ -86,7 +95,7 @@ plan, and makes no R2, D1, or API requests. All files are validated before any
 real publication starts. One invalid item therefore prevents the entire batch
 from mutating cloud state.
 
-## Metadata File
+## Metadata file
 
 Metadata is JSON with optional batch `defaults` and per-file `files` entries:
 
@@ -147,7 +156,7 @@ Supported catalogue fields:
 | `name` | Stable lowercase dataset identifier | Slug of filename stem |
 | `display_name` | Human-readable catalogue name | Filename stem |
 | `description` | Human-readable explanation | `null` |
-| `data_type` | `grid`, `dust_grid`, `instrument`, `simulation_data`, etc. | Recognized grids only |
+| `data_type` | `grid`, `dust_grid`, `instrument`, `simulation_data`, etc. | Recognised grids only |
 | `is_test` | Deliberately reduced or incomplete, unsuitable for science | `false` |
 | `is_ci` | Downloaded by Synthesizer's CI workflows | `false` |
 | `is_recommended` | Scientifically recommended dataset | `false` |
@@ -187,7 +196,7 @@ that is `is_ci`, and the two are independent. Production files that CI happens
 to download, such as the dust grids and the Euclid NISP instrument cache, are
 `is_ci: true` with `is_test: false`.
 
-## Real Publication
+## Real publication
 
 Real publication requires:
 
@@ -210,6 +219,11 @@ configuration variables are:
 | `SYNTHESIZER_R2_BUCKET` | Override `synthesizer-data` |
 | `SYNTHESIZER_D1_DATABASE_ID` | Override production D1 ID |
 | `SYNTHESIZER_DATA_API_URL` | Enable final public API verification, normally `https://data.synthesizer-project.org` |
+| `SYNTHESIZER_ADS_TOKEN` | ADS API token, for resolving citation bibcodes to BibTeX. Without it the tool asks ADS for an anonymous token, which is enough for occasional use but rate-limited. Get one at <https://ui.adsabs.harvard.edu/user/settings/token> |
+
+`SYNTHESIZER_DATA_API_URL` affects `syndex-upload` only. `syndex-plots` and
+`syndex-previews` read no environment variables for their endpoints; point
+them elsewhere with `--api-url` and `--account-id` respectively.
 
 After reviewing dry-run output, remove `--dry-run`:
 
@@ -236,10 +250,10 @@ file's transfer or registration failure does not prevent remaining validated
 files from being attempted. The command reports every failure and exits
 non-zero.
 
-## Test-Data Pilot
+## The test-data pilot
 
-First migration target is every distinct object the CI workflows currently
-download via `synthesizer-download`:
+The first migration target was every distinct object the CI workflows
+download through `synthesizer-download`:
 
 - BPASS stellar test grid.
 - QSOSED AGN test grid.
@@ -264,12 +278,14 @@ instrument cache file, and SVO archive are production data reused by CI and
 are marked `is_test: false`.
 
 Before uploading, review every derived name, path, classification, axis, model
-field, line list, wavelength range, and checksum. Also measure serialized D1
-metadata sizes. Normalize a field only if the pilot demonstrates a real limit.
+field, line list, wavelength range, and checksum, and measure serialised D1
+metadata sizes. Normalise a field only if there is a demonstrated limit; the
+pilot found none, and the catalogue has since grown to 244 datasets with the
+same JSON columns.
 
-## Full Box Migration
+## How the Box migration ran
 
-Bulk migration will run from HPC scratch one file at a time:
+Bulk migration ran from HPC scratch one file at a time:
 
 ```text
 Box download
@@ -281,14 +297,18 @@ Box download
     -> remove temporary file
 ```
 
-Peak scratch use is one source file plus transfer overhead, not the full Box
-collection. Migration tooling must checkpoint every completed file, resume
-safely, retry interrupted transfers, report failures, bound concurrency by
-scratch capacity, and avoid changing current releases automatically.
+Peak scratch use was therefore one source file plus transfer overhead rather
+than the whole Box collection. The tooling checkpointed every completed file so
+a run could resume, retried interrupted transfers per part rather than per
+file, reported failures without stopping, bounded concurrency by scratch
+capacity, and never changed a current release on its own.
 
-Direct Box-to-R2 streaming is intentionally deferred. HDF5 metadata extraction
-needs local file access, and the final object path is unknown until hashing
-finishes.
+Direct Box-to-R2 streaming was deliberately not attempted: HDF5 metadata
+extraction needs local file access, and the final object path is unknown until
+hashing finishes.
+
+What it found, and what had to be corrected in the source files, is recorded in
+[`migration-notes.md`](migration-notes.md).
 
 ## Recovery
 

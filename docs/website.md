@@ -248,14 +248,23 @@ longer than a landing page and these were measured against WCAG:
 | Token | Value | Contrast | Use |
 |---|---|---|---|
 | `--color-text` | `#dce8f2` | 15.29 | body text |
-| `--color-muted` | `#5a7a96` -> **`#6484a0`** | 4.22 fails AA -> 4.54 passes | secondary metadata, which is most of a table |
+| `--color-muted` | `#5a7a96` -> **`#6d8ea9`** | 4.22 fails AA -> 5.52 | secondary metadata, which is most of a table |
 | `--color-accent` | `#2b6090` | 2.88 | **fill only**, never text or a border |
 | `--color-accent-light` | `#4a9acc` | 6.15 | links, interactive text, focus rings |
 | `--color-dim` | `#304a62` | 2.07 | **non-text only**: borders, dividers |
 
-`--color-muted` at its original value fails AA body text on both backgrounds.
+`--color-muted` at the org site's value fails AA body text on both
+backgrounds. Its first correction, `#6484a0`, cleared AA at rest (4.54) but not
+on a hovered table row, where the accent tint lifts the ground to `#102135` and
+the same colour measures 4.14 — for the secondary text that fills most of the
+table. `#6d8ea9` measures 5.52 on the page, 5.17 on a card and 4.72 on a
+hovered row.
+
 `--color-accent` fails as text and also fails the 3.0 floor for interactive
-boundaries, so it can only sit behind light text. The names carry Tailwind v4's
+boundaries, so it can only sit behind light text. That floor also moved the
+`.btn` border from `rgba(74, 150, 210, 0.55)` (2.62) to `0.7` (3.51): a button
+whose fill measures 1.63 and whose border measured 2.62 was identifiable only
+by its text. The names carry Tailwind v4's
 `--color-` prefix, which is what makes each one generate utilities.
 
 Typography: **`JetBrains Mono` throughout**, at 400 for body text, UI and
@@ -299,6 +308,50 @@ real S3 client that already resumes.
 The review queue has its own table, and it is the one part of the portal that
 writes. Submitters need no account, since every submission is reviewed by a
 human before anything is published; the review page itself is protected.
+
+### Why it is shut
+
+`POST /syndex/submit` returns 503 and the form renders closed. The transfer
+path is built, but as built it is unbounded storage that anyone can fill, and
+R2 Standard bills every month until someone deletes what they left:
+
+- `presignUpload` signs a method, a key and an expiry, and no
+  `content-length`. `BROWSER_UPLOAD_LIMIT` reaches the browser as page copy
+  and a `data-limit` attribute, so the advertised limit is advisory and the
+  real ceiling is R2's 5 GiB single-part maximum.
+- `POST /submit/:token/upload-url` takes the filename from the request, so
+  each call signs a different key. One token can therefore write any number
+  of objects, and `uploadedFile` only reports the extras after they are
+  already stored.
+- `GET /submit/:token` mints twelve hours of prefix-scoped
+  `object-read-write` merely by being viewed, with no size or object-count
+  ceiling, and the token that authorises it is in the URL.
+- Nothing expires the submissions bucket.
+- Turnstile stops a script, not a person with a solver: there is no per-IP,
+  per-address or queue-depth limit on how many tokens can exist.
+
+What has to land before it opens, cheapest first:
+
+1. Sign `content-length` into the presigned PUT and refuse to sign anything
+   over the limit, so the cap is enforced rather than advertised.
+2. Record the key when it is first signed and refuse a second filename, so a
+   submission is one object rather than as many as someone asks for.
+3. Drop the temporary-credential path, or mint it only on a reviewer's
+   action. The ten datasets over 1 GB can have credentials handed out by
+   hand; that is rarer than the abuse it otherwise invites.
+4. An R2 lifecycle rule deleting `submissions/` after fourteen days. A bucket
+   setting rather than a code change, and the one control that bounds
+   accumulation absolutely.
+5. Caps in D1: at most a couple of pending submissions per address, and a
+   ceiling on queue depth.
+
+With those, the worst case is bounded — a limited number of submissions, one
+object each, under the size limit, deleted automatically. Until then the door
+stays shut and the page says where to knock. The form's own validation was
+written and then removed with the handler; the rules it enforced were a
+lowercase-hyphen catalogue name, a display name, a listed data type, a
+contact name, an email address, and no collision with an existing dataset or
+another pending submission.
 
 ## Prerequisites
 

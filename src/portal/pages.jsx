@@ -17,6 +17,7 @@ import {
   Flag,
   Layout,
   Scientific,
+  kindLabel,
   date,
   num,
   size,
@@ -115,7 +116,7 @@ const CopyButton = ({
     type="button"
     data-copy-command={command}
     class={`group relative inline-flex shrink-0 cursor-pointer items-center justify-center border border-muted bg-bg text-text transition-colors hover:border-accent-light hover:text-accent-light ${
-      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
+      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-lg"
     }`}
     aria-label={label}
     data-download-filename={filename}
@@ -154,7 +155,7 @@ const DownloadButton = ({
   <a
     href={href}
     class={`group relative inline-flex shrink-0 items-center justify-center border border-muted bg-bg text-text no-underline transition-colors hover:border-accent-light hover:text-accent-light ${
-      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-md"
+      large ? "h-11 w-11 rounded-lg" : "h-8 w-8 rounded-lg"
     }`}
     aria-label={label}
     data-download-filename={filename}
@@ -211,14 +212,14 @@ function decode(text, fallback = null) {
  */
 export const Landing = ({ counts, datasets, bytes }) => (
   <Layout
-    title="Syndex"
+    title="The Synthesizer data catalogue"
     counts={counts}
     nav={false}
     bare
     active={null}
     footer={
       <>
-        {datasets} datasets · {size(bytes)}
+        {datasets} dataset{datasets === 1 ? "" : "s"} · {size(bytes)}
       </>
     }
   >
@@ -231,11 +232,12 @@ export const Landing = ({ counts, datasets, bytes }) => (
         class="mx-auto mb-7 h-auto w-[clamp(9rem,22vw,15rem)]"
       />
       <h1 class="mx-auto whitespace-nowrap text-[clamp(1rem,4.8vw,2.6rem)] leading-[1.25]">
-        The Synthesizer Database
+        The Synthesizer data catalogue
       </h1>
       <p class="mx-auto mt-4 max-w-3xl text-sm leading-[1.7] text-muted sm:text-base">
-        An index of SPS and AGN grids, dust emission and attenuation models,
-        and instruments for the Synthesizer ecosystem.
+        An index of stellar population synthesis (SPS) and AGN grids, dust
+        emission and attenuation models, and instruments for the Synthesizer
+        ecosystem.
       </p>
 
       <form
@@ -270,10 +272,9 @@ export const Landing = ({ counts, datasets, bytes }) => (
           class="card card-link flex flex-col items-center px-5 pt-7 pb-6 text-center text-text no-underline"
         >
           <span
-            class="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-full border border-line"
-            style="background: rgba(43, 96, 144, 0.06)"
+            class="mb-5 flex h-22 w-22 items-center justify-center rounded-full border border-line bg-accent/5"
           >
-            <span class="text-[1.9rem] font-medium leading-none">
+            <span class="text-3xl font-medium leading-none">
               {counts[tab.id]}
             </span>
           </span>
@@ -330,7 +331,9 @@ const Axes = ({ axes }) => (
               <Scientific>{num(axis.maximum)}</Scientific>
             </td>
             <td class="px-4 py-2 text-muted">{axis.units ?? "—"}</td>
-            <td class="px-4 py-2 tabular-nums">{axis.count}</td>
+            <td class="px-4 py-2 tabular-nums">
+              {axis.count.toLocaleString("en-GB")}
+            </td>
             <td class="px-4 py-2 text-muted">{axis.scale}</td>
           </tr>
         ))}
@@ -370,7 +373,10 @@ const Releases = ({ dataset }) => (
         {dataset.releases.map((release) => (
           <tr class="border-b border-dim last:border-0">
             <td class="px-4 py-2 tabular-nums">
-              <a href={`${DATA_API}/v1/releases/${release.release_id}`}>
+              <a
+                href={`${DATA_API}/v1/releases/${release.release_id}`}
+                title={`Release ${release.release_id} as JSON`}
+              >
                 {release.release_id}
               </a>
             </td>
@@ -460,7 +466,7 @@ const previewAlt = (dataset) =>
   `${previewCaption(dataset)} ${dataset.display_name}.`;
 
 /** One dataset, with everything the catalogue holds about it. */
-export const Dataset = ({ dataset, counts }) => {
+export const Dataset = ({ dataset, counts, returnTo = null }) => {
   const grid = dataset.grid;
   const instrument = dataset.instrument;
   const cloudy = decode(grid?.photoionisation_parameters_json, {});
@@ -514,7 +520,10 @@ export const Dataset = ({ dataset, counts }) => {
         <div class="flex items-center justify-between gap-4">
           <p class="text-base font-medium">
             <a
-              href={`${BASE}/search?type=${encodeURIComponent(dataset.data_type)}`}
+              href={
+                returnTo ??
+                `${BASE}/search?type=${encodeURIComponent(dataset.data_type)}`
+              }
               class="inline-flex items-center gap-2 text-muted no-underline transition-colors hover:text-text"
             >
               <span aria-hidden="true" class="text-xl leading-none">&larr;</span>{" "}
@@ -626,7 +635,7 @@ export const Dataset = ({ dataset, counts }) => {
             <Section title="Grid">
               <Fields
                 entries={[
-                  ["kind", grid.grid_type],
+                  ["kind", kindLabel(grid.grid_type)],
                   [
                     "model",
                     grid.model_name === null
@@ -642,7 +651,7 @@ export const Dataset = ({ dataset, counts }) => {
                       ? null
                       : (
                         <Scientific>
-                          {`${num(grid.wavelength_min)}–${num(grid.wavelength_max)} ${grid.wavelength_units ?? ""}`}
+                          {`${num(grid.wavelength_min)}–${num(grid.wavelength_max)}${grid.wavelength_units ? ` ${grid.wavelength_units}` : ""}`}
                         </Scientific>
                       ),
                   ],
@@ -699,7 +708,7 @@ export const Dataset = ({ dataset, counts }) => {
                         <Scientific>
                           {`${num(instrument.wavelength_min)}–${num(
                             instrument.wavelength_max,
-                          )} ${instrument.wavelength_units ?? ""}`}
+                          )}${instrument.wavelength_units ? ` ${instrument.wavelength_units}` : ""}`}
                         </Scientific>
                       ),
                   ],
@@ -709,7 +718,7 @@ export const Dataset = ({ dataset, counts }) => {
                       ? null
                       : (
                         <Scientific>
-                          {`${num(instrument.resolution)} ${instrument.resolution_units ?? ""}`}
+                          {`${num(instrument.resolution)}${instrument.resolution_units ? ` ${instrument.resolution_units}` : ""}`}
                         </Scientific>
                       ),
                   ],
@@ -807,10 +816,9 @@ export const Dataset = ({ dataset, counts }) => {
             </Section>
           )}
 
-          {(citations.length > 0 || Object.keys(metadata).length > 0) && (
+          {citations.length > 0 && (
             <Section title="Citations">
-              {citations.length > 0 && (
-                <>
+              <>
                   <p class="mb-3 text-sm text-muted">
                     Cite all of these when using this grid: the model, the paper it
                     was released in, and the code it was processed through.
@@ -827,7 +835,6 @@ export const Dataset = ({ dataset, counts }) => {
                           <em class="text-muted">{citation.journal}. </em>
                         ) : null}
                         <a
-                          class="text-accent-light"
                           href={`https://ui.adsabs.harvard.edu/abs/${encodeURIComponent(
                             citation.bibcode,
                           )}/abstract`}
@@ -838,7 +845,6 @@ export const Dataset = ({ dataset, counts }) => {
                           <>
                             {" · "}
                             <a
-                              class="text-accent-light"
                               href={`https://doi.org/${citation.doi}`}
                             >
                               doi
@@ -851,15 +857,19 @@ export const Dataset = ({ dataset, counts }) => {
                   {dataset.release_id ? (
                     <p class="mb-3 text-sm">
                       <a
-                        class="text-accent-light"
                         href={`${DATA_API}/v1/releases/${dataset.release_id}/citations.bib`}
                       >
-                        Download all {citations.length} as BibTeX
+                        Download {citations.length === 1 ? "it" : `all ${citations.length}`}{" "}
+                        as BibTeX
                       </a>
                     </p>
                   ) : null}
-                </>
-              )}
+              </>
+            </Section>
+          )}
+
+          {Object.keys(metadata).length > 0 && (
+            <Section title="Metadata">
               <Fields
                 entries={Object.entries(metadata).map(([key, value]) => [
                   key,
@@ -936,10 +946,19 @@ export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
         role="status"
         class="card mt-5 max-w-2xl border-accent-light p-5"
       >
-        <p class="label-caps text-accent-light">Coming soon</p>
+        <p class="label-caps text-accent-light">Not open yet</p>
         <p class="mt-2 text-sm leading-relaxed text-muted">
-          Dataset submission and upload are not open yet. Email a maintainer
-          in the meantime.
+          Dataset submission is not accepting uploads yet. In the meantime,
+          open an issue on{" "}
+          <a
+            href="https://github.com/synthesizer-project/synthesizer/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            the Synthesizer repository
+          </a>{" "}
+          describing the dataset, and a maintainer will arrange to take the
+          file.
         </p>
       </div>
     )}
@@ -1025,7 +1044,7 @@ export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
               "ADS bibcodes, one per line, such as 2017PASA...34...58E. " +
               "Include the model paper, the paper this grid was released in, " +
               "and the photoionisation code if it was processed through one. " +
-              "The reference itself is fetched from ADS, so a bibcode is all " +
+              "The citation itself is fetched from ADS, so a bibcode is all " +
               "that is needed."
             }
           />
@@ -1080,8 +1099,8 @@ export const Submit = ({ counts, open, sitekey, values = {}, errors = [] }) => (
  * The page that takes the bytes.
  *
  * Two ways up, because one size of file does not fit both: a presigned PUT
- * from the browser for anything under 1 GiB, which is 233 of the
- * catalogue's 241 datasets, and an S3 client for the eight that are larger,
+ * from the browser for anything under 1 GB, which is 233 of the
+ * catalogue's 244 datasets, and an S3 client for the eleven that are larger,
  * where multipart and resumption matter and a browser tab is the wrong
  * place to be holding 26 GiB.
  *
@@ -1094,7 +1113,12 @@ export const Upload = ({ counts, submission, credentials }) => {
   const complete = `${BASE}/submit/${submission.upload_token}/complete`;
 
   return (
-    <Layout title="Send the file" counts={counts} active={null} showSubmit={false}>
+    <Layout
+      title={uploaded ? "Submission complete" : "Send the file"}
+      counts={counts}
+      active={null}
+      showSubmit={false}
+    >
       <h1 class="text-3xl sm:text-4xl">
         {uploaded ? "Submission complete" : "Send the file"}
       </h1>
@@ -1220,7 +1244,7 @@ export const Upload = ({ counts, submission, credentials }) => {
                 type="submit"
                 class="btn-quiet mt-4"
               >
-                I have finished uploading
+                Check for the file
               </button>
             </form>
           </Section>

@@ -39,12 +39,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import matplotlib.ticker  # noqa: E402
-import numpy as np  # noqa: E402
-from matplotlib.colors import Normalize  # noqa: E402
+import matplotlib.pyplot as plt
+import matplotlib.ticker
+import numpy as np
+from matplotlib.colors import Normalize
 
-from syndex.upload import (  # noqa: E402
+from syndex.upload import (
     DEFAULT_ACCOUNT_ID,
     DEFAULT_BUCKET,
     DEFAULT_DATABASE_ID,
@@ -345,9 +345,7 @@ def spectra_preview(hdf: h5py.File, name: str, kind: str = "spectra"):
         parts = ["incident"]
     else:
         names = [
-            k
-            for k in group
-            if k != "wavelength" and getattr(group[k], "ndim", 0) >= 1
+            k for k in group if k != "wavelength" and getattr(group[k], "ndim", 0) >= 1
         ]
         # A name like pdr_fsil is a derived fraction of pdr, so prefer the base
         # quantity when both are present.
@@ -444,9 +442,7 @@ def spectra_preview(hdf: h5py.File, name: str, kind: str = "spectra"):
     ceiling = top * 10**0.35
 
     ranks = (
-        np.linspace(0.0, 1.0, reduced.shape[0])
-        if reduced.shape[0] > 1
-        else np.zeros(1)
+        np.linspace(0.0, 1.0, reduced.shape[0]) if reduced.shape[0] > 1 else np.zeros(1)
     )
     figure, axes = frame(r"wavelength / $\rm\AA$")
     axes.set_xscale("log")
@@ -516,7 +512,7 @@ def ionising_preview(hdf: h5py.File, name: str):
         honest plot is possible.
     """
     group = hdf["log10_specific_ionising_luminosity"]
-    element = sorted(group)[0]
+    element = min(group)
     values = np.asarray(group[element])
     axis_names = [str(a) for a in hdf.attrs.get("axes", [])]
     if values.ndim < 2 or len(axis_names) < 2:
@@ -787,7 +783,9 @@ def make_preview(client, bucket: str, row: dict[str, Any]) -> tuple[bytes, str] 
 
 def _parser() -> argparse.ArgumentParser:
     """Build the command line parser."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -835,8 +833,7 @@ def run(argv: list[str] | None = None) -> int:
     token = os.getenv("SYNTHESIZER_D1_API_TOKEN")
     if not token:
         raise UploadError(
-            "D1 access is required to list candidates "
-            "(set SYNTHESIZER_D1_API_TOKEN)"
+            "D1 access is required to list candidates (set SYNTHESIZER_D1_API_TOKEN)"
         )
 
     rows = d1_query(args.account_id, args.database_id, token, CANDIDATE_SQL)
@@ -890,8 +887,7 @@ def run(argv: list[str] | None = None) -> int:
         )
         try:
             result = make_preview(client, args.bucket, row)
-        except Exception as exc:
-            # One bad file must not end a run of 244.
+        except Exception as exc:  # noqa: BLE001 - one bad file must not end a run
             print(f"    FAILED: {type(exc).__name__}: {exc}", flush=True)
             traceback.print_exc()
             manifest[name] = {
@@ -921,8 +917,7 @@ def run(argv: list[str] | None = None) -> int:
                 args.account_id,
                 args.database_id,
                 token,
-                "UPDATE files SET preview_path = ?, preview_kind = ? "
-                "WHERE file_id = ?",
+                "UPDATE files SET preview_path = ?, preview_kind = ? WHERE file_id = ?",
                 [key, kind, row["file_id"]],
             )
             entry["preview_path"] = key

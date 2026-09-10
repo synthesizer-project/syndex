@@ -98,7 +98,27 @@ export const Scientific = ({ children }) =>
     });
 
 /**
+ * What a `grid_type` is called in the interface.
+ *
+ * The stored values are `sps`, `agn` and `dust`. The filter rail, the active
+ * filter chips and the dataset page all read from here so they cannot
+ * disagree, which they did: the rail offered "stellar" and the dataset page
+ * then printed the raw "sps".
+ *
+ * @param {string} value The stored grid_type.
+ * @returns {string} What to show a reader.
+ */
+export function kindLabel(value) {
+  return { sps: "stellar", agn: "AGN", dust: "dust" }[value] ?? value;
+}
+
+/**
  * Format a file size in decimal units.
+ *
+ * Decimal rather than binary throughout, matching the size facets in
+ * `catalogue.js` and what the storage provider bills in. `filters.js` carries
+ * the same function for the browser, since this module is never shipped
+ * there; keep the two in step.
  *
  * @param {number | null} bytes Size in bytes.
  * @returns {string} Human-readable size.
@@ -114,7 +134,13 @@ export function size(bytes) {
     value /= 1000;
     index += 1;
   }
-  return `${index === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[index]}`;
+  if (index === 0) {
+    return `${value} ${units[index]}`;
+  }
+  // One decimal below 10, but never a bare ".0": an upload limit that reads
+  // "1.0 GB" looks like a rounding artefact rather than a round number.
+  const shown = value < 10 ? value.toFixed(1).replace(/\.0$/, "") : value.toFixed(0);
+  return `${shown} ${units[index]}`;
 }
 
 /**
@@ -167,8 +193,18 @@ export function modelLabel(model) {
 
 /** A short, self-describing marker. Never colour alone: the word is the
  *  identity, and the border only groups it. */
+const BADGE_TITLES = {
+  "known bug": "A defect is recorded against this release; the dataset page says what it is.",
+  recommended: "The maintainers' default choice for this kind of data.",
+  reduced: "A small cut-down copy, for tests rather than for science.",
+  CI: "Downloaded by Synthesizer's own test suite.",
+};
+
 export const Badge = ({ children, strong = false }) => (
-  <span class={`pill ${strong ? "text-accent-light" : "text-muted"}`}>
+  <span
+    class={`pill ${strong ? "text-accent-light" : "text-muted"}`}
+    title={BADGE_TITLES[children]}
+  >
     {children}
   </span>
 );
@@ -249,6 +285,7 @@ const Background = () => (
  */
 export const Layout = ({
   title,
+  description = null,
   counts = null,
   active = null,
   filters = null,
@@ -263,6 +300,15 @@ export const Layout = ({
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>{title} · Syndex</title>
+      {/* A catalogue exists to be found, so every page says what it is. */}
+      <meta
+        name="description"
+        content={
+          description ??
+          "A searchable index of stellar population synthesis and AGN grids, " +
+            "dust models and instruments for the Synthesizer project."
+        }
+      />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
       <link rel="stylesheet" href={FONTS} />
@@ -407,7 +453,7 @@ export const Layout = ({
           <div class="min-w-0 flex-1">
             <p data-command-eyebrow class="label-caps mb-2 text-accent-light">Ready to run</p>
             <h2 data-command-title class="text-2xl leading-tight">Download command</h2>
-            <p data-command-intro class="mt-2 text-sm text-muted">Copied to your clipboard</p>
+            <p data-command-intro class="mt-2 text-sm text-muted">Copied to your clipboard.</p>
           </div>
           <div>
             <button
@@ -658,7 +704,7 @@ const AxisFilter = ({ tab, filters, axis, units }) => {
         open={opened}
       >
         <summary class="flex cursor-pointer items-center text-xs text-muted">
-          Select range
+          select range
         </summary>
         <div class="mt-2 flex items-center gap-2 text-sm">
           <label class="flex-1">
@@ -689,7 +735,7 @@ const AxisFilter = ({ tab, filters, axis, units }) => {
           </label>
         </div>
         <fieldset class="mt-2 border-0">
-          <legend class="text-xs text-muted">Match</legend>
+          <legend class="text-xs text-muted">match</legend>
           {Object.entries(RANGE_MODES).map(([mode, description]) => (
             <label class="flex items-center gap-2 text-sm">
               <input
@@ -787,7 +833,7 @@ const FilterRail = ({ tab, filters, facets }) => (
       Get download command (<span data-selection-count="">0</span>)
     </button>
   <details class="filter-sheet card p-5" open>
-    <summary class="label-caps cursor-pointer">Filters</summary>
+    <summary class="label-caps cursor-pointer">Refine</summary>
     <form
       id="filters"
       method="get"
@@ -804,7 +850,7 @@ const FilterRail = ({ tab, filters, facets }) => (
             id="q"
             name="q"
             value={filters.q}
-            placeholder="name or description"
+            placeholder="name, description, type or filename…"
             class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
           />
         </label>
@@ -844,7 +890,7 @@ const FilterRail = ({ tab, filters, facets }) => (
           name="kind"
           values={facets.kind}
           active={filters.kind}
-          label={(value) => (value === "agn" ? "AGN" : "stellar")}
+          label={kindLabel}
         />
       )}
       {tab.id === "grids" && (
@@ -915,7 +961,7 @@ function chipLabel(key, value) {
     return modelLabel(value);
   }
   if (key === "kind") {
-    return value === "agn" ? "AGN" : "stellar";
+    return kindLabel(value);
   }
   return String(value).replace(/_/g, " ");
 }
@@ -990,11 +1036,13 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
 };
 
 /** A dataset name, linking to its page. */
-const Name = ({ row }) => (
+const Name = ({ row, filters }) => (
   <div class="min-w-[12rem]">
     <a
-      href={`${BASE}/datasets/${encodeURIComponent(row.name)}`}
-      class="block max-w-[12rem] truncate no-underline hover:underline"
+      href={`${BASE}/datasets/${encodeURIComponent(row.name)}?return=${encodeURIComponent(
+        searchUrl(filters),
+      )}`}
+      class="block truncate no-underline hover:underline"
       title={row.name}
     >
       {row.name}
@@ -1080,17 +1128,17 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       }
     : null;
   const photoionised = {
-    label: "reprocessed",
-    sort: "reprocessed",
+    label: "photoionised",
+    sort: "photoionised",
     cell: (row) => (
-      <Flag yes={row.emission_type === "photoionised"} label="Reprocessed" />
+      <Flag yes={row.emission_type === "photoionised"} label="Photoionised" />
     ),
     present: (row) => row.emission_type !== null,
   };
 
   if (tab.id === "grids") {
     return populated([
-      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
       {
         label: "model",
         cell: (row) => modelLabel(row.model_name),
@@ -1131,7 +1179,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
 
   if (tab.id === "dust") {
     return populated([
-      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
       {
         label: "emission",
         cell: (row) => (row.emission_type ?? "—").replace(/^dust_/, "").replace(/_/g, " "),
@@ -1179,7 +1227,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       }
     };
     return populated([
-      { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
       {
         label: "type",
         cell: (row) => (row.instrument_type ?? "—").replace(/_/g, " "),
@@ -1224,11 +1272,16 @@ function columnsFor(tab, filters, rows, axesByRelease) {
   }
 
   return populated([
-    { label: "name", cell: (row) => <Name row={row} />, sort: "name" },
+    { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
     {
       label: "type",
       cell: (row) => row.data_type.replace(/_/g, " "),
       sort: "type",
+    },
+    {
+      label: "format",
+      cell: (row) => row.format,
+      sort: "format",
     },
     fileSize,
     {
@@ -1246,12 +1299,12 @@ const Results = ({ tab, filters, rows, axes }) => {
 
   // Horizontal scrolling is contained whatever the screen, so the page never
   // scrolls sideways. On a wide screen the rows scroll inside the card too,
-  // which is what lets the column headings stay put over 157 of them; on a
+  // which is what lets the column headings stay put over 244 of them; on a
   // narrow one the page scrolls normally rather than trapping a small
   // viewport inside a smaller box.
   return (
-    <div id="catalogue-results" class="results card min-w-0 overflow-auto">
-      <table class="w-max border-collapse text-sm">
+    <div id="catalogue-results" class="results card min-w-0 overflow-x-auto">
+      <table class="min-w-full w-max border-collapse text-sm">
         <thead>
           <tr class="text-left">
             <th scope="col" class="border-b border-line px-4 py-3">

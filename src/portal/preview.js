@@ -25,9 +25,12 @@
     }
     dialog = document.createElement("dialog");
     dialog.className = "preview-overlay";
+    // A modal dialog is announced by its accessible name, and this one has no
+    // heading to take it from.
+    dialog.setAttribute("aria-label", "Preview plot");
     dialog.innerHTML =
       '<button type="button" class="preview-close" aria-label="Close">' +
-      "×</button><figure style=\"margin:0\">" +
+      "×</button><figure>" +
       '<img alt="" /><figcaption></figcaption></figure>';
 
     dialog.querySelector(".preview-close").addEventListener("click", () => {

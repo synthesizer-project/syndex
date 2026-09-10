@@ -978,7 +978,9 @@ PLOTS = {
 
 def main() -> None:
     """Render catalogue plots from the command line."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--api-url", default=DEFAULT_API_URL)
     parser.add_argument("--output-dir", type=Path, default=Path("plots"))
     parser.add_argument("--cache", type=Path, default=Path(".catalogue-cache.json"))

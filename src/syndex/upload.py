@@ -74,10 +74,10 @@ def _json_value(value: Any) -> Any:
 
 
 def _json_dump(value: Any) -> str:
-    """Serialize catalogue JSON consistently and reject non-finite numbers.
+    """Serialise catalogue JSON consistently and reject non-finite numbers.
 
     Args:
-        value: JSON-compatible value to serialize.
+        value: JSON-compatible value to serialise.
 
     Returns:
         Compact JSON with deterministic key ordering.
@@ -199,10 +199,7 @@ def check_photoionisation_version(path: Path, version: str | None) -> list[str]:
     recorded = str(version).strip().lstrip("c")
     if named == recorded:
         return []
-    return [
-        f"filename says Cloudy {match.group(1)} but the file records "
-        f"{version!r}"
-    ]
+    return [(f"filename says Cloudy {match.group(1)} but the file records {version!r}")]
 
 
 def check_axis_conventions(axes: list[dict[str, Any]]) -> list[str]:
@@ -244,7 +241,7 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
         path: HDF5 file to inspect.
 
     Returns:
-        Extracted grid metadata, or ``None`` when the file is not a recognized
+        Extracted grid metadata, or ``None`` when the file is not a recognised
         Synthesizer grid.
 
     Raises:
@@ -294,7 +291,7 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             )
 
         for warning in check_axis_conventions(axes):
-            print(f"  WARNING {path.name}: {warning}", file=sys.stderr)
+            print(f"warning: {path.name}: {warning}", file=sys.stderr)
 
         spectra_group_name = None
         for candidate in ("spectra", "extinction_curves"):
@@ -420,7 +417,7 @@ def extract_hdf5(path: Path) -> dict[str, Any] | None:
             result["photoionisation_code"] = "Cloudy"
             result["photoionisation_code_version"] = cloudy_version
             for warning in check_photoionisation_version(path, cloudy_version):
-                print(f"  WARNING {path.name}: {warning}", file=sys.stderr)
+                print(f"warning: {path.name}: {warning}", file=sys.stderr)
 
         return result
 
@@ -480,7 +477,7 @@ def extract_instrument_hdf5(path: Path) -> dict[str, Any] | None:
 
     Returns:
         Extracted instrument metadata, or ``None`` when the file does not
-        match a recognized instrument layout.
+        match a recognised instrument layout.
 
     Raises:
         OSError: If an HDF5 file cannot be opened or read.
@@ -513,10 +510,10 @@ def extract_instrument_hdf5(path: Path) -> dict[str, Any] | None:
 
 
 def _extract_array_summary(dataset: h5py.Dataset) -> dict[str, Any]:
-    """Summarize a bulk array dataset without reading its values.
+    """Summarise a bulk array dataset without reading its values.
 
     Args:
-        dataset: HDF5 dataset to summarize.
+        dataset: HDF5 dataset to summarise.
 
     Returns:
         Shape and units, never the array contents.
@@ -615,12 +612,12 @@ def _extract_instrument_group(group: h5py.Group) -> dict[str, Any] | None:
     """Extract one instrument's structural metadata from an HDF5 group.
 
     Args:
-        group: HDF5 group or file potentially containing one serialized
+        group: HDF5 group or file potentially containing one serialised
             instrument.
 
     Returns:
         Extracted instrument metadata, or ``None`` if the group matches no
-        recognized single-instrument layout (expected at the root of a
+        recognised single-instrument layout (expected at the root of a
         collection cache file).
     """
     tagged_type = _json_value(group.attrs.get("instrument_type"))
@@ -928,7 +925,7 @@ def _ads_token() -> str:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return json.load(response)["access_token"]
-    except Exception as exc:  # noqa: BLE001 - any failure here is the same problem
+    except Exception as exc:
         raise UploadError(
             "no SYNTHESIZER_ADS_TOKEN set and ADS would not issue an "
             f"anonymous one: {exc}"
@@ -956,7 +953,7 @@ def _bibtex_field(entry: str, field: str) -> str | None:
         return None
     value = match.group(1).strip().strip(",").strip()
     # Values arrive as "{...}" or {{...}} or "..."; unwrap whichever it is.
-    while value and value[0] in "{\"" and value[-1] in "}\"":
+    while value and value[0] in '{"' and value[-1] in '}"':
         value = value[1:-1].strip()
     return re.sub(r"\s+", " ", value.replace("{", "").replace("}", "")) or None
 
@@ -1118,7 +1115,7 @@ def build_plan(
     if data_type in GRID_DATA_TYPES:
         if extracted_grid is None:
             raise UploadError(
-                f"{source.key}: file is not a recognized Synthesizer grid"
+                f"{source.key}: file is not a recognised Synthesizer grid"
             )
         explicit_grid = config.get("grid", {})
         if not isinstance(explicit_grid, dict):
@@ -1135,7 +1132,7 @@ def build_plan(
         )
         if extracted_instrument is None:
             raise UploadError(
-                f"{source.key}: file is not a recognized Synthesizer instrument cache"
+                f"{source.key}: file is not a recognised Synthesizer instrument cache"
             )
         explicit_instrument = config.get("instrument", {})
         if not isinstance(explicit_instrument, dict):
@@ -1470,7 +1467,14 @@ def _upload_resumable(
             futures = [
                 pool.submit(
                     _upload_one_part,
-                    client, bucket, key, upload_id, number, offset, size, source,
+                    client,
+                    bucket,
+                    key,
+                    upload_id,
+                    number,
+                    offset,
+                    size,
+                    source,
                 )
                 for number, offset, size in pending
             ]
@@ -1532,9 +1536,8 @@ def _upload_with_retries(
     except ImportError:
         pass
 
-    resumable = (
-        plan["file"]["size_bytes"] >= RESUMABLE_THRESHOLD_BYTES
-        and hasattr(client, "create_multipart_upload")
+    resumable = plan["file"]["size_bytes"] >= RESUMABLE_THRESHOLD_BYTES and hasattr(
+        client, "create_multipart_upload"
     )
 
     for attempt in range(1, attempts + 1):
@@ -1906,32 +1909,68 @@ def _parser() -> argparse.ArgumentParser:
     Returns:
         Configured argument parser.
     """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", nargs="+", type=Path)
-    parser.add_argument("--metadata", type=Path, help="JSON batch metadata")
-    parser.add_argument("--recursive", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--data-type")
-    parser.add_argument(
-        "--is-test", action=argparse.BooleanOptionalAction, default=None
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--is-ci", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument("--r2-prefix")
     parser.add_argument(
-        "--set-current", action=argparse.BooleanOptionalAction, default=None
+        "paths", nargs="+", type=Path, help="files or directories to publish"
+    )
+    parser.add_argument(
+        "--metadata", type=Path, help="JSON file of per-file and batch metadata"
+    )
+    parser.add_argument(
+        "--recursive", action="store_true", help="descend into directories"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="inspect the files and print the plan without contacting Cloudflare",
+    )
+    parser.add_argument(
+        "--data-type",
+        help="catalogue data type for files that are not grids, such as instrument",
+    )
+    parser.add_argument(
+        "--is-test",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="mark as reduced test data rather than science data",
+    )
+    parser.add_argument(
+        "--is-ci",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="mark as used by the Synthesizer test suite",
+    )
+    parser.add_argument(
+        "--r2-prefix", help="override the R2 key prefix derived from the data type"
+    )
+    parser.add_argument(
+        "--set-current",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="make this release the dataset's current one (default: yes)",
     )
     parser.add_argument(
         "--account-id",
         default=os.getenv("SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID", DEFAULT_ACCOUNT_ID),
+        help="Cloudflare account id (default: %(default)s)",
     )
     parser.add_argument(
-        "--bucket", default=os.getenv("SYNTHESIZER_R2_BUCKET", DEFAULT_BUCKET)
+        "--bucket",
+        default=os.getenv("SYNTHESIZER_R2_BUCKET", DEFAULT_BUCKET),
+        help="R2 bucket to upload into (default: %(default)s)",
     )
     parser.add_argument(
         "--database-id",
         default=os.getenv("SYNTHESIZER_D1_DATABASE_ID", DEFAULT_DATABASE_ID),
+        help="D1 database to register in (default: %(default)s)",
     )
-    parser.add_argument("--api-url", default=os.getenv("SYNTHESIZER_DATA_API_URL"))
+    parser.add_argument(
+        "--api-url",
+        default=os.getenv("SYNTHESIZER_DATA_API_URL"),
+        help="verify each publication through this API rather than the default",
+    )
     return parser
 
 
@@ -1973,9 +2012,16 @@ def run(argv: list[str] | None = None) -> int:
             print(f"error: {error}", file=sys.stderr)
         return 2
 
-    print(json.dumps(plans, indent=2, sort_keys=True, allow_nan=False))
     if args.dry_run:
+        print(json.dumps(plans, indent=2, sort_keys=True, allow_nan=False))
         return 0
+
+    for plan in plans:
+        dataset = plan["dataset"]
+        print(
+            f"  {dataset['name']}  ({dataset['data_type']}, "
+            f"{plan['file']['size_bytes'] / 1024**2:.0f} MiB)"
+        )
 
     token = os.getenv("SYNTHESIZER_D1_API_TOKEN")
     if not token:

@@ -1,3 +1,14 @@
+/**
+ * The portal's only browser script: filter-rail state, bulk selection, and
+ * the two command dialogs.
+ *
+ * Everything here is an enhancement of something that already works without
+ * it. The filter form submits and the results render server-side; this keeps
+ * an open facet open across a swap, remembers a selection that survives one,
+ * and turns a download link into a dialog that says how large the file is
+ * before it starts.
+ */
+
 document.addEventListener(
   "toggle",
   (event) => {
@@ -36,30 +47,17 @@ document.addEventListener(
   true,
 );
 
-const filterHeight = new ResizeObserver(([entry]) => {
-  entry.target
-    .closest("#catalogue-grid")
-    ?.style.setProperty(
-      "--filter-height",
-      `${entry.target.getBoundingClientRect().height}px`,
-    );
-});
-
-function syncFilterHeight() {
-  filterHeight.disconnect();
-  const rail = document.querySelector("#catalogue-grid > [data-filter-column]");
-  if (rail !== null) {
-    filterHeight.observe(rail);
-  }
-}
-
-syncFilterHeight();
-document.addEventListener("htmx:afterSwap", syncFilterHeight);
-
 const selectedDatasets = new Set();
 const selectedSizes = new Map();
+/**
+ * The browser's copy of `size()` from views.jsx, which is server-only.
+ * Keep the two in step: both count in decimal and both drop a bare ".0".
+ *
+ * @param {number} bytes Size in bytes.
+ * @returns {string} Human-readable size.
+ */
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "an unknown amount of data";
+  if (!Number.isFinite(bytes)) return "\u2014";
   const units = ["B", "kB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
@@ -67,7 +65,10 @@ function formatBytes(bytes) {
     value /= 1000;
     unit += 1;
   }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+  if (unit === 0) return `${value.toFixed(0)} ${units[unit]}`;
+  const shown =
+    value < 10 ? value.toFixed(1).replace(/\.0$/, "") : value.toFixed(0);
+  return `${shown} ${units[unit]}`;
 }
 
 function showDownloadNotice(filename, amount, href) {
@@ -173,16 +174,17 @@ document.addEventListener("click", async (event) => {
       : "Download command";
     const intro = dialog.querySelector("[data-command-intro]");
     intro.hidden = copied;
-    intro.textContent = "Clipboard unavailable; use the copy control below";
-    dialog.querySelector("[data-command-box]").style.order = "1";
-    dialog.querySelector("[data-command-size-panel]").style.order = "2";
+    intro.textContent = "Clipboard unavailable; use the copy control below.";
+    dialog
+      .querySelector("[data-command-content]")
+      .classList.remove("size-first");
     const filename = dialog.querySelector("[data-command-filename]");
     filename.hidden = false;
     filename.textContent = commandCopy.dataset.downloadFilename ?? "";
     dialog.querySelector("[data-command-size-label]").textContent = "Download size";
     const size = dialog.querySelector("[data-bulk-size]");
-    size.style.marginTop = "0.75rem";
-    size.textContent = amount ?? "Unknown";
+    size.classList.remove("mt-0");
+    size.textContent = amount ?? "\u2014";
     dialog.querySelector("[data-bulk-command-text]").textContent =
       commandCopy.dataset.copyCommand;
     const dialogCopy = dialog.querySelector("[data-copy-bulk-command]");
@@ -207,18 +209,21 @@ document.addEventListener("click", async (event) => {
     );
     document.querySelector("[data-bulk-command-text]").textContent = commands;
     document.querySelector("[data-command-title]").textContent =
-      `${selectedDatasets.size} datasets selected`;
+      `${selectedDatasets.size} dataset${
+        selectedDatasets.size === 1 ? "" : "s"
+      } selected`;
     document.querySelector("[data-command-eyebrow]").hidden = false;
     const intro = document.querySelector("[data-command-intro]");
     intro.hidden = false;
-    intro.textContent = "One command downloads the complete selection";
-    document.querySelector("[data-command-box]").style.order = "2";
-    document.querySelector("[data-command-size-panel]").style.order = "1";
+    intro.textContent = "One command downloads the complete selection.";
+    document
+      .querySelector("[data-command-content]")
+      .classList.add("size-first");
     document.querySelector("[data-command-filename]").hidden = true;
     document.querySelector("[data-command-size-label]").textContent =
       "Download size";
     const size = document.querySelector("[data-bulk-size]");
-    size.style.marginTop = "0";
+    size.classList.add("mt-0");
     size.textContent = formatBytes(total);
     const bulkCopy = document.querySelector("[data-copy-bulk-command]");
     bulkCopy.hidden = false;

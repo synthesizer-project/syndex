@@ -113,11 +113,17 @@ export const RANGE_MODES = {
  * @returns {object} The filter state the rest of this module works from.
  */
 export function parseFilters(params) {
+  // A repeated parameter becomes a bound placeholder or, for axes, an EXISTS
+  // subquery. Nothing legitimate needs more than this: the catalogue has 17
+  // distinct axes and 24 models, so a longer list is a hand-written URL, and
+  // it would otherwise walk into SQLite's variable limit as a 500.
+  const LIST_LIMIT = 32;
   const list = (key) =>
     params
       .getAll(key)
       .map((value) => value.trim())
-      .filter((value) => value !== "");
+      .filter((value) => value !== "")
+      .slice(0, LIST_LIMIT);
 
   const type = list("type").slice(0, 1);
   const selectedType = type[0] ?? null;
@@ -128,7 +134,7 @@ export function parseFilters(params) {
   const sortable = new Set([
     "name",
     "model",
-    "reprocessed",
+    "photoionised",
     "spectra",
     "lines",
     "emission",
@@ -377,7 +383,6 @@ function clausesFor(filters) {
         psf: "i.psfs_json IS NOT NULL",
         noise: "i.noise_maps_json IS NOT NULL",
         depth: "i.depth_json IS NOT NULL",
-        tags: "(r.known_bug * 8 + d.is_recommended * 4 + d.is_test * 2 + d.is_ci)",
       }[capability],
       params: [],
     });
@@ -394,15 +399,15 @@ function clausesFor(filters) {
  * Build the EXISTS clause for one axis filter.
  *
  * Adding an axis at all filters to grids that have it, which is useful on
- * its own: `spins` finds the five RELAGN grids and nothing else. A range
+ * its own: `spins` finds the six RELAGN grids and nothing else. A range
  * then narrows that, either way round:
  *
  *     Any overlap           gmin <= qmax AND gmax >= qmin
  *     Full range included   gmin <= qmin AND gmax >= qmax
  *
  * An omitted bound drops its own condition, so filling in one box asks a
- * one-sided question rather than an impossible one. `grid_axes` holds around
- * 400 rows, so this needs no index of its own.
+ * one-sided question rather than an impossible one. `grid_axes` holds 405
+ * rows, so this needs no index of its own.
  *
  * @param {{name: string, min: number|null, max: number|null, mode: string}}
  *     axis One axis filter.
@@ -495,13 +500,14 @@ function ordering(filters) {
       {
         name: "d.name",
         model: "g.model_name",
-        reprocessed: "g.emission_type = 'photoionised'",
+        photoionised: "g.emission_type = 'photoionised'",
         spectra: "g.has_spectra",
         lines: "g.has_lines",
         emission: "g.emission_type",
         wavelengths: "g.wavelength_min",
         axes: "(SELECT COUNT(*) FROM grid_axes a WHERE a.release_id = r.release_id)",
         size: "f.size_bytes",
+        format: "f.format",
         type: "d.data_type",
         published: "r.published_at",
         instrument_type: "i.instrument_type",
@@ -668,9 +674,9 @@ export async function search(db, tab, filters) {
   }
 
   // Axes available to add, counted against every active filter so that an
-  // axis returning nothing is never offered. Ten of the twelve grid axes
-  // appear on 13 grids or fewer, which is why the picker is a list of what
-  // exists rather than a panel of every axis there could be.
+  // axis returning nothing is never offered. Fifteen of the seventeen grid
+  // axes appear on 17 grids or fewer, which is why the picker is a list of
+  // what exists rather than a panel of every axis there could be.
   const hasAxes = tab.id === "grids" || tab.id === "dust";
   if (hasAxes) {
     statements.push(

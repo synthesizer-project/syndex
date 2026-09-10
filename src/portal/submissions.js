@@ -4,12 +4,12 @@
  * The bytes never pass through the Worker. Registering a submission mints an
  * unguessable upload token, which names one prefix of a separate submissions
  * bucket, and the file goes straight to R2 from wherever it already is:
- * under 1 GiB through a presigned PUT from the browser, above that with an
+ * under 1 GB through a presigned PUT from the browser, above that with an
  * ordinary S3 client driven by prefix-scoped temporary credentials, so
  * multipart and resumption come from tooling that already does them
  * properly rather than from code written here.
  *
- * 233 of the catalogue's 241 datasets are under 1 GiB. The eight that are
+ * 233 of the catalogue's 244 datasets are under 1 GB. The eleven that are
  * not are grids on an HPC filesystem, where rclone is already installed and
  * a browser is the wrong tool anyway.
  *
@@ -24,8 +24,13 @@ import { AwsClient } from "aws4fetch";
  *
  * A presigned PUT is one request and cannot resume, so this is a limit on
  * what will plausibly finish rather than the 5 GiB R2 allows.
+ *
+ * Counted in decimal, like every other size the portal shows: as 1024**3 it
+ * rendered through the same formatter as "1.1 GB", which reads like a
+ * mistake. It is advertised rather than enforced -- see "Why it is shut" in
+ * docs/website.md.
  */
-export const BROWSER_UPLOAD_LIMIT = 1024 ** 3;
+export const BROWSER_UPLOAD_LIMIT = 1000 ** 3;
 
 /** How long a presigned upload URL stays valid. */
 const UPLOAD_URL_TTL = 60 * 60;

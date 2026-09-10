@@ -37,13 +37,10 @@ import {
   Upload,
 } from "./pages.jsx";
 import {
-  BROWSER_UPLOAD_LIMIT,
   presignUpload,
   submissionsOpen,
   temporaryCredentials,
   uploadedFile,
-  uploadPrefix,
-  verifyChallenge,
 } from "./submissions.js";
 import { BASE, Panel } from "./views.jsx";
 
@@ -158,6 +155,12 @@ app.get("/:tab{grids|dust|instruments|data}", (c) => {
 
 app.get("/datasets/:name", async (c) => {
   const name = c.req.param("name");
+  const requestedReturn = c.req.query("return");
+  const returnTo =
+    requestedReturn === `${BASE}/search` ||
+    requestedReturn?.startsWith(`${BASE}/search?`)
+      ? requestedReturn
+      : null;
   const [record, counts] = await Promise.all([
     fetchDataset(c.env.DB, name),
     tabCounts(c.env.DB),
@@ -171,7 +174,7 @@ app.get("/datasets/:name", async (c) => {
     );
   }
 
-  return page(c, <Dataset dataset={record} counts={counts} />);
+  return page(c, <Dataset dataset={record} counts={counts} returnTo={returnTo} />);
 });
 
 app.get("/submit", async (c) =>
@@ -186,9 +189,25 @@ app.get("/submit", async (c) =>
   ),
 );
 
-app.post("/submit", async (c) => {
-  return c.text("Submissions are coming soon.", 503);
-});
+// Deliberately shut, and not merely unconfigured. The write path is built but
+// not yet safe to expose: the presigned PUT signs no content-length, so the
+// advertised size limit is advisory only; `upload-url` signs a new key for
+// every filename it is handed, so one token can write any number of objects;
+// and `/submit/:token` mints twelve hours of prefix-scoped credentials just by
+// being viewed. With no lifecycle rule on the submissions bucket, each of
+// those is unbounded storage that bills monthly. See "Submissions" in
+// docs/website.md for what has to land before this returns anything but 503.
+app.post("/submit", async (c) =>
+  page(
+    c,
+    <Submit
+      counts={await tabCounts(c.env.DB)}
+      open={false}
+      sitekey={c.env.TURNSTILE_SITEKEY}
+    />,
+    { status: 503, cache: "no-store" },
+  ),
+);
 
 /**
  * Find a submission by the token that authorises its upload.
@@ -410,83 +429,24 @@ app.onError((error, c) => {
       error: error instanceof Error ? error.message : String(error),
     }),
   );
+  // Deliberately not a JSX page: whatever just failed may be the renderer
+  // itself, so this is a complete document with no dependencies but the
+  // stylesheet, and it still offers a way out.
   return c.html(
-    "<!doctype html><title>Syndex</title><p>Something went wrong " +
-      "rendering this page. The failure has been logged.",
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+      `<title>Something went wrong \u00b7 Syndex</title>` +
+      `<link rel="stylesheet" href="${BASE}/static/app.css"></head>` +
+      `<body class="bg-bg text-text">` +
+      `<main class="mx-auto max-w-2xl px-6 py-12">` +
+      `<h1 class="text-3xl">Something went wrong</h1>` +
+      `<p class="mt-3 text-muted">This page could not be rendered. The ` +
+      `failure has been logged.</p>` +
+      `<p class="mt-4"><a href="${BASE}">Back to the catalogue</a></p>` +
+      `</main></body></html>`,
     500,
     { "cache-control": "no-store" },
   );
 });
-
-/**
- * Check a submission, and hand back what the form should redisplay.
- *
- * The form echoes user input back, so every value here reaches the page as
- * text and is escaped by JSX on the way. Validation is about whether a
- * reviewer can act on the submission at all: a name they cannot publish
- * under, or a URL they cannot fetch, wastes their time and the submitter's.
- *
- * @param {D1Database} db Catalogue database.
- * @param {Record<string, unknown>} form Parsed form body.
- * @returns {Promise<{values: object, errors: string[]}>} Cleaned values and
- *     every problem found, so the form can report them all at once.
- */
-async function validate(db, form) {
-  const text = (key, limit) =>
-    String(form[key] ?? "")
-      .trim()
-      .slice(0, limit);
-
-  const values = {
-    name: text("name", 128).toLowerCase(),
-    display_name: text("display_name", 256),
-    description: text("description", 4000) || null,
-    data_type: text("data_type", 32),
-    licence: text("licence", 128) || null,
-    citations: text("citations", 4000) || null,
-    submitter_name: text("submitter_name", 128),
-    submitter_email: text("submitter_email", 256),
-    notes: text("notes", 4000) || null,
-  };
-
-  const errors = [];
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(values.name)) {
-    errors.push(
-      "The catalogue name must be lowercase letters, digits and hyphens.",
-    );
-  }
-  if (values.display_name === "") {
-    errors.push("A display name is required.");
-  }
-  if (!DATA_TYPES.includes(values.data_type)) {
-    errors.push("Choose one of the listed data types.");
-  }
-  if (values.submitter_name === "") {
-    errors.push("A name to reply to is required.");
-  }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(values.submitter_email)) {
-    errors.push("An email address is required, so the review can ask questions.");
-  }
-
-  if (errors.length === 0) {
-    const taken = await db
-      .prepare(
-        `SELECT 1 FROM datasets WHERE name = ?
-         UNION ALL
-         SELECT 1 FROM submissions WHERE name = ? AND state = 'pending'`,
-      )
-      .bind(values.name, values.name)
-      .first();
-    if (taken !== null) {
-      errors.push(
-        `${values.name} is already in the catalogue or already waiting for` +
-          " review. Pick another name, or send a note asking for the existing" +
-          " one to be updated.",
-      );
-    }
-  }
-
-  return { values, errors };
-}
 
 export default app;

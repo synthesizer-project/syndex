@@ -11,7 +11,7 @@ const JSON_HEADERS = {
   "cache-control": "public, max-age=60",
 };
 
-/** Columns stored as serialized JSON, parsed before being returned. */
+/** Columns stored as serialised JSON, parsed before being returned. */
 const JSON_COLUMNS = new Set([
   "citations_json",
   "metadata_json",
@@ -34,7 +34,7 @@ const JSON_COLUMNS = new Set([
 /**
  * Convert one D1 row into an API object.
  *
- * Strips the `_json` suffix from serialized columns and decodes their
+ * Strips the `_json` suffix from serialised columns and decodes their
  * contents, and converts SQLite integer booleans into real booleans.
  *
  * @param {Record<string, unknown> | null} row Row returned by D1.
@@ -70,6 +70,35 @@ function json(body, status = 200) {
 }
 
 /**
+ * Parse a release id from a path segment.
+ *
+ * Deliberately strict: `Number()` accepts `0x10`, `1e3`, ` 1` and `1.0`, so
+ * four handlers validating it four different ways disagreed about which of
+ * those named a release. Only digits do.
+ *
+ * @param {string} text Path segment as it arrived.
+ * @returns {number | null} The id, or null when it is not one.
+ */
+function releaseNumber(text) {
+  return /^[0-9]+$/.test(text) && Number(text) > 0 ? Number(text) : null;
+}
+
+/**
+ * Quote a filename for a `content-disposition` header.
+ *
+ * Filenames come from D1 rather than from the request, but a header built by
+ * interpolation is a header that can be split, so the quoting happens here
+ * rather than resting on what the publisher happened to allow.
+ *
+ * @param {string} name Filename to offer the client.
+ * @returns {string} A `filename="..."` parameter.
+ */
+function contentDisposition(name) {
+  const safe = String(name).replace(/[^\w.\-+]/g, "_");
+  return `attachment; filename="${safe}"`;
+}
+
+/**
  * Build a JSON error response.
  *
  * @param {number} status HTTP status code.
@@ -92,7 +121,12 @@ function error(status, message) {
  */
 async function listDatasets(db, url) {
   const params = url.searchParams;
-  const limit = Math.min(Math.max(Number(params.get("limit") ?? 100), 1), 1000);
+  // Number("abc") is NaN and both clamps preserve it, so an unparseable
+  // limit used to reach D1 as `LIMIT NaN` and bound nothing at all.
+  const requested = Number(params.get("limit") ?? 100);
+  const limit = Number.isFinite(requested)
+    ? Math.min(Math.max(Math.trunc(requested), 1), 1000)
+    : 100;
 
   /**
    * Read a boolean query parameter as the 0/1 D1 stores, or null for absent.
@@ -162,23 +196,12 @@ async function listDatasets(db, url) {
 }
 
 /**
- * Assemble one release's complete metadata.
- *
- * Grid metadata, ordered axes, and instrument metadata are fetched in a
- * single batch. Both the dataset detail and the release detail responses use
- * this, so a release describes itself identically wherever it appears.
- *
- * @param {D1Database} db Catalogue database.
- * @param {Record<string, unknown>} row Decoded release row joined to its file.
- * @param {string} origin Origin of the incoming request.
- * @returns {Promise<Record<string, unknown>>} The release object.
- */
-/**
  * Serve a release's preview image.
  *
  * The bucket is private, so the image cannot be linked directly and has to be
- * proxied. Previews are content addressed and never change for a given file,
- * so they are safe to cache hard and to serve with an immutable directive.
+ * proxied. The object is content addressed, but this URL names a release, and
+ * regenerating a preview repoints it at new bytes -- so it revalidates rather
+ * than being pinned in browsers as immutable.
  *
  * @param {object} env Worker bindings.
  * @param {Request} request Incoming request, for conditional handling.
@@ -186,8 +209,8 @@ async function listDatasets(db, url) {
  * @returns {Promise<Response>} The PNG, or an error response.
  */
 async function releasePreview(env, request, releaseId) {
-  const numeric = Number(releaseId);
-  if (!Number.isInteger(numeric) || numeric <= 0) {
+  const numeric = releaseNumber(releaseId);
+  if (numeric === null) {
     return error(400, "Release id must be a positive integer");
   }
 
@@ -208,10 +231,10 @@ async function releasePreview(env, request, releaseId) {
     return error(404, "No preview for this release");
   }
 
-  const object =
-    request.method === "HEAD"
-      ? await env.FILES.head(row.preview_path)
-      : await env.FILES.get(row.preview_path, { onlyIf: request.headers });
+  const head = request.method === "HEAD";
+  const object = head
+    ? await env.FILES.head(row.preview_path)
+    : await env.FILES.get(row.preview_path, { onlyIf: request.headers });
 
   if (object === null) {
     console.error(
@@ -224,25 +247,29 @@ async function releasePreview(env, request, releaseId) {
     return error(502, "Preview is unavailable");
   }
 
-  // A 304 from onlyIf has no body.
-  if (!("body" in object)) {
+  const headers = {
+    "content-type": "image/png",
+    "content-length": String(object.size),
+    etag: object.httpEtag,
+    "access-control-allow-origin": "*",
+    // The object is content addressed but this URL is not: it names a
+    // release, and regenerating a preview repoints that release at new
+    // bytes. Marking it immutable therefore pinned stale plots in browsers
+    // for a year. An hour with revalidation keeps it cheap -- the ETag
+    // changes with the object, so a re-check costs a 304.
+    "cache-control": "public, max-age=3600, must-revalidate",
+  };
+
+  // head() and a failed precondition both yield an object with no body, but
+  // they mean opposite things: the first is a 200 whose body was not asked
+  // for, the second is a 304.
+  if (head) {
+    return new Response(null, { headers });
+  }
+  if (object.body === undefined) {
     return new Response(null, { status: 304 });
   }
-
-  return new Response(object.body, {
-    headers: {
-      "content-type": "image/png",
-      "content-length": String(object.size),
-      "etag": object.httpEtag,
-      "access-control-allow-origin": "*",
-      // The object is content addressed but this URL is not: it names a
-      // release, and regenerating a preview repoints that release at new
-      // bytes. Marking it immutable therefore pinned stale plots in browsers
-      // for a year. An hour with revalidation keeps it cheap -- the ETag
-      // changes with the object, so a re-check costs a 304.
-      "cache-control": "public, max-age=3600, must-revalidate",
-    },
-  });
+  return new Response(object.body, { headers });
 }
 
 
@@ -259,8 +286,8 @@ async function releasePreview(env, request, releaseId) {
  * @returns {Promise<Response>} A BibTeX document, or an error response.
  */
 async function releaseCitations(db, releaseId) {
-  const numeric = Number(releaseId);
-  if (!Number.isInteger(numeric) || numeric <= 0) {
+  const numeric = releaseNumber(releaseId);
+  if (numeric === null) {
     return error(400, "Release id must be a positive integer");
   }
 
@@ -297,14 +324,28 @@ async function releaseCitations(db, releaseId) {
   return new Response(body, {
     headers: {
       "content-type": "application/x-bibtex; charset=utf-8",
-      "content-disposition": `attachment; filename="${release.dataset}.bib"`,
+      "content-disposition": contentDisposition(`${release.dataset}.bib`),
       "access-control-allow-origin": "*",
-      "cache-control": "public, max-age=3600",
+      // Citations can be corrected, and this URL names a release rather than
+      // the bytes, so it revalidates for the same reason the preview does.
+      "cache-control": "public, max-age=3600, must-revalidate",
     },
   });
 }
 
 
+/**
+ * Assemble one release's complete metadata.
+ *
+ * Grid metadata, ordered axes, instrument metadata and citations are fetched
+ * in a single batch. Both the dataset detail and the release detail responses
+ * use this, so a release describes itself identically wherever it appears.
+ *
+ * @param {D1Database} db Catalogue database.
+ * @param {Record<string, unknown>} row Decoded release row joined to its file.
+ * @param {string} origin Origin of the incoming request.
+ * @returns {Promise<Record<string, unknown>>} The release object.
+ */
 async function releasePayload(db, row, origin) {
   const releaseId = row.release_id;
   const [grid, axes, instrument, citations] = await db.batch([
@@ -448,8 +489,9 @@ async function listReleases(db, name, origin) {
  * @returns {Promise<Response>} JSON release detail.
  */
 async function getRelease(db, releaseId, origin) {
-  if (!/^[0-9]+$/.test(releaseId)) {
-    return error(400, "Release id must be an integer");
+  const numeric = releaseNumber(releaseId);
+  if (numeric === null) {
+    return error(400, "Release id must be a positive integer");
   }
 
   const row = await db
@@ -465,11 +507,11 @@ async function getRelease(db, releaseId, origin) {
        JOIN datasets d ON d.dataset_id = r.dataset_id
        WHERE r.release_id = ?`,
     )
-    .bind(Number(releaseId))
+    .bind(numeric)
     .first();
 
   if (row === null) {
-    return error(404, `No release with id ${releaseId}`);
+    return error(404, `No release with id '${releaseId}'`);
   }
 
   const decoded = decodeRow(row);
@@ -614,8 +656,9 @@ function parseRange(header, size) {
  * @returns {Promise<Response>} File bytes, 304, or a JSON error.
  */
 async function downloadRelease(env, request, releaseId) {
-  if (!/^[0-9]+$/.test(releaseId)) {
-    return error(400, "Release id must be an integer");
+  const numeric = releaseNumber(releaseId);
+  if (numeric === null) {
+    return error(400, "Release id must be a positive integer");
   }
 
   const row = await env.DB.prepare(
@@ -623,11 +666,11 @@ async function downloadRelease(env, request, releaseId) {
      FROM releases r JOIN files f ON f.file_id = r.file_id
      WHERE r.release_id = ?`,
   )
-    .bind(Number(releaseId))
+    .bind(numeric)
     .first();
 
   if (row === null) {
-    return error(404, `No release with id ${releaseId}`);
+    return error(404, `No release with id '${releaseId}'`);
   }
 
   // Ranged reads let an interrupted download resume instead of restarting,
@@ -673,7 +716,7 @@ async function downloadRelease(env, request, releaseId) {
     "access-control-allow-origin": "*",
     "accept-ranges": "bytes",
     "cache-control": "public, max-age=31536000, immutable",
-    "content-disposition": `attachment; filename="${row.filename}"`,
+    "content-disposition": contentDisposition(row.filename),
     "x-syndex-sha256": row.sha256,
     etag: object.httpEtag,
   });

@@ -321,10 +321,31 @@ const tests = {
       "/syndex/search?q=bpass&type=grid",
     );
 
-    // Nothing else moved: the API still owns every other path, including the
-    // 404 for the root.
-    assert.equal((await call("/", env)).status, 404);
-    assert.match((await call("/", env)).body, /No route for/);
+    // The apex serves the portal and nothing else of its own, so everything
+    // outside /syndex and /v1 belongs to the org site.
+    const root = await call("/", env);
+    assert.equal(root.status, 302);
+    assert.equal(
+      root.headers.get("location"),
+      "https://synthesizer-project.github.io/",
+    );
+    assert.equal(root.headers.get("cache-control"), "no-store");
+
+    const deep = await call("/getting-started?q=1", env);
+    assert.equal(
+      deep.headers.get("location"),
+      "https://synthesizer-project.github.io/getting-started?q=1",
+    );
+
+    // The API's own hostname is untouched: it still answers, and still 404s
+    // for a path it does not have.
+    const onApi = await worker.fetch(
+      new Request("https://data.synthesizer-project.org/nope"),
+      env,
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+    assert.equal(onApi.status, 404);
+    assert.match(await onApi.text(), /No route for/);
   },
 
   async "a filter URL survives being parsed and rebuilt"() {

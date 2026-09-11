@@ -20,6 +20,16 @@
     {
       "pattern": "synthesizer-project.org/syndex/*",
       "zone_name": "synthesizer-project.org"
+    },
+    // Everything else on the apex, which the Worker answers by redirecting to
+    // the org site on GitHub Pages. Pages would serve the apex itself, but
+    // only by permanently redirecting synthesizer-project.github.io to it, and
+    // this domain is still young enough to be blocked by security products --
+    // so the old address has to keep working unredirected for now. There is no
+    // origin behind this hostname; the Worker is the whole of it.
+    {
+      "pattern": "synthesizer-project.org/*",
+      "zone_name": "synthesizer-project.org"
     }
   ],
   // The portal's stylesheet and its vendored copy of htmx, built by

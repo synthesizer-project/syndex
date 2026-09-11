@@ -79,7 +79,8 @@ returned as JSON by the API.
 ## Quick start
 
 Prerequisites: Python 3.10 or later, [uv](https://docs.astral.sh/uv/), and
-Node 20 or later. The Cloudflare commands below assume `npm install` has run;
+Node 22.15 or later — the portal's tests transform JSX through
+`module.registerHooks`, which older releases do not have. The Cloudflare commands below assume `npm install` has run;
 prefix `wrangler` with `npx` unless it is installed globally.
 
 Install dependencies:

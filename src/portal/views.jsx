@@ -306,7 +306,7 @@ export const Layout = ({
         content={
           description ??
           "A searchable index of stellar population synthesis and AGN grids, " +
-            "dust models and instruments for the Synthesizer project."
+          "dust models and instruments for the Synthesizer project."
         }
       />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -335,64 +335,61 @@ export const Layout = ({
           it signposts the same places at full size, and a bar above that
           would only say them twice. */}
       {!bare && (
-      <header class="relative border-b border-line">
-        <div
-          class={`flex w-full flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${
-            showSubmit ? "pr-48" : ""
-          }`}
-        >
-          <a
-            href={BASE}
-            class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
+        <header class="relative border-b border-line">
+          <div
+            class={`flex w-full flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${showSubmit ? "pr-48" : ""
+              }`}
           >
-            <img
-              src={`${BASE}/static/syndex_logo_2.png`}
-              alt=""
-              width="824"
-              height="862"
-              class="h-9 w-auto"
-            />
-            Syndex
-          </a>
-          {nav && (
-            <nav
-              aria-label="Data types"
-              class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm"
-            >
-              {TABS.map((tab) => (
-                <a
-                  href={
-                    filters === null
-                      ? `${BASE}/search${
-                          tab.types === null ? "" : `?type=${tab.types[0]}`
-                        }`
-                      : typeUrl(filters, tab.types?.[0] ?? null)
-                  }
-                  aria-current={tab.id === active ? "page" : undefined}
-                  class={`flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${
-                    tab.id === active
-                      ? "border-accent-light text-text"
-                      : "border-transparent text-muted hover:text-text"
-                  }`}
-                >
-                  {tab.label}
-                  <span class="text-xs text-muted tabular-nums">
-                    {counts[tab.id]}
-                  </span>
-                </a>
-              ))}
-            </nav>
-          )}
-          {showSubmit && (
             <a
-              href={`${BASE}/submit`}
-              class="btn absolute top-4 right-6 text-xs no-underline"
+              href={BASE}
+              class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
             >
-              Submit a dataset
+              <img
+                src={`${BASE}/static/syndex_logo_2.png`}
+                alt=""
+                width="824"
+                height="862"
+                class="h-9 w-auto"
+              />
+              Syndex
             </a>
-          )}
-        </div>
-      </header>
+            {nav && (
+              <nav
+                aria-label="Data types"
+                class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm"
+              >
+                {TABS.map((tab) => (
+                  <a
+                    href={
+                      filters === null
+                        ? `${BASE}/search${tab.types === null ? "" : `?type=${tab.types[0]}`
+                        }`
+                        : typeUrl(filters, tab.types?.[0] ?? null)
+                    }
+                    aria-current={tab.id === active ? "page" : undefined}
+                    class={`flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${tab.id === active
+                        ? "border-accent-light text-text"
+                        : "border-transparent text-muted hover:text-text"
+                      }`}
+                  >
+                    {tab.label}
+                    <span class="text-xs text-muted tabular-nums">
+                      {counts[tab.id]}
+                    </span>
+                  </a>
+                ))}
+              </nav>
+            )}
+            {showSubmit && (
+              <a
+                href={`${BASE}/submit`}
+                class="btn absolute top-4 right-6 text-xs no-underline"
+              >
+                Submit a dataset
+              </a>
+            )}
+          </div>
+        </header>
       )}
       {bare && (
         <nav
@@ -418,13 +415,12 @@ export const Layout = ({
         {children}
       </main>
       <footer
-        class={`${
-          bare
+        class={`${bare
             ? "landing-footer w-full px-6 pb-8 text-center"
             : "mx-auto w-full max-w-7xl px-6 pt-4 pb-12"
-        } text-sm text-muted`}
+          } text-sm text-muted`}
       >
-          <div class={`${bare ? "" : "border-t border-line pt-6"} text-center`}>
+        <div class={`${bare ? "" : "border-t border-line pt-6"} text-center`}>
           {footer !== null && <div class="mb-5">{footer}</div>}
           <a
             href="https://synthesizer-project.github.io"
@@ -441,7 +437,7 @@ export const Layout = ({
             >
               <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
             </svg>
-            synthesizer-project.github.io
+            synthesizer-project
           </a>
         </div>
       </footer>
@@ -582,40 +578,40 @@ export const Facet = ({
         {active.length > 0 && <span>{active.length} selected</span>}
       </summary>
       <fieldset class="mt-2 border-0">
-      <legend class="sr-only">{legend}</legend>
-      <ul class="space-y-0.5 text-sm">
-        {visible.map((value) => (
-          <li>
-            <label
-              for={`${name}-${value.value}`}
-              class="flex cursor-pointer items-center gap-2 py-0.5"
-            >
-              <input
-                type="checkbox"
-                id={`${name}-${value.value}`}
-                name={name}
-                value={value.value}
-                checked={active.includes(value.value)}
-              />
-              <span class="min-w-0 flex-1 truncate" title={String(value.value)}>
-                {label(value.value)}
-              </span>
-              <span class="text-muted tabular-nums">{value.n}</span>
-            </label>
-          </li>
-        ))}
-      </ul>
-      {(hidden > 0 || expanded) && (
-        <a href={href} hx-get={href} class="mt-1.5 inline-block text-sm">
-          {expanded ? "collapse" : `${hidden} more`}{" "}
-          <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
-        </a>
-      )}
-      {/* So that expanding a list survives ticking a box in it. */}
-      {expanded && <input type="hidden" name="more" value={name} />}
-      {opened && (
-        <input type="hidden" name="open" value={name} data-filter-open="" />
-      )}
+        <legend class="sr-only">{legend}</legend>
+        <ul class="space-y-0.5 text-sm">
+          {visible.map((value) => (
+            <li>
+              <label
+                for={`${name}-${value.value}`}
+                class="flex cursor-pointer items-center gap-2 py-0.5"
+              >
+                <input
+                  type="checkbox"
+                  id={`${name}-${value.value}`}
+                  name={name}
+                  value={value.value}
+                  checked={active.includes(value.value)}
+                />
+                <span class="min-w-0 flex-1 truncate" title={String(value.value)}>
+                  {label(value.value)}
+                </span>
+                <span class="text-muted tabular-nums">{value.n}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        {(hidden > 0 || expanded) && (
+          <a href={href} hx-get={href} class="mt-1.5 inline-block text-sm">
+            {expanded ? "collapse" : `${hidden} more`}{" "}
+            <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+          </a>
+        )}
+        {/* So that expanding a list survives ticking a box in it. */}
+        {expanded && <input type="hidden" name="more" value={name} />}
+        {opened && (
+          <input type="hidden" name="open" value={name} data-filter-open="" />
+        )}
       </fieldset>
     </details>
   );
@@ -625,44 +621,43 @@ export const Facet = ({
 const TypeFacet = ({ filters, values }) => {
   const opened = filters.open.includes("type");
   return (
-  <details class="py-4" data-filter-group="type" open={opened}>
-    <summary class="label-caps flex cursor-pointer items-center justify-between">
-      <span>Data type</span>
-      {filters.type.length > 0 && (
-        <span>{filters.type[0].replace(/_/g, " ")}</span>
-      )}
-    </summary>
-    <ul class="mt-2 space-y-0.5 text-sm">
-      <li>
-        <a
-          href={typeUrl(filters, null)}
-          hx-get={typeUrl(filters, null)}
-          class={filters.type.length === 0 ? "text-text" : "text-muted"}
-        >
-          All data
-        </a>
-      </li>
-      {values.map((value) => (
-        <li class="flex items-center gap-2 py-0.5">
+    <details class="py-4" data-filter-group="type" open={opened}>
+      <summary class="label-caps flex cursor-pointer items-center justify-between">
+        <span>Data type</span>
+        {filters.type.length > 0 && (
+          <span>{filters.type[0].replace(/_/g, " ")}</span>
+        )}
+      </summary>
+      <ul class="mt-2 space-y-0.5 text-sm">
+        <li>
           <a
-            href={typeUrl(filters, value.value)}
-            hx-get={typeUrl(filters, value.value)}
-            aria-current={filters.type[0] === value.value ? "true" : undefined}
-            class={`min-w-0 flex-1 truncate ${
-              filters.type[0] === value.value ? "text-text" : "text-muted"
-            }`}
-            title={String(value.value)}
+            href={typeUrl(filters, null)}
+            hx-get={typeUrl(filters, null)}
+            class={filters.type.length === 0 ? "text-text" : "text-muted"}
           >
-            {value.value.replace(/_/g, " ")}
+            All data
           </a>
-          <span class="text-muted tabular-nums">{value.n}</span>
         </li>
-      ))}
-    </ul>
-    {opened && (
-      <input type="hidden" name="open" value="type" data-filter-open="" />
-    )}
-  </details>
+        {values.map((value) => (
+          <li class="flex items-center gap-2 py-0.5">
+            <a
+              href={typeUrl(filters, value.value)}
+              hx-get={typeUrl(filters, value.value)}
+              aria-current={filters.type[0] === value.value ? "true" : undefined}
+              class={`min-w-0 flex-1 truncate ${filters.type[0] === value.value ? "text-text" : "text-muted"
+                }`}
+              title={String(value.value)}
+            >
+              {value.value.replace(/_/g, " ")}
+            </a>
+            <span class="text-muted tabular-nums">{value.n}</span>
+          </li>
+        ))}
+      </ul>
+      {opened && (
+        <input type="hidden" name="open" value="type" data-filter-open="" />
+      )}
+    </details>
   );
 };
 
@@ -787,35 +782,35 @@ const AxisPicker = ({ tab, filters, facets }) => {
         {filters.axes.length > 0 && <span>{filters.axes.length} selected</span>}
       </summary>
       <fieldset class="mt-2 border-0">
-      <legend class="sr-only">Axes</legend>
-      {filters.axes.map((axis) => (
-        <AxisFilter
-          tab={tab}
-          filters={filters}
-          axis={axis}
-          units={units[axis.name] ?? ""}
-        />
-      ))}
-      {available.length > 0 && (
-        <label for="add-axis" class="block pt-2 text-sm">
-          <span class="sr-only">Add an axis</span>
-          <select
-            id="add-axis"
-            name="axis"
-            class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
-          >
-            <option value="">Axes</option>
-            {available.map((axis) => (
-              <option value={axis.value}>
-                {axis.value} ({axis.n})
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {opened && (
-        <input type="hidden" name="open" value="axes" data-filter-open="" />
-      )}
+        <legend class="sr-only">Axes</legend>
+        {filters.axes.map((axis) => (
+          <AxisFilter
+            tab={tab}
+            filters={filters}
+            axis={axis}
+            units={units[axis.name] ?? ""}
+          />
+        ))}
+        {available.length > 0 && (
+          <label for="add-axis" class="block pt-2 text-sm">
+            <span class="sr-only">Add an axis</span>
+            <select
+              id="add-axis"
+              name="axis"
+              class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
+            >
+              <option value="">Axes</option>
+              {available.map((axis) => (
+                <option value={axis.value}>
+                  {axis.value} ({axis.n})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {opened && (
+          <input type="hidden" name="open" value="axes" data-filter-open="" />
+        )}
       </fieldset>
     </details>
   );
@@ -832,117 +827,117 @@ const FilterRail = ({ tab, filters, facets }) => (
     >
       Get download command (<span data-selection-count="">0</span>)
     </button>
-  <details class="filter-sheet card p-5" open>
-    <summary class="label-caps cursor-pointer">Refine</summary>
-    <form
-      id="filters"
-      method="get"
-      action={`${BASE}/search`}
-      hx-get={`${BASE}/search`}
-      hx-trigger="change, submit"
-      class="mt-4 flex flex-col divide-y divide-line"
-    >
-      <div class="pb-4">
-        <label for="q" class="block text-sm">
-          <span class="label-caps mb-1 block">Search</span>
-          <input
-            type="search"
-            id="q"
-            name="q"
-            value={filters.q}
-            placeholder="name, description, type or filename…"
-            class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
+    <details class="filter-sheet card p-5" open>
+      <summary class="label-caps cursor-pointer">Refine</summary>
+      <form
+        id="filters"
+        method="get"
+        action={`${BASE}/search`}
+        hx-get={`${BASE}/search`}
+        hx-trigger="change, submit"
+        class="mt-4 flex flex-col divide-y divide-line"
+      >
+        <div class="pb-4">
+          <label for="q" class="block text-sm">
+            <span class="label-caps mb-1 block">Search</span>
+            <input
+              type="search"
+              id="q"
+              name="q"
+              value={filters.q}
+              placeholder="name, description, type or filename…"
+              class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
+            />
+          </label>
+          <button type="submit" class="btn mt-2 w-full">
+            Search
+          </button>
+        </div>
+
+        {filters.type.length > 0 && (
+          <input type="hidden" name="type" value={filters.type[0]} />
+        )}
+        {filters.sort !== "" && (
+          <>
+            <input type="hidden" name="sort" value={filters.sort} />
+            <input type="hidden" name="direction" value={filters.direction} />
+          </>
+        )}
+
+        <TypeFacet filters={filters} values={facets.type} />
+        <Facet
+          tab={tab}
+          filters={filters}
+          legend="File size"
+          name="size"
+          values={facets.size}
+          active={filters.size}
+          label={(value) =>
+            SIZE_BUCKETS.find((bucket) => bucket.value === value)?.label ?? value
+          }
+        />
+
+        {tab.id === "grids" && (
+          <Facet
+            tab={tab}
+            filters={filters}
+            legend="Kind"
+            name="kind"
+            values={facets.kind}
+            active={filters.kind}
+            label={kindLabel}
           />
-        </label>
-        <button type="submit" class="btn mt-2 w-full">
-          Search
-        </button>
-      </div>
+        )}
+        {tab.id === "grids" && (
+          <Facet
+            tab={tab}
+            filters={filters}
+            legend="Model"
+            name="model"
+            values={facets.model}
+            active={filters.model}
+            label={modelLabel}
+          />
+        )}
+        {(tab.id === "grids" || tab.id === "dust") && (
+          <Facet
+            tab={tab}
+            filters={filters}
+            legend="Emission"
+            name="emission"
+            values={facets.emission}
+            active={filters.emission}
+            label={(value) => value.replace(/_/g, " ")}
+          />
+        )}
+        {(tab.id === "grids" || tab.id === "dust") && (
+          <Facet
+            tab={tab}
+            filters={filters}
+            legend="Content"
+            name="content"
+            values={facets.content}
+            active={filters.content}
+            label={(value) => `has ${value}`}
+          />
+        )}
+        {tab.id === "instruments" && (
+          <Facet
+            tab={tab}
+            filters={filters}
+            legend="Carries"
+            name="capability"
+            values={facets.capability}
+            active={filters.capability}
+            label={(value) => ({ psf: "PSFs", noise: "noise maps", depth: "depths" })[value]}
+          />
+        )}
+        {(tab.id === "grids" || tab.id === "dust") && (
+          <AxisPicker tab={tab} filters={filters} facets={facets} />
+        )}
 
-      {filters.type.length > 0 && (
-        <input type="hidden" name="type" value={filters.type[0]} />
-      )}
-      {filters.sort !== "" && (
-        <>
-          <input type="hidden" name="sort" value={filters.sort} />
-          <input type="hidden" name="direction" value={filters.direction} />
-        </>
-      )}
-
-      <TypeFacet filters={filters} values={facets.type} />
-      <Facet
-        tab={tab}
-        filters={filters}
-        legend="File size"
-        name="size"
-        values={facets.size}
-        active={filters.size}
-        label={(value) =>
-          SIZE_BUCKETS.find((bucket) => bucket.value === value)?.label ?? value
-        }
-      />
-
-      {tab.id === "grids" && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Kind"
-          name="kind"
-          values={facets.kind}
-          active={filters.kind}
-          label={kindLabel}
-        />
-      )}
-      {tab.id === "grids" && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Model"
-          name="model"
-          values={facets.model}
-          active={filters.model}
-          label={modelLabel}
-        />
-      )}
-      {(tab.id === "grids" || tab.id === "dust") && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Emission"
-          name="emission"
-          values={facets.emission}
-          active={filters.emission}
-          label={(value) => value.replace(/_/g, " ")}
-        />
-      )}
-      {(tab.id === "grids" || tab.id === "dust") && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Content"
-          name="content"
-          values={facets.content}
-          active={filters.content}
-          label={(value) => `has ${value}`}
-        />
-      )}
-      {tab.id === "instruments" && (
-        <Facet
-          tab={tab}
-          filters={filters}
-          legend="Carries"
-          name="capability"
-          values={facets.capability}
-          active={filters.capability}
-          label={(value) => ({ psf: "PSFs", noise: "noise maps", depth: "depths" })[value]}
-        />
-      )}
-      {(tab.id === "grids" || tab.id === "dust") && (
-        <AxisPicker tab={tab} filters={filters} facets={facets} />
-      )}
-
-    </form>
-  </details>
+      </form>
+    </details>
   </div>
 );
 
@@ -997,15 +992,15 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
       chip(chipLabel(key, value), {
         ...(key === "type"
           ? {
-              type: [],
-              kind: [],
-              model: [],
-              emission: [],
-              content: [],
-              capability: [],
-              axes: [],
-              more: [],
-            }
+            type: [],
+            kind: [],
+            model: [],
+            emission: [],
+            content: [],
+            capability: [],
+            axes: [],
+            more: [],
+          }
           : { [key]: filters[key].filter((other) => other !== value) }),
       });
     }
@@ -1128,9 +1123,8 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       <Scientific>
         {row.wavelength_min === null
           ? "—"
-          : `${num(row.wavelength_min)}–${num(row.wavelength_max)} ${
-              row.wavelength_units ?? ""
-            }`}
+          : `${num(row.wavelength_min)}–${num(row.wavelength_max)} ${row.wavelength_units ?? ""
+          }`}
       </Scientific>
     ),
     present: (row) => row.wavelength_min !== null,
@@ -1149,13 +1143,13 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       row.is_ci === 1,
   )
     ? {
-        label: "tags",
-        cell: (row) => (
-          <div class="flex flex-wrap gap-1">
-            <Badges row={row} />
-          </div>
-        ),
-      }
+      label: "tags",
+      cell: (row) => (
+        <div class="flex flex-wrap gap-1">
+          <Badges row={row} />
+        </div>
+      ),
+    }
     : null;
   const photoionised = {
     label: "photoionised",
@@ -1357,29 +1351,28 @@ const Results = ({ tab, filters, rows, axes }) => {
                 ? searchUrl(filters, { sort: column.sort, direction })
                 : null;
               return (
-              <th
-                scope="col"
-                aria-sort={sortable ? (active ? `${filters.direction}ending` : "none") : undefined}
-                class={`label-caps border-b border-line px-4 py-3 whitespace-nowrap ${
-                  column.numeric ? "text-right" : ""
-                }`}
-                style={column.style}
-              >
-                {sortable ? (
-                  <a
-                    href={href}
-                    hx-get={href}
-                    class="whitespace-nowrap text-inherit no-underline hover:text-text"
-                  >
-                    {column.label}
-                    {active && (
-                      <span aria-hidden="true">
-                        {filters.direction === "asc" ? " ↑" : " ↓"}
-                      </span>
-                    )}
-                  </a>
-                ) : column.label}
-              </th>
+                <th
+                  scope="col"
+                  aria-sort={sortable ? (active ? `${filters.direction}ending` : "none") : undefined}
+                  class={`label-caps border-b border-line px-4 py-3 whitespace-nowrap ${column.numeric ? "text-right" : ""
+                    }`}
+                  style={column.style}
+                >
+                  {sortable ? (
+                    <a
+                      href={href}
+                      hx-get={href}
+                      class="whitespace-nowrap text-inherit no-underline hover:text-text"
+                    >
+                      {column.label}
+                      {active && (
+                        <span aria-hidden="true">
+                          {filters.direction === "asc" ? " ↑" : " ↓"}
+                        </span>
+                      )}
+                    </a>
+                  ) : column.label}
+                </th>
               );
             })}
           </tr>
@@ -1406,9 +1399,8 @@ const Results = ({ tab, filters, rows, axes }) => {
               </td>
               {columns.map((column) => (
                 <td
-                  class={`px-4 py-2.5 align-baseline whitespace-nowrap ${
-                    column.numeric ? "text-right tabular-nums" : ""
-                  }`}
+                  class={`px-4 py-2.5 align-baseline whitespace-nowrap ${column.numeric ? "text-right tabular-nums" : ""
+                    }`}
                   style={column.style}
                 >
                   {column.cell(row, axes.get(row.release_id))}
@@ -1446,7 +1438,7 @@ export const Panel = ({ tab, filters, result, noun }) => (
     >
       <FilterRail tab={tab} filters={filters} facets={result.facets} />
       <section class="min-w-0" aria-label={`${noun} results`}>
-      <Results tab={tab} filters={filters} rows={result.rows} axes={result.axes} />
+        <Results tab={tab} filters={filters} rows={result.rows} axes={result.axes} />
       </section>
     </div>
   </div>

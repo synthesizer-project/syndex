@@ -1,0 +1,62 @@
+# Deploy the Worker on every push to main.
+#
+# The tests gate the deploy because the build has a footgun: Tailwind writes
+# dist/assets at build time and `wrangler deploy` ships whatever is on disk, so
+# deploying without building first silently publishes stale styling. Running
+# `npm run deploy` here rather than `wrangler deploy` is what makes that
+# impossible, and it is the same command used by hand.
+#
+# Migrations are deliberately not applied here. A schema change should land
+# when someone is watching it, not as a side effect of a merge.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one in flight: a half-finished
+# upload is worse than a queued one.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Worker and portal tests
+        run: npm test
+      - uses: astral-sh/setup-uv@v5
+      - name: Publisher tests
+        run: uv run --extra test pytest -q
+      - name: Lint
+        run: uvx ruff check .
+      - name: Format
+        run: uvx ruff format --check .
+
+  deploy:
+    name: Deploy
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build and deploy
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is already in wrangler.jsonc. Set so wrangler
+          # never has to guess which account a token belongs to.
+          CLOUDFLARE_ACCOUNT_ID: e86ac0bb0bee64457c144e84d67966ef

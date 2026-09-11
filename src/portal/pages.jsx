@@ -96,9 +96,16 @@ const expandedFields = (value, path = []) =>
   });
 
 /** A titled block. */
-const Section = ({ title, children }) => (
+const Section = ({ title, action = null, children }) => (
   <section class="card mb-5 p-6">
-    <h2 class="mb-4 text-xl">{title}</h2>
+    {action === null ? (
+      <h2 class="mb-4 text-xl">{title}</h2>
+    ) : (
+      <div class="mb-4 flex items-start justify-between gap-4">
+        <h2 class="text-xl">{title}</h2>
+        {action}
+      </div>
+    )}
     {children}
   </section>
 );
@@ -139,6 +146,35 @@ const CopyButton = ({
       class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[calc(100vw-3rem)] rounded-lg border border-line bg-surface px-3.5 py-2 font-mono text-xs whitespace-nowrap text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
     >
       {command}
+    </span>
+  </button>
+);
+
+/** The same control, for copying a value that is already on the page. */
+const CopyTextButton = ({ text, label }) => (
+  <button
+    type="button"
+    data-copy-text={text}
+    data-copy-label={label}
+    class="group relative inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-muted bg-bg text-text transition-colors hover:border-accent-light hover:text-accent-light"
+    aria-label={label}
+  >
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      class="h-4 w-4"
+    >
+      <rect x="8" y="8" width="14" height="14" rx="2" />
+      <path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4" />
+    </svg>
+    <span
+      role="tooltip"
+      class="pointer-events-none invisible absolute top-full right-0 z-20 mt-2 w-max max-w-[calc(100vw-3rem)] rounded-lg border border-line bg-surface px-3.5 py-2 text-xs whitespace-nowrap text-text opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+    >
+      {label}
     </span>
   </button>
 );
@@ -448,6 +484,16 @@ const previewCaption = (dataset) => {
   }
   if (dataset.preview_kind === "ionising") {
     return "Ionising luminosity across the first two grid axes.";
+  }
+  // A dust grid's plot is of the same kind but not of the same quantity, and
+  // calling its extinction curves "transmitted plus nebular spectra" is simply
+  // wrong.
+  if (dataset.data_type === "dust_grid") {
+    const curves =
+      dataset.grid?.emission_type === "dust_attenuation"
+        ? "attenuation curves"
+        : "emission spectra";
+    return `Every one of this grid's ${curves}, coloured by magnitude.`;
   }
   const what =
     dataset.grid?.emission_type === "incident"
@@ -817,7 +863,34 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
           )}
 
           {citations.length > 0 && (
-            <Section title="Citations">
+            <Section
+              title="Citations"
+              action={
+                <div class="flex gap-2">
+                  <CopyTextButton
+                    text={citations
+                      .map((citation) => String(citation.bibtex ?? "").trim())
+                      .filter((entry) => entry !== "")
+                      .join("\n\n")}
+                    label={
+                      citations.length === 1
+                        ? "Copy the BibTeX entry"
+                        : `Copy all ${citations.length} BibTeX entries`
+                    }
+                  />
+                  {dataset.release_id === null ? null : (
+                    <DownloadButton
+                      href={`${DATA_API}/v1/releases/${dataset.release_id}/citations.bib`}
+                      label={
+                        citations.length === 1
+                          ? "Download the citation as BibTeX"
+                          : `Download all ${citations.length} citations as BibTeX`
+                      }
+                    />
+                  )}
+                </div>
+              }
+            >
               <>
                   <p class="mb-3 text-sm text-muted">
                     Cite all of these when using this grid: the model, the paper it
@@ -854,16 +927,6 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
                       </li>
                     ))}
                   </ul>
-                  {dataset.release_id ? (
-                    <p class="mb-3 text-sm">
-                      <a
-                        href={`${DATA_API}/v1/releases/${dataset.release_id}/citations.bib`}
-                      >
-                        Download {citations.length === 1 ? "it" : `all ${citations.length}`}{" "}
-                        as BibTeX
-                      </a>
-                    </p>
-                  ) : null}
               </>
             </Section>
           )}

@@ -821,7 +821,8 @@ export async function dataset(db, name) {
     // from their c23.01 siblings despite sharing a model.
     db
       .prepare(
-        `SELECT c.bibcode, c.doi, c.authors, c.title, c.year, c.journal
+        `SELECT c.bibcode, c.doi, c.authors, c.title, c.year, c.journal,
+                c.bibtex
          FROM file_citations fc
          JOIN citations c ON c.citation_id = fc.citation_id
          WHERE fc.file_id = ? ORDER BY fc.position, c.year`,

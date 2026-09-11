@@ -1035,19 +1035,26 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
   );
 };
 
-/** A dataset name, linking to its page. */
+/**
+ * A dataset name, linking to its page.
+ *
+ * The truncation is the column's, not this element's: the cap lives on the
+ * `<td>` and `<th>` (see `columnsFor`), and the link only has to clip to
+ * whatever width it is given.
+ *
+ * @param {object} props.row The dataset row.
+ * @param {object} props.filters Current filters, for the return link.
+ */
 const Name = ({ row, filters }) => (
-  <div class="min-w-[12rem]">
-    <a
-      href={`${BASE}/datasets/${encodeURIComponent(row.name)}?return=${encodeURIComponent(
-        searchUrl(filters),
-      )}`}
-      class="block truncate no-underline hover:underline"
-      title={row.name}
-    >
-      {row.name}
-    </a>
-  </div>
+  <a
+    href={`${BASE}/datasets/${encodeURIComponent(row.name)}?return=${encodeURIComponent(
+      searchUrl(filters),
+    )}`}
+    class="block truncate no-underline hover:underline"
+    title={row.name}
+  >
+    {row.name}
+  </a>
 );
 
 /**
@@ -1082,6 +1089,29 @@ function axisColumns(filters, already) {
  * spins wants to see the spins.
  */
 function columnsFor(tab, filters, rows, axesByRelease) {
+  // Names truncate to whatever the other columns leave, and no further.
+  //
+  // `max-width: 0` is the whole trick. It takes this column out of the table's
+  // content-width sum, so the other columns are measured first and this one
+  // receives the remainder; `width: 100%` is what claims that remainder rather
+  // than letting it spread across every column. `min-width` is the floor, both
+  // the default truncation length and the point past which the card scrolls
+  // instead of squeezing the name to nothing.
+  //
+  // So a tab whose columns already fill the card has nothing left to give and
+  // its names sit at the floor, truncated; a tab with room to spare hands it
+  // over and the truncation grows into it, up to whole names.
+  //
+  // This only works while the table itself is not allowed to reach
+  // `max-content`: that sum includes the untruncated names, and a table wide
+  // enough for them pushes every other column out of view whatever the cell
+  // says. See the `<table>` below.
+  const name = {
+    label: "name",
+    cell: (row) => <Name row={row} filters={filters} />,
+    sort: "name",
+    style: "width:100%;min-width:18rem;max-width:0",
+  };
   const populated = (columns) =>
     columns.filter(
       (column) =>
@@ -1138,7 +1168,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
 
   if (tab.id === "grids") {
     return populated([
-      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
+      name,
       {
         label: "model",
         cell: (row) => modelLabel(row.model_name),
@@ -1179,7 +1209,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
 
   if (tab.id === "dust") {
     return populated([
-      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
+      name,
       {
         label: "emission",
         cell: (row) => (row.emission_type ?? "—").replace(/^dust_/, "").replace(/_/g, " "),
@@ -1227,7 +1257,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
       }
     };
     return populated([
-      { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
+      name,
       {
         label: "type",
         cell: (row) => (row.instrument_type ?? "—").replace(/_/g, " "),
@@ -1272,7 +1302,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
   }
 
   return populated([
-    { label: "name", cell: (row) => <Name row={row} filters={filters} />, sort: "name" },
+    name,
     {
       label: "type",
       cell: (row) => row.data_type.replace(/_/g, " "),
@@ -1304,7 +1334,12 @@ const Results = ({ tab, filters, rows, axes }) => {
   // viewport inside a smaller box.
   return (
     <div id="catalogue-results" class="results card min-w-0 overflow-x-auto">
-      <table class="min-w-full w-max border-collapse text-sm">
+      {/* Exactly the card's width, and deliberately no `min-w-max`: that
+          would size the table to its content, names included, and no rule on
+          the name column could then shrink it. Columns that cannot shrink --
+          everything but the name -- still overflow it, and the container
+          scrolls. */}
+      <table class="w-full border-collapse text-sm">
         <thead>
           <tr class="text-left">
             <th scope="col" class="border-b border-line px-4 py-3">
@@ -1325,9 +1360,10 @@ const Results = ({ tab, filters, rows, axes }) => {
               <th
                 scope="col"
                 aria-sort={sortable ? (active ? `${filters.direction}ending` : "none") : undefined}
-                class={`label-caps border-b border-line px-4 py-3 ${
+                class={`label-caps border-b border-line px-4 py-3 whitespace-nowrap ${
                   column.numeric ? "text-right" : ""
                 }`}
+                style={column.style}
               >
                 {sortable ? (
                   <a
@@ -1370,9 +1406,10 @@ const Results = ({ tab, filters, rows, axes }) => {
               </td>
               {columns.map((column) => (
                 <td
-                  class={`px-4 py-2.5 align-baseline ${
-                    column.numeric ? "text-right tabular-nums whitespace-nowrap" : ""
+                  class={`px-4 py-2.5 align-baseline whitespace-nowrap ${
+                    column.numeric ? "text-right tabular-nums" : ""
                   }`}
+                  style={column.style}
                 >
                   {column.cell(row, axes.get(row.release_id))}
                 </td>

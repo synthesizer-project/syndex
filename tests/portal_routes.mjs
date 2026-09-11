@@ -311,11 +311,11 @@ const tests = {
     const portal = await call("/syndex/search", env);
     assert.equal(portal.status, 200);
     assert.match(portal.headers.get("content-type"), /text\/html/);
-    assert.equal(portal.headers.get("vary"), "HX-Request");
+    assert.match(portal.headers.get("vary"), /^HX-Request\b/);
     assert.match(portal.body, /class="bg-layer"/);
     assert.match(portal.body, /viewBox="0 0 1440 900"/);
     const oldTab = await call("/syndex/grids?q=bpass", env);
-    assert.equal(oldTab.status, 308);
+    assert.equal(oldTab.status, 307);
     assert.equal(
       oldTab.headers.get("location"),
       "/syndex/search?q=bpass&type=grid",
@@ -782,7 +782,7 @@ const tests = {
     // The rail is swapped with the table: its counts describe the search.
     assert.match(body, /id="filters"/);
     assert.equal(headers.get("cache-control"), "no-store");
-    assert.equal(headers.get("vary"), "HX-Request");
+    assert.match(headers.get("vary"), /^HX-Request\b/);
   },
 
   async "dataset links preserve the filtered result URL"() {
@@ -832,6 +832,7 @@ const tests = {
               title: "Binary Population and Spectral Synthesis Version 2.1",
               year: 2017,
               journal: "PASA",
+              bibtex: "@ARTICLE{2017PASA...34...58E, title = {BPASS} }",
             },
           ],
           grid: [
@@ -976,11 +977,15 @@ const tests = {
     assert.match(body, /aria-label="Direct download release 2"/);
     assert.match(body, /aria-label="Direct download release 1"/);
     assert.doesNotMatch(body, /synthesizer-download …/);
+    // One copy control at the top of the page, one per release row, and one
+    // on the citations card.
     assert.equal(
       body.match(/<rect x="8" y="8" width="14" height="14" rx="2"><\/rect>/g)
         ?.length,
-      4,
+      5,
     );
+    assert.match(body, /aria-label="Copy the BibTeX entry"/);
+    assert.match(body, /data-copy-text="@ARTICLE/);
     assert.match(body, />download<\/th>/);
     assert.match(body, />minimum version<\/th><th[^>]*>maximum version<\/th>/);
     assert.match(body, />0\.9\.0<\/td><td[^>]*>0\.9\.9<\/td>/);
@@ -1057,6 +1062,59 @@ const tests = {
     assert.equal(status, 404);
     assert.match(body, /no dataset named nope/);
     assert.match(body, /<html/);
+  },
+
+  async "a dataset page opens whatever the name contains"() {
+    // The tab redirects were one regex route, `:tab{grids|dust|...}`, and `|`
+    // binds loosest when Hono composes it: the pattern matched any path
+    // containing "dust" or "instruments", or ending in "data". Every dust grid
+    // redirected to the dust tab instead of opening.
+    const env = { DB: stubDb({ rows: { datasets: [GRID_ROW] } }) };
+    for (const name of [
+      "draine-li-dust-extcurve-mrn",
+      "dust",
+      "euclid-nisp-instruments",
+      "camels-simulation-data",
+    ]) {
+      const { status } = await call(`/syndex/datasets/${name}`, env);
+      assert.equal(status, 200, `${name} should open, not redirect`);
+    }
+
+    // The tab shortcuts themselves still redirect onto the canonical search,
+    // but temporarily and uncached: as a 308 this route's earlier mistake was
+    // learned permanently by every browser that saw it, and no server-side fix
+    // could reach them.
+    for (const [path, target] of [
+      ["/syndex/grids", "/syndex/search?type=grid"],
+      ["/syndex/dust", "/syndex/search?type=dust_grid"],
+      ["/syndex/instruments", "/syndex/search?type=instrument"],
+      ["/syndex/data", "/syndex/search"],
+    ]) {
+      const reply = await call(path, env);
+      assert.equal(reply.status, 307, path);
+      assert.equal(reply.headers.get("location"), target, path);
+      assert.equal(reply.headers.get("cache-control"), "no-store", path);
+    }
+  },
+
+  async "a history restore gets a whole page, not a fragment"() {
+    // htmx replaces the body with whatever a restore returns, so a fragment
+    // there leaves the page as a bare results panel with no layout.
+    const env = { DB: stubDb() };
+    const fragmentReply = await call("/syndex/search", env, {
+      headers: { "HX-Request": "true" },
+    });
+    assert.doesNotMatch(fragmentReply.body, /<!doctype html>/i);
+
+    const restored = await call("/syndex/search", env, {
+      headers: { "HX-Request": "true", "HX-History-Restore-Request": "true" },
+    });
+    assert.match(restored.body, /<!doctype html>/i);
+    assert.match(restored.body, /<title>/);
+    assert.match(
+      restored.headers.get("vary"),
+      /HX-History-Restore-Request/,
+    );
   },
 
   async "the form is closed rather than half working"() {

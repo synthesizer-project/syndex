@@ -72,7 +72,7 @@ app.use(trimTrailingSlash());
 function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
   return c.html(`<!doctype html>\n${node.toString()}`, status, {
     "cache-control": cache,
-    vary: "HX-Request",
+    vary: "HX-Request, HX-History-Restore-Request",
   });
 }
 
@@ -86,7 +86,7 @@ function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
 function fragment(c, node) {
   return c.html(node.toString(), 200, {
     "cache-control": "no-store",
-    vary: "HX-Request",
+    vary: "HX-Request, HX-History-Restore-Request",
   });
 }
 
@@ -122,7 +122,14 @@ app.get("/search", async (c) => {
 
   // htmx asks for the panel alone. Everything else about the request is the
   // same, which is what keeps the two paths from drifting apart.
-  if (c.req.header("HX-Request") === "true") {
+  //
+  // Except on a history restore. When htmx has no cached snapshot for a URL
+  // the back button lands on, it re-fetches it with both HX-Request and
+  // HX-History-Restore-Request set, and replaces the whole body with what
+  // comes back -- so answering that with a fragment leaves the page as a bare
+  // results panel with none of the layout around it.
+  const restoring = c.req.header("HX-History-Restore-Request") === "true";
+  if (!restoring && c.req.header("HX-Request") === "true") {
     return fragment(c, panel);
   }
 
@@ -138,19 +145,38 @@ app.get("/search", async (c) => {
   );
 });
 
-app.get("/:tab{grids|dust|instruments|data}", (c) => {
+// The tab paths the portal used to have, kept because they were shareable.
+//
+// Registered as four literal routes rather than one `:tab{grids|dust|...}`
+// pattern. That pattern is composed into a regex where `|` binds loosest, so
+// it read as "starts with /syndex/grids, OR contains dust, OR contains
+// instruments, OR ends with data" -- and every dataset with `dust` in its name
+// was redirected to the dust tab instead of opening.
+const TAB_PATHS = {
+  "/grids": "grid",
+  "/dust": "dust_grid",
+  "/instruments": "instrument",
+  "/data": null,
+};
+
+app.on("GET", Object.keys(TAB_PATHS), (c) => {
   const params = new URL(c.req.url).searchParams;
-  const type = {
-    grids: "grid",
-    dust: "dust_grid",
-    instruments: "instrument",
-  }[c.req.param("tab")];
-  if (type === undefined) {
+  const type = TAB_PATHS[new URL(c.req.url).pathname.slice(BASE.length)];
+  if (type === null) {
     params.delete("type");
   } else {
     params.set("type", type);
   }
-  return c.redirect(`${BASE}/search${params.size === 0 ? "" : `?${params}`}`, 308);
+  // 307 and no-store, not 308. A 308 is cacheable for ever by default, so
+  // when this route's pattern was wrong every browser that touched a dust
+  // grid's page learned the redirect permanently and kept honouring it long
+  // after the server stopped sending it. An alias is not worth a redirect
+  // nobody can take back.
+  const target = `${BASE}/search${params.size === 0 ? "" : `?${params}`}`;
+  return c.body(null, 307, {
+    location: target,
+    "cache-control": "no-store",
+  });
 });
 
 app.get("/datasets/:name", async (c) => {

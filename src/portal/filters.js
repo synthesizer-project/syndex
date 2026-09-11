@@ -153,6 +153,30 @@ document.addEventListener("click", async (event) => {
     showDownloadNotice(filename, amount, download.href);
   }
 
+  // Copying a value rather than a command: no dialog, just the control saying
+  // it worked. The text rides on the attribute because the citations it copies
+  // are already on the page.
+  const textCopy = event.target.closest("[data-copy-text]");
+  if (textCopy !== null) {
+    const label = textCopy.dataset.copyLabel ?? "Copy";
+    let message = "Copied";
+    try {
+      await navigator.clipboard.writeText(textCopy.dataset.copyText);
+    } catch {
+      message = "Copy unavailable";
+    }
+    textCopy.setAttribute("aria-label", message);
+    textCopy.querySelector("[role=tooltip]").textContent = message;
+    textCopy.classList.toggle("text-accent-light", message === "Copied");
+    // Back to itself, so a second copy still reads as one.
+    setTimeout(() => {
+      textCopy.setAttribute("aria-label", label);
+      textCopy.querySelector("[role=tooltip]").textContent = label;
+      textCopy.classList.remove("text-accent-light");
+    }, 2000);
+    return;
+  }
+
   const commandCopy = event.target.closest("[data-copy-command]");
   if (commandCopy !== null) {
     const amount = commandCopy.dataset.downloadSizeLabel;

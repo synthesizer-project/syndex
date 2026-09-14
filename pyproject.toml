@@ -7,16 +7,21 @@ name = "synthesizer-syndex"
 version = "0.1.0"
 description = "Catalogue and publication tooling for Synthesizer data"
 requires-python = ">=3.10"
+# Reading a file is all `syndex-check` does, and a contributor should not have
+# to install an S3 client and a plotting stack to check one before submitting.
+# Publishing and plotting pull their own dependencies through extras.
 dependencies = [
-    "boto3>=1.34",
     "h5py>=3.10",
-    "matplotlib>=3.8",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+publish = ["boto3>=1.34"]
+plots = ["matplotlib>=3.8"]
+test = ["pytest>=8", "boto3>=1.34", "matplotlib>=3.8"]
 
 [project.scripts]
+syndex-check = "syndex.check:main"
 syndex-upload = "syndex.upload:main"
 syndex-plots = "syndex.plots:main"
 syndex-previews = "syndex.previews:main"

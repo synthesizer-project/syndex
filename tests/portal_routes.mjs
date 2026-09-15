@@ -1548,7 +1548,7 @@ const tests = {
     assert.doesNotMatch(offered.body, /name="submitter_email"/);
   },
 
-  async "the upload page offers both ways up"() {
+  async "the upload page leads with the browser and folds the CLI away"() {
     const env = contributorEnv({ rows: { submission: SUBMISSION } });
     const { body } = await call(
       `/syndex/submit/${SUBMISSION.upload_token}`,
@@ -1556,22 +1556,26 @@ const tests = {
       SIGNED_IN,
     );
 
-    assert.match(body, /From this browser/);
-    assert.match(body, /Choose file/);
-    assert.match(body, /data-part-size="94371840"/);
-    // A file that will not fit gets a warning, not a line of status text:
-    // this is the one case where the page cannot do what was asked of it.
-    assert.match(body, /id="too-large"[^>]*role="alert"/);
-    assert.match(body, /Too large to upload via the browser/);
-    assert.match(body, /From a machine that already has the file/);
+    // The browser is the way most files go up, so it is the open one; the
+    // command line is folded away until a file needs it.
+    assert.match(body, /id="browser-upload"/);
+    assert.match(body, /Upload the file/);
+    assert.match(body, /<details id="cli-upload"/);
+    assert.doesNotMatch(body, /<details id="cli-upload" open/);
+    assert.match(body, /Upload with the CLI/);
+
+    // Both limits are stated, from the same constants.
+    assert.match(body, /Up to 10 GB from a browser/);
+    assert.match(body, /up to 189 GB rather than 10 GB/);
+
     // The token is what attaches the file to this submission.
     assert.match(
       body,
       new RegExp(`syndex-submit ${SUBMISSION.upload_token}`),
     );
-    // Nothing is minted by looking at the page.
+    assert.match(body, /data-part-size="94371840"/);
+    assert.match(body, /data-max-parts="106"/);
     assert.doesNotMatch(body, /AWS_ACCESS_KEY_ID/);
-    // The digest asked a contributor to do by hand what the sizes answer.
     assert.doesNotMatch(body, /sha256/i);
   },
 

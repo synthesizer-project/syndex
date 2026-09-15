@@ -118,6 +118,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const pickLabel = document.getElementById("pick-label");
   const tooLargeWarning = document.getElementById("too-large");
   const tooLargeDetail = document.getElementById("too-large-detail");
+  const browserUpload = document.getElementById("browser-upload");
+  const cliUpload = document.getElementById("cli-upload");
   const send = document.getElementById("send");
   const progress = document.getElementById("progress");
   const status = document.getElementById("upload-status");
@@ -148,8 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const tooLarge = file !== undefined && file.size > limit;
 
     // The one button changes job rather than a second appearing beside it:
-    // choose a file, then send it. A file too large to send leaves the
-    // chooser in place, since picking another is the way out of that.
+    // choose a file, then send it.
     const ready = file !== undefined && !tooLarge;
     send.hidden = !ready;
     send.disabled = !ready;
@@ -157,13 +158,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     chosen.textContent = file === undefined ? "No file chosen" : file.name;
 
+    // Only one of the two ways up can work for a given file, so only one is
+    // offered once the file is known. A page showing both, with one of them
+    // refusing, is a page asking somebody to work out which is which.
+    browserUpload.hidden = tooLarge;
+    cliUpload.open = tooLarge;
     tooLargeWarning.hidden = !tooLarge;
     if (tooLarge) {
       tooLargeDetail.textContent =
         `${file.name} is ${gigabytes(file.size)}, and the browser can send up` +
-        ` to ${gigabytes(limit)}. A file this size has to go up from the` +
-        " command line instead — see below. That route is still being built," +
-        " so for now ask a maintainer to take the file.";
+        ` to ${gigabytes(limit)}. Send it with the command below instead.`;
     }
     status.textContent = "";
   });

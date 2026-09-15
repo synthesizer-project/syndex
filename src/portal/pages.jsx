@@ -1963,45 +1963,56 @@ export const Upload = ({
             </p>
           </Section>
 
-          <Section title="From this browser">
-            <p class="mb-4 text-sm text-muted">
-              Up to {size(browserLimit)} maximum. If your file exceeds this,
-              use the command line option below.
-            </p>
-            {/* Revealed by upload.js, which is also what sends the file: a
-                browser running none is never shown a picker that could not
-                do anything with what it picked. */}
-            {/* One button in one place: it chooses a file, and once there is
-                one to send it becomes the thing that sends it. Changing your
-                mind is a reload, which clears the selection anyway. */}
-            <div id="picker" hidden class="flex flex-wrap items-center gap-3">
-              <input type="file" id="pick" class="sr-only" />
-              <label
-                for="pick"
-                id="pick-label"
-                class="btn w-36 cursor-pointer text-center"
-              >
-                Choose file
-              </label>
-              <button
-                type="button"
-                id="send"
-                hidden
-                disabled
-                data-part-url={`${BASE}/submit/${submission.upload_token}/part`}
-                data-part-size={String(partSize)}
-                data-max-parts={String(browserParts)}
-                class="btn w-36 text-center"
-              >
-                Upload
-              </button>
-              <span id="chosen" class="text-sm text-muted">
-                No file chosen
-              </span>
-            </div>
-            {/* Revealed by upload.js when a file will not fit. A line of
-                status text is too quiet for the one case where the page
-                cannot do what was asked of it. */}
+          {/* Hidden by upload.js once a file too large for a browser is
+              chosen. Until then it is the way a file gets chosen at all, so
+              it cannot start hidden. */}
+          <div id="browser-upload">
+            <Section title="Upload the file">
+              <p class="mb-4 text-sm text-muted">
+                Up to {size(browserLimit)} from a browser. Anything larger
+                goes up from the command line.
+              </p>
+              <div id="picker" hidden class="flex flex-wrap items-center gap-3">
+                <input type="file" id="pick" class="sr-only" />
+                <label
+                  for="pick"
+                  id="pick-label"
+                  class="btn w-36 cursor-pointer text-center"
+                >
+                  Choose file
+                </label>
+                <button
+                  type="button"
+                  id="send"
+                  hidden
+                  disabled
+                  data-part-url={`${BASE}/submit/${submission.upload_token}/part`}
+                  data-part-size={String(partSize)}
+                  data-max-parts={String(browserParts)}
+                  class="btn w-36 text-center"
+                >
+                  Upload
+                </button>
+                <span id="chosen" class="text-sm text-muted">
+                  No file chosen
+                </span>
+              </div>
+              <progress id="progress" hidden value="0" class="mt-4 w-full">
+                0%
+              </progress>
+              <p id="upload-status" role="status" class="mt-2 text-sm">
+                <noscript>
+                  Sending a file needs JavaScript. Ask a maintainer to take it
+                  another way.
+                </noscript>
+              </p>
+            </Section>
+          </div>
+
+          {/* Folded away, because most files do not need it -- and opened by
+              upload.js when one does. */}
+          <details id="cli-upload" class="card mb-5 p-6">
+            <summary class="cursor-pointer text-xl">Upload with the CLI</summary>
             <div
               id="too-large"
               hidden
@@ -2013,31 +2024,11 @@ export const Upload = ({
               </p>
               <p id="too-large-detail" class="mt-2 leading-relaxed text-muted"></p>
             </div>
-            <progress id="progress" hidden value="0" class="mt-4 w-full">
-              0%
-            </progress>
-            <p class="mt-2 flex items-center gap-2 text-sm">
-              {/* Turning whenever a request is in flight. The bar says how
-                  far along the transfer is; this says it is still going,
-                  which is the question somebody watching actually has. */}
-              <span id="spinner" hidden class="spinner" aria-hidden="true"></span>
-            </p>
-            <p id="upload-status" role="status" class="text-sm">
-              <noscript>
-                Sending a file needs JavaScript. Ask a maintainer to take it
-                another way.
-              </noscript>
-            </p>
-          </Section>
-
-          <Section title="From a machine that already has the file">
-            <p class="text-sm leading-relaxed text-muted">
-              This uses the same endpoint as above, but directly from the
-              command line, enabling uploads from remote machines. This also
-              allows for resumption of terminated uploads, so it handles files
-              up to {size(limit)} rather than {size(browserLimit)}. Note that
-              the token below is what links this file to your upload, so copy
-              it exactly.
+            <p class="mt-4 text-sm leading-relaxed text-muted">
+              Upload from the command line, useful for remote machines.
+              Resumable, and takes files up to {size(limit)} rather than{" "}
+              {size(browserLimit)}. The token below links the file to this
+              submission.
             </p>
             <div class="mt-3">
               <Command>
@@ -2058,7 +2049,7 @@ export const Upload = ({
                 Installation instructions
               </a>
             </p>
-          </Section>
+          </details>
 
           {/* Submitted by upload.js when the last piece lands. No button:
               pressing one by hand only ever asked the Worker to look in the

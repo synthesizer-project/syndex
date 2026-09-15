@@ -435,34 +435,35 @@ dialog[open] {
   display: none;
 }
 
+/*
+ * A review step, which says whether it has been acknowledged.
+ *
+ * The tick is content rather than markup so that the two states cannot drift
+ * apart, and the whole row is the label, so the box is a target the size of
+ * the step rather than a twelve pixel square.
+ */
+.review-step .tick::after {
+  content: "to do";
+  color: var(--color-muted);
+}
+
+.review-step:has(input:checked) .tick::after {
+  content: "done";
+  color: var(--color-accent-light);
+}
 
 /*
- * Turning while an upload request is in flight.
+ * Inline code: a command in a sentence.
  *
- * A progress bar that only advances as each ninety megabyte piece lands looks
- * stopped, and the bar now moves byte by byte -- but a transfer can still sit
- * on one piece for a minute on a slow connection, and something turning is
- * what says the page has not given up.
+ * A bare element selector, so the utilities on `Command`'s block element --
+ * which sets its own border, background and padding -- win over it without
+ * needing to undo anything.
  */
-@keyframes syndex-spin {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-.spinner {
-  display: inline-block;
-  width: 0.9rem;
-  height: 0.9rem;
-  border: 2px solid var(--color-line);
-  border-top-color: var(--color-accent-light);
-  border-radius: 50%;
-  animation: syndex-spin 0.8s linear infinite;
-}
-
-/* Something that never stops moving is exactly what this setting is for. */
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation-duration: 3s;
-  }
+code {
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-bg);
+  padding: 0.1em 0.4em;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
 }

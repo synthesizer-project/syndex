@@ -1291,12 +1291,92 @@ const Gate = ({ name, question, checked = false, children }) => (
   </div>
 );
 
+/**
+ * Picking the dataset a new release belongs to.
+ *
+ * A search rather than a list: the catalogue is 245 datasets and their names
+ * are long enough that scrolling one is worse than typing three characters of
+ * it. Matched on the catalogue name and the display name both, because
+ * somebody who made a grid knows what they called it and not necessarily how
+ * it was catalogued.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered page.
+ */
+export const ChooseDataset = ({ counts, query, datasets }) => (
+  <Layout
+    title="Submit a new release"
+    counts={counts}
+    active={null}
+    showSubmit={false}
+  >
+    <p class="mb-4 text-sm">
+      <a href={`${BASE}/submit`}>Back to submitting</a>
+    </p>
+    <h1 class="text-3xl sm:text-4xl">Submit a new release</h1>
+    <p class="mt-3 max-w-2xl text-muted">
+      A corrected or regenerated version of something already in the
+      catalogue. It keeps that dataset's name and becomes its current release;
+      everything published before it stays where it is, since anything might
+      already depend on it.
+    </p>
+
+    <form method="get" action={`${BASE}/submit/release`} class="mt-6 max-w-xl">
+      <label for="q" class="block">
+        <span class="label-caps mb-1 block">Which dataset</span>
+        <div class="flex gap-2">
+          <input
+            id="q"
+            name="q"
+            type="search"
+            value={query}
+            autofocus
+            placeholder="bpass, Euclid, draine…"
+            class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
+          />
+          <button type="submit" class="btn">
+            Search
+          </button>
+        </div>
+      </label>
+    </form>
+
+    {query !== "" && datasets.length === 0 && (
+      <p class="mt-6 text-muted">
+        Nothing in the catalogue matches {query}. If this is a dataset that is
+        not published yet, it is a{" "}
+        <a href={`${BASE}/submit`}>new submission</a> rather than a release.
+      </p>
+    )}
+
+    {datasets.length > 0 && (
+      <ul class="card mt-6 max-w-3xl divide-y divide-line p-0">
+        {datasets.map((dataset) => (
+          <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
+            <a
+              href={`${BASE}/submit?release=${dataset.dataset_id}`}
+              class="font-mono text-sm break-all"
+            >
+              {dataset.name}
+            </a>
+            <span class="flex-1 truncate text-sm text-muted">
+              {dataset.display_name}
+            </span>
+            <span class="label-caps">{dataset.data_type}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+  </Layout>
+);
+
 export const Submit = ({
   counts,
   open,
   user,
   limit,
   mine = [],
+  releaseOf = null,
   values = {},
   errors = [],
 }) => {
@@ -1304,10 +1384,14 @@ export const Submit = ({
 
   return (
     <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
-      <h1 class="text-3xl sm:text-4xl">Submit a dataset</h1>
+      <h1 class="text-3xl sm:text-4xl">
+        {releaseOf === null ? "Submit a dataset" : "Submit a new release"}
+      </h1>
       <p class="mt-3 max-w-2xl text-muted">
-        Describe it, then send the file. A maintainer reads every submission
-        before anything reaches the catalogue.
+        {releaseOf === null
+          ? "Describe it, then send the file. A maintainer reads every " +
+            "submission before anything reaches the catalogue."
+          : `A new release of ${releaseOf.display_name}. Its details are filled in below; change whatever this version changes, then send the file.`}
       </p>
       {open && (
         <>
@@ -1316,12 +1400,6 @@ export const Submit = ({
             {user.email === null ? "" : ` (${user.email})`}. Uploads are
             limited to {size(limit)}. Fields marked{" "}
             <span aria-hidden="true">*</span> are required.
-          </p>
-          <p class="mt-2 max-w-2xl text-sm text-muted">
-            Install the tooling with{" "}
-            <code>pip install synthesizer-syndex</code> and run{" "}
-            <code>syndex-check YOUR-FILE</code> in the CLI to ensure your file
-            will pass checks.
           </p>
         </>
       )}
@@ -1354,6 +1432,14 @@ export const Submit = ({
         </div>
       )}
 
+      {open && releaseOf === null && (
+        <p class="mt-5">
+          <a href={`${BASE}/submit/release`} class="btn-quiet text-sm no-underline">
+            Submit a new release of something already published
+          </a>
+        </p>
+      )}
+
       {open && (
         <form
           id="submit-form"
@@ -1372,6 +1458,9 @@ export const Submit = ({
             {/* First and alone, because everything below reads differently
                 depending on the answer -- and because an unanswered question
                 is a better prompt than a field whose default is a guess. */}
+            {releaseOf !== null && (
+              <input type="hidden" name="release_of" value={releaseOf.dataset_id} />
+            )}
             <label for="data_type" class="block sm:col-span-2">
               <span class="label-caps mb-1 block">
                 Data type <span aria-hidden="true">*</span>
@@ -1402,10 +1491,15 @@ export const Submit = ({
                 name="name"
                 value={values.name}
                 required
+                readonly={releaseOf !== null}
                 maxlength="128"
                 pattern="[a-z0-9][a-z0-9-]*"
                 placeholder={DEFAULT_EXAMPLE.name}
-                hint="Lowercase, digits and hyphens. No spaces. People download by this."
+                hint={
+                  releaseOf === null
+                    ? "Lowercase, digits and hyphens. No spaces. People download by this."
+                    : "Fixed: keeping the name is what makes this a new release rather than a second dataset."
+                }
               />
               <Field
                 label="Display name"
@@ -1496,8 +1590,16 @@ export const Submit = ({
               />
             </fieldset>
 
+            {/* Here rather than in the preamble: it is what to do next, and
+                what to do next belongs beside the button that does it. */}
+            <p class="mt-6 max-w-2xl text-sm text-muted">
+              Before sending the file, install the tooling with{" "}
+              <code>pip install synthesizer-syndex</code> and run{" "}
+              <code>syndex-check YOUR-FILE</code> in the CLI to ensure your
+              file will pass checks.
+            </p>
             <button type="submit" class="btn mt-5">
-              Continue to the upload
+              Continue to upload
             </button>
           </div>
         </form>
@@ -1557,7 +1659,13 @@ export const Submit = ({
  * believing a report of success, which is also why the confirm button is an
  * ordinary form: someone who uploaded with rclone presses it by hand.
  */
-export const Upload = ({ counts, submission, partSize, maxParts }) => {
+export const Upload = ({
+  counts,
+  submission,
+  partSize,
+  maxParts,
+  duplicate = null,
+}) => {
   const uploaded = submission.uploaded_at !== null;
 
   return (
@@ -1614,7 +1722,7 @@ export const Upload = ({ counts, submission, partSize, maxParts }) => {
             </Section>
           )}
 
-          <CheckReport submission={submission} forContributor />
+          <CheckReport submission={submission} duplicate={duplicate} forContributor />
           <p class="mt-4 text-sm">
             <a href={`${BASE}/submit`}>Your submissions</a>
           </p>
@@ -1814,6 +1922,37 @@ const StateBadge = ({ state }) => (
 );
 
 /**
+ * One step of a review, which opens when it is acknowledged.
+ *
+ * A checkbox rather than a details element, because what is wanted is not
+ * "show me this" but "I have done this": the same control that reveals the
+ * command is the record that somebody said they ran it. Nothing is enforced
+ * -- a reviewer who wants to approve without fetching the file still can --
+ * but skipping a step becomes something they did rather than something that
+ * happened to them.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered step.
+ */
+const ReviewStep = ({ id, number, title, hint, children }) => (
+  <li class="review-step">
+    <input type="checkbox" id={id} class="peer sr-only" />
+    <label
+      for={id}
+      class="flex cursor-pointer items-baseline gap-3 text-sm peer-checked:text-text"
+    >
+      <span class="label-caps">{number}</span>
+      <span class="flex-1">
+        {title}
+        <span class="mt-0.5 block text-xs text-muted">{hint}</span>
+      </span>
+      <span aria-hidden="true" class="tick label-caps text-accent-light"></span>
+    </label>
+    <div class="mt-3 hidden peer-checked:block">{children}</div>
+  </li>
+);
+
+/**
  * One waiting submission, summarised to what decides whether to open it.
  *
  * Four facts and a way in. The description, the citations, the digest and the
@@ -1893,7 +2032,11 @@ const CheckBadge = ({ state }) => {
  * @param {object} props Component props.
  * @returns {unknown} The rendered report, or a note that none has run.
  */
-const CheckReport = ({ submission, duplicate = null, forContributor = false }) => {
+export const CheckReport = ({
+  submission,
+  duplicate = null,
+  forContributor = false,
+}) => {
   const report = (() => {
     try {
       return JSON.parse(submission.validation_report_json ?? "null");
@@ -1902,14 +2045,37 @@ const CheckReport = ({ submission, duplicate = null, forContributor = false }) =
     }
   })();
 
+  const running = submission.validation_state === "running";
+
   return (
+    // While a check is running this fetches itself every few seconds and
+    // swaps itself for what comes back. The replacement carries no trigger
+    // once the check has finished, so the polling stops on its own rather
+    // than needing anything to stop it.
+    <div
+      id="check-report"
+      hx-get={running ? `${BASE}/submit/${submission.upload_token}/check` : undefined}
+      hx-trigger={running ? "every 5s" : undefined}
+      hx-swap="outerHTML"
+    >
     <Section title="What the checker found">
       {duplicate !== null && (
-        <p class="mb-4 rounded border border-accent-light p-3 text-sm">
-          These are the same bytes as <strong>{duplicate.name}</strong>, which
-          is already {duplicate.published ? "in the catalogue" : "in the queue"}
-          . There may be nothing here to publish.
-        </p>
+        <div role="alert" class="mb-4 rounded border border-accent-light p-4 text-sm">
+          <p class="label-caps text-accent-light">Already in the catalogue</p>
+          <p class="mt-2 leading-relaxed text-muted">
+            These are byte for byte the same file as{" "}
+            <strong class="text-text">{duplicate.name}</strong>, which is
+            already {duplicate.published ? "published" : "waiting in the queue"}
+            .{" "}
+            {submission.release_of_name === duplicate.name
+              ? "This release is the file that is already there, unchanged."
+              : forContributor
+                ? "There is nothing here to add. If this is a corrected or " +
+                  "newer version of that dataset, submit it as a new release " +
+                  "of it rather than as a second dataset."
+                : "There is nothing here to publish."}
+          </p>
+        </div>
       )}
 
       {submission.validation_state === null &&
@@ -1971,36 +2137,34 @@ const CheckReport = ({ submission, duplicate = null, forContributor = false }) =
             </details>
           )}
 
-          {Object.keys(report.detected ?? {}).length > 0 && (
-            <details class="mt-3">
-              <summary class="cursor-pointer text-sm text-muted">
-                What was read out of the file
-              </summary>
-              <div class="mt-2">
-                <Fields
-                  entries={Object.entries(report.detected).map(
-                    ([key, value]) => [
-                      key,
-                      Array.isArray(value)
-                        ? value
-                            .map((item) =>
-                              typeof item === "object" && item !== null
-                                ? `${item.name}[${item.count}]`
-                                : String(item),
-                            )
-                            .join(", ")
-                        : typeof value === "object" && value !== null
-                          ? JSON.stringify(value)
-                          : value,
-                    ],
-                  )}
-                />
-              </div>
-            </details>
-          )}
         </>
       )}
     </Section>
+
+    {/* Its own card rather than something to expand. This is what the file
+        says it is -- axes, model, emission type -- and it is most of what a
+        reviewer is checking the submission's description against. */}
+    {Object.keys(report?.detected ?? {}).length > 0 && (
+      <Section title="What was read out of the file">
+        <Fields
+          entries={Object.entries(report.detected).map(([key, value]) => [
+            key,
+            Array.isArray(value)
+              ? value
+                  .map((item) =>
+                    typeof item === "object" && item !== null
+                      ? `${item.name}[${item.count}]`
+                      : String(item),
+                  )
+                  .join(", ")
+              : typeof value === "object" && value !== null
+                ? JSON.stringify(value)
+                : value,
+          ])}
+        />
+      </Section>
+    )}
+    </div>
   );
 };
 
@@ -2033,6 +2197,11 @@ const Submission = ({ submission, bucket }) => {
 
       <div class="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="type">{submission.data_type}</Fact>
+        {submission.release_of_name && (
+          <Fact label="new release of">
+            <span class="font-mono break-all">{submission.release_of_name}</span>
+          </Fact>
+        )}
         <Fact label="size">
           {arrived ? (
             size(submission.uploaded_size_bytes)
@@ -2057,17 +2226,6 @@ const Submission = ({ submission, bucket }) => {
         </Fact>
       </div>
 
-      {arrived && (
-        <p class="mt-3 text-xs text-muted">
-          sha256{" "}
-          {submission.declared_sha256 === null ? (
-            <em>not declared, so a truncated transfer will not be caught</em>
-          ) : (
-            <span class="font-mono break-all">{submission.declared_sha256}</span>
-          )}
-        </p>
-      )}
-
       <Fields
         entries={[
           ["description", submission.description],
@@ -2080,38 +2238,63 @@ const Submission = ({ submission, bucket }) => {
       />
 
       {pending && arrived && (
-        // syndex-upload publishes a local file: it opens the HDF5, verifies
-        // the digest and registers R2 and D1 in one transaction, none of
-        // which a Worker can do. So the bytes come down first, as a separate
-        // and visible step.
-        <details class="mt-4">
-          <summary class="cursor-pointer text-sm text-muted">
-            Fetch and publish it
-          </summary>
-          <div class="mt-3">
+        // Three steps rather than one list of commands, each acknowledged
+        // before the next opens. syndex-upload publishes a local file -- it
+        // opens the HDF5, verifies the digest and registers R2 and D1 in one
+        // transaction, none of which a Worker can do -- so approving without
+        // having fetched and opened the file is approving something nobody
+        // has looked at. The ticks do not enforce that; they make skipping it
+        // a thing somebody did rather than a thing that happened.
+        <ol class="mt-5 space-y-3 border-t border-line pt-4">
+          <ReviewStep
+            id={`fetch-${submission.submission_id}`}
+            number={1}
+            title="Fetch the file"
+            hint="It comes out of the submissions bucket, not the catalogue's."
+          >
             <Command>
               npx wrangler r2 object get {bucket}/{submission.r2_key} --file{" "}
               {submission.name} --remote
             </Command>
-          </div>
-          <div class="mt-2">
+          </ReviewStep>
+
+          <ReviewStep
+            id={`check-${submission.submission_id}`}
+            number={2}
+            title="Check it yourself"
+            hint="The same checker the submission was put through, on the file you now hold."
+          >
             <Command>syndex-check {submission.name}</Command>
-          </div>
-          <div class="mt-2">
+          </ReviewStep>
+
+          <ReviewStep
+            id={`publish-${submission.submission_id}`}
+            number={3}
+            title={
+              submission.release_of_name
+                ? "Publish it as a new release"
+                : "Publish it"
+            }
+            hint={
+              submission.release_of_name
+                ? "It joins the releases of that dataset and becomes the current one. Everything published before it stays."
+                : "Approving records the decision. This is what puts it in the catalogue."
+            }
+          >
             <Command>
               syndex-upload {submission.name} --data-type{" "}
               {submission.data_type === "other"
                 ? "CHOOSE-A-TYPE"
                 : submission.data_type}
             </Command>
-          </div>
-          {submission.data_type === "other" && (
-            <p class="mt-2 text-xs text-muted">
-              Submitted as <strong>other</strong>, so the type is yours to
-              choose. It may be one the catalogue does not have yet.
-            </p>
-          )}
-        </details>
+            {submission.data_type === "other" && (
+              <p class="mt-2 text-xs text-muted">
+                Submitted as <strong>other</strong>, so the type is yours to
+                choose. It may be one the catalogue does not have yet.
+              </p>
+            )}
+          </ReviewStep>
+        </ol>
       )}
 
       {pending && (

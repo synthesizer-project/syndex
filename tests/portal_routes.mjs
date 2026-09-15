@@ -157,8 +157,15 @@ function resultsFor(sql, rows) {
   }
   // The name collision check, which is two questions: is it published, and
   // is somebody already submitting it.
-  if (sql.includes("SELECT 1 FROM datasets WHERE name")) {
+  if (sql.includes("FROM datasets WHERE name = ?")) {
     return rows.published ?? [];
+  }
+  // The dataset a new release belongs to, and the search that picks it.
+  if (sql.includes("FROM datasets WHERE dataset_id = ?")) {
+    return rows.releaseOf ?? [];
+  }
+  if (sql.includes("name LIKE ?1")) {
+    return rows.datasetMatches ?? [];
   }
   if (sql.includes("WHERE name = ? AND state = 'pending'")) {
     return rows.waiting ?? [];
@@ -310,7 +317,6 @@ const SUBMISSION = {
   r2_key: null,
   uploaded_at: null,
   uploaded_size_bytes: null,
-  declared_sha256: null,
   submitter_name: "A Contributor",
   submitter_email: "a@example.org",
   notes: null,
@@ -1235,6 +1241,80 @@ const tests = {
     );
   },
 
+  async "a new release keeps the name of the dataset it belongs to"() {
+    const dataset = {
+      dataset_id: 12,
+      name: "bpass-2p2p1-bin-chabrier03-0p1-300p0",
+      display_name: "BPASS 2.2.1 binary",
+      description: "A grid.",
+      data_type: "grid",
+      licence: "CC-BY-4.0",
+    };
+
+    // The form comes filled in from the dataset, with the name fixed.
+    const { body } = await call(
+      "/syndex/submit?release=12",
+      contributorEnv({ rows: { releaseOf: [dataset] } }),
+      SIGNED_IN,
+    );
+    assert.match(body, /Submit a new release/);
+    assert.match(body, /<input type="hidden" name="release_of" value="12"/);
+    assert.match(body, /name="name"[^>]*readonly/);
+
+    // And it is accepted under a name that is already in the catalogue,
+    // which is the whole point.
+    const issued = [];
+    const accepted = await postSubmission(
+      contributorEnv({ rows: { published: [{ dataset_id: 12 }] }, issued }),
+      { name: dataset.name, release_of: "12" },
+    );
+    assert.equal(accepted.status, 303);
+    assert.equal(statement(issued, "INSERT INTO submissions").params.at(-1), 12);
+  },
+
+  async "a release cannot be attached to a dataset it does not name"() {
+    // Otherwise the hidden field is a way to attach a file to any dataset in
+    // the catalogue by naming a different one.
+    const { status, body } = await postSubmission(
+      contributorEnv({ rows: { published: [{ dataset_id: 99 }] } }),
+      { name: "some-other-dataset", release_of: "12" },
+    );
+
+    assert.equal(status, 400);
+    assert.match(body, /keep the name of the dataset it belongs to/);
+  },
+
+  async "an existing name is pointed at the release route, not just refused"() {
+    const { status, body } = await postSubmission(
+      contributorEnv({ rows: { published: [{ dataset_id: 12 }] } }),
+    );
+
+    assert.equal(status, 400);
+    assert.match(body, /submit a new release of it instead/);
+  },
+
+  async "the dataset a release belongs to is searched for, not scrolled"() {
+    const { body } = await call(
+      "/syndex/submit/release?q=bpass",
+      contributorEnv({
+        rows: {
+          datasetMatches: [
+            {
+              dataset_id: 12,
+              name: "bpass-2p2p1-bin-chabrier03-0p1-300p0",
+              display_name: "BPASS 2.2.1 binary",
+              data_type: "grid",
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /href="\/syndex\/submit\?release=12"/);
+    assert.match(body, /bpass-2p2p1-bin-chabrier03-0p1-300p0/);
+  },
+
   async "a submission can be started again from one already sent"() {
     const previous = {
       name: "example-grid",
@@ -1729,7 +1809,7 @@ const tests = {
     );
 
     assert.equal(status, 400);
-    assert.match(body, /already in the catalogue/);
+    assert.match(body, /is already in the catalogue/);
   },
 
   async "somebody else's pending name is refused, your own is not"() {
@@ -1791,7 +1871,9 @@ const tests = {
     const insert = statement(issued, "INSERT INTO submissions");
     assert.ok(insert.params.includes("example-grid"));
     // And it is owned, which is what makes the per-account cap mean anything.
-    assert.equal(insert.params.at(-1), USER.user_id);
+    // The last column is the dataset a release belongs to: nothing, here.
+    assert.equal(insert.params.at(-2), USER.user_id);
+    assert.equal(insert.params.at(-1), null);
   },
 
   async "the review queue needs a reviewer, not a shared password"() {
@@ -1888,8 +1970,13 @@ const tests = {
     assert.match(body, /Approve/);
     assert.match(body, /Reject/);
     assert.match(body, /wrangler r2 object get/);
-    assert.match(body, /not declared/);
     assert.match(body, /Back to the queue/);
+    // Three steps, each acknowledged before its command is shown: approving
+    // without having opened the file is approving something nobody has read.
+    assert.match(body, /Fetch the file/);
+    assert.match(body, /Check it yourself/);
+    assert.match(body, /Publish it/);
+    assert.match(body, /id="fetch-7"[^>]*class="peer/);
   },
 
   async "the checker's verdict reaches the reviewer"() {
@@ -1951,9 +2038,9 @@ const tests = {
       SIGNED_IN,
     );
 
-    assert.match(body, /same bytes as/);
+    assert.match(body, /byte for byte the same file as/);
     assert.match(body, /bpass-2p2p1-bin-chabrier03-0p1-300p0/);
-    assert.match(body, /already in the catalogue/);
+    assert.match(body, /Already in the catalogue/);
   },
 
   async "a verdict is only taken from the runner that was asked"() {

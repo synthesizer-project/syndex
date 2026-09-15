@@ -49,6 +49,7 @@ import {
   PreviousSubmissions,
   RequestAccess,
   Review,
+  ChooseDataset,
   SUBMISSION_TYPES,
   SignInRequired,
   SubmissionReview,
@@ -58,6 +59,7 @@ import {
 } from "./pages.jsx";
 import {
   duplicatesOf,
+  validationConfigured,
   fetchAuthorised,
   fetchUrl,
   readReport,
@@ -476,6 +478,12 @@ function readSubmission(form) {
   // The rows arrive as repeated fields, which `parseBody({ all: true })`
   // collects into an array -- except when there is exactly one, which stays a
   // string. Both are the same thing with a different number of rows filled in.
+  // Which dataset this is a new release of, if any. A number or nothing: the
+  // page renders it as a hidden field, so a value that is not one of ours is
+  // somebody editing the form rather than a mistake.
+  const releaseOf = Number(form.release_of ?? 0);
+  values.release_of = releaseOf > 0 ? releaseOf : null;
+
   const rows = form.has_citations
     ? [form.citation ?? []]
         .flat()
@@ -546,6 +554,23 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
   //
   // Their own only: the token addresses a submission and does not authorise
   // reading it, here as everywhere else.
+  // A new release of something already published. The dataset supplies
+  // everything but the file, and the name is fixed: it is what makes this a
+  // release of that dataset rather than a second one beside it.
+  const release = Number(c.req.query("release") ?? 0);
+  let releaseOf = null;
+  if (release > 0) {
+    releaseOf = await c.env.DB.prepare(
+      `SELECT dataset_id, name, display_name, description, data_type, licence
+       FROM datasets WHERE dataset_id = ?`,
+    )
+      .bind(release)
+      .first();
+    if (releaseOf !== null && Object.keys(values).length === 0) {
+      values = { ...releaseOf, release_of: releaseOf.dataset_id };
+    }
+  }
+
   const like = c.req.query("like");
   if (like && Object.keys(values).length === 0) {
     const previous = await c.env.DB.prepare(
@@ -592,6 +617,7 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
       open={submissionsOpen(c.env)}
       user={user}
       mine={mine.results}
+      releaseOf={releaseOf}
       values={values}
       errors={errors}
       limit={MAX_UPLOAD_BYTES}
@@ -599,6 +625,33 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
     { status, cache: "no-store" },
   );
 }
+
+app.get("/submit/release", requireRole("contributor"), async (c) => {
+  const query = String(c.req.query("q") ?? "").trim();
+
+  // Matched on both names, because somebody looking for a grid they made
+  // knows what they called it and not necessarily how it was catalogued.
+  const { results } = query
+    ? await c.env.DB.prepare(
+        `SELECT dataset_id, name, display_name, data_type
+         FROM datasets
+         WHERE name LIKE ?1 OR display_name LIKE ?1
+         ORDER BY name LIMIT 25`,
+      )
+        .bind(`%${query}%`)
+        .all()
+    : { results: [] };
+
+  return page(
+    c,
+    <ChooseDataset
+      counts={await tabCounts(c.env.DB)}
+      query={query}
+      datasets={results}
+    />,
+    { cache: "no-store" },
+  );
+});
 
 app.get("/submit", requireRole("contributor"), (c) => submitPage(c));
 
@@ -634,7 +687,7 @@ app.post("/submit", requireRole("contributor"), async (c) => {
   let mine = null;
   if (errors.length === 0) {
     const [published, waiting] = await Promise.all([
-      c.env.DB.prepare("SELECT 1 FROM datasets WHERE name = ?")
+      c.env.DB.prepare("SELECT dataset_id FROM datasets WHERE name = ?")
         .bind(values.name)
         .first(),
       c.env.DB.prepare(
@@ -645,10 +698,17 @@ app.post("/submit", requireRole("contributor"), async (c) => {
         .first(),
     ]);
 
-    if (published !== null) {
+    // A release has to be a release of the dataset whose name it carries.
+    // Without this the field is a way to attach a file to any dataset in the
+    // catalogue by naming a different one.
+    if (values.release_of !== null && published?.dataset_id !== values.release_of) {
       errors.push(
-        `${values.name} is already in the catalogue. A new release of an ` +
-          "existing dataset is published directly rather than submitted.",
+        "A new release has to keep the name of the dataset it belongs to.",
+      );
+    } else if (published !== null && values.release_of === null) {
+      errors.push(
+        `${values.name} is already in the catalogue. To replace or add to it,` +
+          " submit a new release of it instead.",
       );
     } else if (waiting !== null && waiting.user_id !== user.user_id) {
       errors.push(`Somebody else is already submitting ${values.name}.`);
@@ -698,8 +758,8 @@ app.post("/submit", requireRole("contributor"), async (c) => {
     `INSERT INTO submissions (submitted_at, name, display_name, description,
                               data_type, licence, citations, upload_token,
                               filename, submitter_name, submitter_email,
-                              notes, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              notes, user_id, release_of_dataset_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      RETURNING upload_token`,
   )
     .bind(
@@ -721,6 +781,7 @@ app.post("/submit", requireRole("contributor"), async (c) => {
       user.email ?? "",
       values.notes || null,
       user.user_id,
+      values.release_of,
     )
     .first();
 
@@ -776,6 +837,7 @@ app.get("/submit/:token", requireRole("contributor"), async (c) => {
       submission={submission}
       partSize={PART_SIZE}
       maxParts={MAX_PARTS}
+      duplicate={await duplicateOf(c, submission)}
     />,
     { cache: "no-store" },
   );
@@ -817,6 +879,40 @@ app.post("/submit/:token/part/:number{[0-9]+}", requireRole("contributor"), asyn
   return c.json({ part: partNumber }, 200, { "cache-control": "no-store" });
 });
 
+/**
+ * Whatever already holds these bytes, shaped for a page to say so.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object} submission The submission to check.
+ * @returns {Promise<object | null>} The twin, or null.
+ */
+async function duplicateOf(c, submission) {
+  const twin = await duplicatesOf(
+    c.env,
+    submission.submission_id,
+    submission.sha256,
+  );
+  if (twin.published !== null) {
+    return { name: twin.published, published: true };
+  }
+  return twin.pending === null ? null : { name: twin.pending, published: false };
+}
+
+app.get("/submit/:token/check", requireRole("contributor"), async (c) => {
+  const submission = await ownSubmission(c);
+  if (submission === null) {
+    return c.text("", 404, { "cache-control": "no-store" });
+  }
+  return fragment(
+    c,
+    <CheckReport
+      submission={submission}
+      duplicate={await duplicateOf(c, submission)}
+      forContributor
+    />,
+  );
+});
+
 app.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
   const submission = await ownSubmission(c);
   const counts = await tabCounts(c.env.DB);
@@ -852,9 +948,16 @@ app.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
     );
   }
 
+  // The check is marked as running in the same statement that completes the
+  // upload, rather than when the dispatch comes back. Asking GitHub happens
+  // after the response is sent, so a page that set this afterwards would be
+  // rendered before it was set -- and would tell a contributor no check had
+  // run, seconds after starting one.
+  const checking = validationConfigured(c.env);
   const complete = await c.env.DB.prepare(
     `UPDATE submissions
-     SET uploaded_at = ?, uploaded_size_bytes = ?, r2_key = ?, upload_id = NULL
+     SET uploaded_at = ?, uploaded_size_bytes = ?, r2_key = ?, upload_id = NULL,
+         validation_state = ?
      WHERE upload_token = ?
      RETURNING *`,
   )
@@ -862,6 +965,7 @@ app.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
       new Date().toISOString(),
       file.size,
       file.key,
+      checking ? "running" : null,
       submission.upload_token,
     )
     .first();
@@ -872,9 +976,10 @@ app.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
   c.executionCtx.waitUntil(notifySubmission(c.env, origin, complete));
   c.executionCtx.waitUntil(
     requestValidation(c.env, origin, complete).then(async (asked) => {
-      if (asked) {
+      // Nobody is going to run one, so stop saying one is on its way.
+      if (!asked && checking) {
         await c.env.DB.prepare(
-          "UPDATE submissions SET validation_state = 'running' WHERE submission_id = ?",
+          "UPDATE submissions SET validation_state = NULL WHERE submission_id = ?",
         )
           .bind(complete.submission_id)
           .run();
@@ -1099,7 +1204,12 @@ app.get("/review/previous", async (c) => {
 app.get("/review/:id{[0-9]+}", async (c) => {
   const [counts, submission] = await Promise.all([
     tabCounts(c.env.DB),
-    c.env.DB.prepare("SELECT * FROM submissions WHERE submission_id = ?")
+    c.env.DB.prepare(
+      `SELECT s.*, d.name AS release_of_name
+       FROM submissions s
+       LEFT JOIN datasets d ON d.dataset_id = s.release_of_dataset_id
+       WHERE s.submission_id = ?`,
+    )
       .bind(Number(c.req.param("id")))
       .first(),
   ]);
@@ -1112,23 +1222,13 @@ app.get("/review/:id{[0-9]+}", async (c) => {
     );
   }
 
-  // Whether these exact bytes are already somewhere. Asked here rather than
-  // stored, so it stays true as the catalogue and the queue change.
-  const twin = await duplicatesOf(c.env, submission.submission_id, submission.sha256);
-  const duplicate =
-    twin.published !== null
-      ? { name: twin.published, published: true }
-      : twin.pending !== null
-        ? { name: twin.pending, published: false }
-        : null;
-
   return page(
     c,
     <SubmissionReview
       counts={counts}
       submission={submission}
       bucket={c.env.SYNTHESIZER_SUBMISSIONS_BUCKET}
-      duplicate={duplicate}
+      duplicate={await duplicateOf(c, submission)}
     />,
     { cache: "no-store" },
   );

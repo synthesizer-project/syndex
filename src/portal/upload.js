@@ -118,7 +118,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const pickLabel = document.getElementById("pick-label");
   const tooLargeWarning = document.getElementById("too-large");
   const tooLargeDetail = document.getElementById("too-large-detail");
-  const spinner = document.getElementById("spinner");
   const send = document.getElementById("send");
   const progress = document.getElementById("progress");
   const status = document.getElementById("upload-status");
@@ -186,7 +185,6 @@ document.addEventListener("DOMContentLoaded", () => {
     expected.value = String(file.size);
 
     const parts = Math.ceil(file.size / partSize);
-    spinner.hidden = false;
 
     for (let index = 0; index < parts; index += 1) {
       const start = index * partSize;
@@ -207,7 +205,6 @@ document.addEventListener("DOMContentLoaded", () => {
         // Parts count from one, as R2 numbers them.
         await sendPart(`${send.dataset.partUrl}/${index + 1}`, chunk, show);
       } catch (error) {
-        spinner.hidden = true;
         status.textContent =
           `The upload stopped at piece ${index + 1}: ${error.message}.` +
           " Reload this page and choose the file again to carry on; the" +

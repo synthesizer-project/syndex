@@ -40,6 +40,7 @@ import {
 import { notifyAccessRequest, notifySubmission } from "./notify.js";
 import {
   ACCOUNTS_SHOWN,
+  Account,
   Accounts,
   Browse,
   Dataset,
@@ -644,6 +645,42 @@ async function ownSubmissions(c, user) {
     .all();
   return results;
 }
+
+app.get("/account", requireRole("pending"), async (c) => {
+  const { user } = c.get("viewer");
+
+  const [counts, submitted, reviewed] = await Promise.all([
+    tabCounts(c.env.DB),
+    c.env.DB.prepare(
+      `SELECT state, COUNT(*) AS n FROM submissions
+       WHERE user_id = ? GROUP BY state`,
+    )
+      .bind(user.user_id)
+      .all(),
+    // Only somebody who can review has any, so the query is only worth making
+    // for them -- and a contributor being shown an empty "reviewed" list
+    // would be told about a job they do not have.
+    atLeast(user.role, "reviewer")
+      ? c.env.DB.prepare(
+          `SELECT submission_id, name, state, reviewed_at FROM submissions
+           WHERE reviewed_by = ? ORDER BY reviewed_at DESC LIMIT 10`,
+        )
+          .bind(user.user_id)
+          .all()
+      : { results: [] },
+  ]);
+
+  return page(
+    c,
+    <Account
+      counts={counts}
+      user={user}
+      submitted={submitted.results}
+      reviewed={reviewed.results}
+    />,
+    { cache: "no-store" },
+  );
+});
 
 app.get("/submit", requireRole("contributor"), async (c) => {
   const { user } = c.get("viewer");
@@ -1425,7 +1462,7 @@ app.post("/review/:id{[0-9]+}", async (c) => {
 
   const submission = await c.env.DB.prepare(
     `UPDATE submissions
-     SET state = ?, reviewed_at = ?, reviewer_note = ?
+     SET state = ?, reviewed_at = ?, reviewer_note = ?, reviewed_by = ?
      WHERE submission_id = ? AND state = 'pending'
      RETURNING name`,
   )
@@ -1433,6 +1470,7 @@ app.post("/review/:id{[0-9]+}", async (c) => {
       decision,
       new Date().toISOString(),
       String(form.reviewer_note ?? "").slice(0, 1000) || null,
+      c.get("viewer").user.user_id,
       Number(c.req.param("id")),
     )
     .first();

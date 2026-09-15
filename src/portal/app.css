@@ -511,3 +511,29 @@ code {
   font-size: 0.9em;
   overflow-wrap: anywhere;
 }
+
+/*
+ * The header menu.
+ *
+ * A details element, so it opens with no script. The default disclosure
+ * triangle is removed because the summary already carries a burger, and two
+ * markers on one control is one more than it needs.
+ */
+.header-menu > summary {
+  list-style: none;
+}
+
+.header-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.header-menu[open] > summary {
+  border-color: var(--color-accent-light);
+}
+
+/* Rows light up like the rest of the portal's links rather than staying flat. */
+.header-menu nav a:hover,
+.header-menu nav button:hover {
+  background: rgba(43, 96, 144, 0.28);
+  color: var(--color-text);
+}

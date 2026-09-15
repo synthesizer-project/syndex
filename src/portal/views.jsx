@@ -302,77 +302,147 @@ const Background = () => (
  * four places at full size and does not need to do it twice.
  */
 /**
- * The account controls, which are the same on every page that has a header.
+ * The data-type tabs.
  *
- * What is offered depends on who is reading: everyone is offered the
- * catalogue's submission route, but a visitor who is not signed in is sent to
- * sign in first, and someone who has not been granted access is sent to ask
- * for it. Making the button say the same thing for everybody and refusing at
- * the end of the form would waste the time of the people most likely to be
- * new here.
+ * Defined once and placed twice: in the bar on a wide screen, and inside the
+ * menu on a narrow one, where a header holding four tabs and four buttons is
+ * mostly header.
  *
  * @param {object} props Component props.
- * @param {boolean} props.showSubmit Whether this page offers the submit route.
- * @returns {unknown} The rendered controls.
+ * @returns {unknown} The rendered links.
  */
-const AccountLinks = ({ showSubmit = true }) => {
+const TabLinks = ({ counts, filters, active, stacked = false }) => (
+  <>
+    {TABS.map((tab) => (
+      <a
+        href={
+          filters === null
+            ? `${BASE}/search${tab.types === null ? "" : `?type=${tab.types[0]}`}`
+            : typeUrl(filters, tab.types?.[0] ?? null)
+        }
+        aria-current={tab.id === active ? "page" : undefined}
+        class={
+          stacked
+            ? `flex items-baseline justify-between gap-3 rounded-lg px-3 py-2 no-underline ${
+                tab.id === active ? "text-text" : "text-muted hover:text-text"
+              }`
+            : `flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${
+                tab.id === active
+                  ? "border-accent-light text-text"
+                  : "border-transparent text-muted hover:text-text"
+              }`
+        }
+      >
+        {tab.label}
+        <span class="text-xs text-muted tabular-nums">{counts[tab.id]}</span>
+      </a>
+    ))}
+  </>
+);
+
+/**
+ * Everything the header holds about you, behind one control.
+ *
+ * A details element rather than script, so the menu works with JavaScript
+ * off like the rest of the portal. The one thing that costs is light
+ * dismiss: it closes on the button, not on a click elsewhere.
+ *
+ * On a narrow screen it also swallows the data-type tabs. Four tabs beside
+ * four buttons is a header with more chrome than page, and a phone has no
+ * room to pretend otherwise.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered menu.
+ */
+const HeaderMenu = ({ counts, filters, active, nav, showSubmit }) => {
   const { user, waiting } = useContext(ViewerContext);
   const role = user?.role ?? null;
+  const reviews = role === "reviewer" || role === "admin";
 
-  // Its own full-width row on a phone, where three buttons beside four tab
-  // links wrap into an unreadable tangle; beside them from `sm` up.
   return (
-    <nav
-      aria-label="Account"
-      class="flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto"
-    >
-      {showSubmit && (
-        <a href={`${BASE}/submit`} class="btn text-xs no-underline">
-          Submit a dataset
-        </a>
-      )}
-      {(role === "reviewer" || role === "admin") && (
-        <a href={`${BASE}/review`} class="btn text-xs no-underline">
-          Review
-          {waiting > 0 && (
-            <span class="ml-1.5 rounded-full bg-accent-light px-1.5 py-0.5 text-[0.65rem] leading-none text-bg tabular-nums">
-              {waiting}
-            </span>
-          )}
-        </a>
-      )}
-      {/* Reviewers reach the same page from the queue. It is in the header
-          for admins because granting a role is a thing they do without
-          anything having prompted it -- somebody signs in and says, in
-          person, that they would like to contribute, and waiting for them to
-          file a request through the portal helps nobody. */}
-      {role === "admin" && (
-        <a href={`${BASE}/accounts`} class="btn-quiet text-xs no-underline">
-          Admin
-        </a>
-      )}
-      {user === null ? (
-        <a
-          href={`${BASE}/login`}
-          class="btn-quiet text-xs no-underline"
-          data-sign-in
-        >
-          Sign in
-        </a>
-      ) : (
-        // A form, because signing out changes something. A link would let any
-        // page anywhere sign a reader out by embedding it.
-        <form method="post" action={`${BASE}/logout`} class="contents">
-          <button
-            type="submit"
-            class="btn-quiet cursor-pointer text-xs"
-            title={`Signed in as ${user.login}`}
+    <details class="header-menu relative ml-auto">
+      <summary class="btn-quiet flex cursor-pointer items-center gap-2 text-xs">
+        <span aria-hidden="true" class="text-base leading-none">
+          &#9776;
+        </span>
+        Menu
+        {waiting > 0 && (
+          <span class="rounded-full bg-accent-light px-1.5 py-0.5 text-[0.65rem] leading-none text-bg tabular-nums">
+            {waiting}
+          </span>
+        )}
+      </summary>
+
+      <nav
+        aria-label="Menu"
+        class="card absolute right-0 z-30 mt-2 flex w-60 flex-col gap-1 bg-surface p-3 text-sm shadow-2xl"
+      >
+        {nav && (
+          <>
+            <span class="label-caps px-3 pt-1 sm:hidden">Catalogue</span>
+            <div class="flex flex-col sm:hidden">
+              <TabLinks
+                counts={counts}
+                filters={filters}
+                active={active}
+                stacked
+              />
+            </div>
+            <hr class="my-2 border-line sm:hidden" />
+          </>
+        )}
+
+        {showSubmit && (
+          <a href={`${BASE}/submit`} class="rounded-lg px-3 py-2 no-underline">
+            Submit a dataset
+          </a>
+        )}
+        {reviews && (
+          <a
+            href={`${BASE}/review`}
+            class="flex items-baseline justify-between gap-3 rounded-lg px-3 py-2 no-underline"
           >
-            Sign out
-          </button>
-        </form>
-      )}
-    </nav>
+            Review
+            {waiting > 0 && (
+              <span class="rounded-full bg-accent-light px-1.5 py-0.5 text-[0.65rem] leading-none text-bg tabular-nums">
+                {waiting}
+              </span>
+            )}
+          </a>
+        )}
+        {role === "admin" && (
+          <a href={`${BASE}/accounts`} class="rounded-lg px-3 py-2 no-underline">
+            Admin
+          </a>
+        )}
+
+        {user === null ? (
+          <a href={`${BASE}/login`} class="rounded-lg px-3 py-2 no-underline">
+            Sign in
+          </a>
+        ) : (
+          <>
+            <hr class="my-2 border-line" />
+            <a
+              href={`${BASE}/account`}
+              class="rounded-lg px-3 py-2 no-underline"
+            >
+              {user.login}
+            </a>
+            {/* A form, because signing out changes something. A link would
+                let any page anywhere sign a reader out by embedding it. */}
+            <form method="post" action={`${BASE}/logout`}>
+              <button
+                type="submit"
+                class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-muted hover:text-text"
+              >
+                Sign out
+              </button>
+            </form>
+          </>
+        )}
+      </nav>
+    </details>
   );
 };
 
@@ -443,40 +513,34 @@ export const Layout = ({
               />
               Syndex
             </a>
+            {/* Hidden on a phone, where they live in the menu instead. */}
             {nav && (
               <nav
                 aria-label="Data types"
-                class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm"
+                class="hidden flex-wrap items-center gap-x-6 gap-y-2 text-sm sm:flex"
               >
-                {TABS.map((tab) => (
-                  <a
-                    href={
-                      filters === null
-                        ? `${BASE}/search${tab.types === null ? "" : `?type=${tab.types[0]}`
-                        }`
-                        : typeUrl(filters, tab.types?.[0] ?? null)
-                    }
-                    aria-current={tab.id === active ? "page" : undefined}
-                    class={`flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${tab.id === active
-                        ? "border-accent-light text-text"
-                        : "border-transparent text-muted hover:text-text"
-                      }`}
-                  >
-                    {tab.label}
-                    <span class="text-xs text-muted tabular-nums">
-                      {counts[tab.id]}
-                    </span>
-                  </a>
-                ))}
+                <TabLinks counts={counts} filters={filters} active={active} />
               </nav>
             )}
-            <AccountLinks showSubmit={showSubmit} />
+            <HeaderMenu
+              counts={counts}
+              filters={filters}
+              active={active}
+              nav={nav}
+              showSubmit={showSubmit}
+            />
           </div>
         </header>
       )}
       {bare && (
         <div class="landing-links flex w-full px-6 pt-6">
-          <AccountLinks />
+          <HeaderMenu
+            counts={counts}
+            filters={filters}
+            active={active}
+            nav={false}
+            showSubmit
+          />
         </div>
       )}
       {/* On the landing page the content is centred in whatever room the

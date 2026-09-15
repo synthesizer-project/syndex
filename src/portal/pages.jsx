@@ -1310,6 +1310,142 @@ const Gate = ({ name, question, checked = false, children }) => (
 );
 
 /**
+ * What each role is allowed to do, in the order the roles are granted.
+ *
+ * Written out rather than derived from `atLeast`, because a list of what you
+ * may do is not the same text as the rule that decides it: "may grant the
+ * reviewer role" is worth saying to an admin and worth not saying to anybody
+ * else, and neither sentence lives anywhere in the check.
+ */
+const ROLE_ALLOWS = {
+  pending: ["Browse and download everything in the catalogue"],
+  contributor: [
+    "Browse and download everything in the catalogue",
+    "Submit new datasets and new releases",
+  ],
+  reviewer: [
+    "Browse and download everything in the catalogue",
+    "Submit new datasets and new releases",
+    "Read the review queue and decide submissions",
+    "Grant and withdraw the contributor role",
+  ],
+  admin: [
+    "Browse and download everything in the catalogue",
+    "Submit new datasets and new releases",
+    "Read the review queue and decide submissions",
+    "Grant and withdraw any role, including reviewer and admin",
+  ],
+};
+
+/**
+ * One account's own page.
+ *
+ * The only view somebody has of themselves: who the portal thinks they are,
+ * what that lets them do, and what they have done with it. Signing out lives
+ * here rather than in the header, where it was one misclick from the button
+ * beside it and offered nothing else.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered page.
+ */
+export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
+  const byState = Object.fromEntries(
+    submitted.map((row) => [row.state, row.n]),
+  );
+  const total = submitted.reduce((sum, row) => sum + row.n, 0);
+
+  return (
+    <Layout title="Your account" counts={counts} active={null}>
+      <h1 class="text-3xl sm:text-4xl">{user.login}</h1>
+      <p class="mt-3 text-muted">{user.name}</p>
+
+      <div class="mt-8 grid gap-6 lg:grid-cols-2">
+        <Section title="Account">
+          <Fields
+            entries={[
+              ["github", user.login],
+              ["name", user.name],
+              ["email", user.email],
+              ["role", user.role],
+              ["joined", date(user.created_at)],
+            ]}
+          />
+          <form method="post" action={`${BASE}/logout`} class="mt-5">
+            <button type="submit" class="btn-quiet cursor-pointer">
+              Sign out
+            </button>
+          </form>
+        </Section>
+
+        <Section title="What you can do">
+          <ul class="space-y-2 text-sm">
+            {(ROLE_ALLOWS[user.role] ?? []).map((allowed) => (
+              <li class="flex gap-2">
+                <span aria-hidden="true" class="text-accent-light">
+                  ·
+                </span>
+                <span>{allowed}</span>
+              </li>
+            ))}
+          </ul>
+          {user.role === "pending" && (
+            <p class="mt-4 text-sm text-muted">
+              <a href={`${BASE}/access`}>Ask for submit access</a> to contribute
+              datasets.
+            </p>
+          )}
+        </Section>
+      </div>
+
+      <Section title="Your submissions">
+        {total === 0 ? (
+          <p class="text-sm text-muted">
+            You have not submitted anything yet.
+          </p>
+        ) : (
+          <>
+            <div class="flex flex-wrap gap-x-10 gap-y-4">
+              {["pending", "approved", "rejected"].map((state) => (
+                <div>
+                  <span class="block text-2xl tabular-nums">
+                    {byState[state] ?? 0}
+                  </span>
+                  <span class="label-caps">{state}</span>
+                </div>
+              ))}
+            </div>
+            <p class="mt-5 text-sm">
+              <a href={`${BASE}/submit`}>All your submissions</a>
+            </p>
+          </>
+        )}
+      </Section>
+
+      {reviewed.length > 0 && (
+        <Section title="What you have reviewed">
+          <ul class="divide-y divide-line">
+            {reviewed.map((submission) => (
+              <li class="flex flex-wrap items-baseline gap-x-3 py-2 first:pt-0 last:pb-0">
+                <a
+                  href={`${BASE}/review/${submission.submission_id}`}
+                  class="flex-1 font-mono text-sm break-all"
+                >
+                  {submission.name}
+                </a>
+                <StateBadge state={submission.state} />
+                <span class="text-xs text-muted">
+                  {date(submission.reviewed_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </Layout>
+  );
+};
+
+/**
  * Where a submission starts: which of the two things this is.
  *
  * Asked first because the answer changes everything after it. A new dataset

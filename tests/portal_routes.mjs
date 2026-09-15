@@ -655,7 +655,9 @@ const tests = {
     // And it round-trips through the form without JavaScript.
     assert.match(body, /<input type="hidden" name="axis" value="ages"\/>/);
     assert.match(body, /<form id="filters" method="get"/);
-    assert.match(body, /href="\/syndex\/submit" class="btn text-xs no-underline/);
+    // Everything about you is behind one control now.
+    assert.match(body, /class="header-menu/);
+    assert.match(body, /href="\/syndex\/submit"/);
     assert.match(body, /<button type="submit" class="btn mt-2 w-full">Search<\/button>/);
     assert.doesNotMatch(body, /Apply filters/);
     assert.match(body, />select range<\/summary>/);
@@ -707,7 +709,7 @@ const tests = {
     assert.match(body, /action="\/syndex\/search"/);
     assert.match(body, /name, description, type or filename/);
     assert.doesNotMatch(body, /synthesizer-download --dataset NAME/);
-    assert.match(body, /aria-label="Account"/);
+    assert.match(body, /aria-label="Menu"/);
     assert.match(body, /Submit a dataset/);
     assert.match(body, /synthesizer-project\.github\.io/);
     assert.doesNotMatch(body, />API<\/a>/);
@@ -2195,6 +2197,26 @@ const tests = {
     assert.match(body, /marked approved/);
   },
 
+  async "the tabs are in the bar on a wide screen and the menu on a narrow one"() {
+    const { body } = await call("/syndex/search", {
+      DB: stubDb({ rows: { viewer: { ...USER, role: "admin" }, waiting: 2 } }),
+      ...{},
+    }, SIGNED_IN);
+
+    // One definition, placed twice: the bar hides below sm, the menu's copy
+    // shows only there. Four tabs beside four buttons is mostly header.
+    assert.match(body, /aria-label="Data types" class="hidden[^"]*sm:flex"/);
+    assert.match(body, /<span class="label-caps px-3 pt-1 sm:hidden">Catalogue/);
+
+    // And everything about the reader is in the one control, with the count
+    // on the button so it is visible without opening it.
+    assert.match(body, /class="header-menu/);
+    assert.match(body, /href="\/syndex\/review"/);
+    assert.match(body, /href="\/syndex\/accounts"/);
+    assert.match(body, /href="\/syndex\/account"/);
+    assert.match(body, /action="\/syndex\/logout"/);
+  },
+
   async "a signed-in page is never cached by anything shared"() {
     const anonymous = await call("/syndex/search", { DB: stubDb() });
     assert.equal(anonymous.headers.get("cache-control"), "public, max-age=60");
@@ -2208,6 +2230,7 @@ const tests = {
   async "the header offers what the reader can actually do"() {
     const anonymous = (await call("/syndex/search", { DB: stubDb() })).body;
     assert.match(anonymous, /Sign in/);
+    assert.doesNotMatch(anonymous, /syndex\/account/);
     assert.doesNotMatch(anonymous, /Sign out/);
     assert.doesNotMatch(anonymous, /href="\/syndex\/review"/);
 
@@ -2216,6 +2239,8 @@ const tests = {
         DB: stubDb({ rows: { viewer: USER } }),
       }, SIGNED_IN)
     ).body;
+    // The menu holds everything about you, the account page included.
+    assert.match(contributor, /href="\/syndex\/account"/);
     assert.match(contributor, /Sign out/);
     assert.doesNotMatch(contributor, /href="\/syndex\/review"/);
 
@@ -2243,6 +2268,53 @@ const tests = {
       DB: stubDb({ rows: { viewer: USER } }),
     }, SIGNED_IN);
     assert.equal(contributor.status, 200);
+  },
+
+  async "an account page says who you are and what that lets you do"() {
+    const { body } = await call(
+      "/syndex/account",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          // Counts by state, and what this reviewer has decided.
+          submissions: [{ state: "approved", n: 2 }],
+          decided: [
+            {
+              submission_id: 4,
+              name: "older-grid",
+              state: "rejected",
+              reviewed_at: "2026-09-13T00:00:00Z",
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /contributor-one/);
+    assert.match(body, /Read the review queue and decide submissions/);
+    // A contributor is never told about a job they do not have.
+    assert.doesNotMatch(body, /Grant and withdraw any role/);
+    assert.match(body, /What you have reviewed/);
+    assert.match(body, /older-grid/);
+    assert.match(body, /action="\/syndex\/logout"/);
+  },
+
+  async "a decision records who made it"() {
+    const issued = [];
+    await call(
+      "/syndex/review/7",
+      submissionEnv({
+        rows: { viewer: { ...USER, role: "reviewer" } },
+        issued,
+      }),
+      signedInPost({ decision: "approved" }),
+    );
+
+    // Roles replaced a shared password precisely so a decision could be
+    // attributed; the column that attributes it was missing until now.
+    const update = statement(issued, "SET state = ?");
+    assert.equal(update.params[3], USER.user_id);
   },
 
   async "an access request is recorded once and reported"() {

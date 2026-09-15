@@ -340,7 +340,7 @@ function decode(text, fallback = null) {
  */
 export const Landing = ({ counts, datasets, bytes }) => (
   <Layout
-    title="The Synthesizer data catalogue"
+    title="The Synthesizer data index"
     counts={counts}
     nav={false}
     bare
@@ -360,7 +360,7 @@ export const Landing = ({ counts, datasets, bytes }) => (
         class="mx-auto mb-7 h-auto w-[clamp(9rem,22vw,15rem)]"
       />
       <h1 class="mx-auto whitespace-nowrap text-[clamp(1rem,4.8vw,2.6rem)] leading-[1.25]">
-        The Synthesizer data catalogue
+        The Synthesizer data index
       </h1>
       <p class="mx-auto mt-4 max-w-3xl text-sm leading-[1.7] text-muted sm:text-base">
         An index of stellar population synthesis (SPS) and AGN grids, dust
@@ -1310,6 +1310,40 @@ const Gate = ({ name, question, checked = false, children }) => (
 );
 
 /**
+ * Everything one account has ever submitted.
+ *
+ * The chooser shows the last few, because getting back to a transfer part way
+ * through is the common reason to look. This is the rest of them, which is a
+ * different question and was answered by sending somebody to the page that
+ * starts a new submission -- a link that read like a way out and was a way
+ * back to where they already were.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered page.
+ */
+export const Submissions = ({ counts, mine }) => (
+  <Layout title="Your submissions" counts={counts} active={null}>
+    <p class="mb-4 text-sm">
+      <a href={`${BASE}/account`}>Back to your account</a>
+    </p>
+    <h1 class="text-3xl sm:text-4xl">Your submissions</h1>
+    <p class="mt-3 text-muted">
+      {mine.length} in total, newest first.
+    </p>
+
+    {mine.length === 0 ? (
+      <p class="mt-8 text-muted">
+        Nothing yet. <a href={`${BASE}/submit`}>Submit a dataset</a>.
+      </p>
+    ) : (
+      <div class="mt-8">
+        <SubmissionRows mine={mine} />
+      </div>
+    )}
+  </Layout>
+);
+
+/**
  * What each role is allowed to do, in the order the roles are granted.
  *
  * Written out rather than derived from `atLeast`, because a list of what you
@@ -1352,12 +1386,21 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
   const byState = Object.fromEntries(
     submitted.map((row) => [row.state, row.n]),
   );
+  const reviews = user.role === "reviewer" || user.role === "admin";
   const total = submitted.reduce((sum, row) => sum + row.n, 0);
 
   return (
     <Layout title="Your account" counts={counts} active={null}>
-      <h1 class="text-3xl sm:text-4xl">{user.login}</h1>
-      <p class="mt-3 text-muted">{user.name}</p>
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <h1 class="text-3xl sm:text-4xl">{user.login}</h1>
+        {/* A form, because signing out changes something. A link would let
+            any page anywhere sign a reader out by embedding it. */}
+        <form method="post" action={`${BASE}/logout`}>
+          <button type="submit" class="btn cursor-pointer">
+            Sign out
+          </button>
+        </form>
+      </div>
 
       <div class="mt-8 grid gap-6 lg:grid-cols-2">
         <Section title="Account">
@@ -1370,11 +1413,6 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
               ["joined", date(user.created_at)],
             ]}
           />
-          <form method="post" action={`${BASE}/logout`} class="mt-5">
-            <button type="submit" class="btn-quiet cursor-pointer">
-              Sign out
-            </button>
-          </form>
         </Section>
 
         <Section title="What you can do">
@@ -1415,14 +1453,17 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
               ))}
             </div>
             <p class="mt-5 text-sm">
-              <a href={`${BASE}/submit`}>All your submissions</a>
+              <a href={`${BASE}/submissions`}>All your submissions</a>
             </p>
           </>
         )}
       </Section>
 
-      {reviewed.length > 0 && (
+      {reviews && (
         <Section title="What you have reviewed">
+          {reviewed.length === 0 && (
+            <p class="text-sm text-muted">Nothing reviewed yet.</p>
+          )}
           <ul class="divide-y divide-line">
             {reviewed.map((submission) => (
               <li class="flex flex-wrap items-baseline gap-x-3 py-2 first:pt-0 last:pb-0">
@@ -1458,7 +1499,14 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
  * @param {object} props Component props.
  * @returns {unknown} The rendered page.
  */
-export const SubmitChoice = ({ counts, open, user, limit, mine = [] }) => (
+export const SubmitChoice = ({
+  counts,
+  open,
+  user,
+  limit,
+  mine = [],
+  more = false,
+}) => (
   <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
     <h1 class="text-3xl sm:text-4xl">Submit a dataset</h1>
     {open && (
@@ -1514,7 +1562,7 @@ export const SubmitChoice = ({ counts, open, user, limit, mine = [] }) => (
       </div>
     )}
 
-    <YourSubmissions mine={mine} />
+    <YourSubmissions mine={mine} more={more} />
   </Layout>
 );
 
@@ -1525,12 +1573,32 @@ export const SubmitChoice = ({ counts, open, user, limit, mine = [] }) => (
  * @param {object[]} props.mine The account's own submissions.
  * @returns {unknown} The rendered list, or nothing when there are none.
  */
-const YourSubmissions = ({ mine }) =>
+const YourSubmissions = ({ mine, more = false }) =>
   mine.length === 0 ? null : (
     <section class="mt-10">
-      <h2 class="mb-4 text-xl">Your submissions</h2>
-      <ul class="card divide-y divide-line p-0">
-        {mine.map((submission) => (
+      <SectionHead
+        title="Your submissions"
+        action={
+          more ? (
+            <a href={`${BASE}/submissions`} class="text-sm">
+              All your submissions
+            </a>
+          ) : null
+        }
+      />
+      <SubmissionRows mine={mine} />
+    </section>
+  );
+
+/**
+ * One account's submissions, as rows.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered list.
+ */
+const SubmissionRows = ({ mine }) => (
+  <ul class="card divide-y divide-line p-0">
+    {mine.map((submission) => (
           <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
             <a
               href={`${BASE}/submit/${submission.upload_token}`}
@@ -1558,12 +1626,11 @@ const YourSubmissions = ({ mine }) =>
             >
               <ResubmitIcon />
               Resubmit
-            </a>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+        </a>
+      </li>
+    ))}
+  </ul>
+);
 
 export const Submit = ({
   counts,
@@ -1870,7 +1937,7 @@ export const Upload = ({
 
           <CheckReport submission={submission} duplicate={duplicate} forContributor />
           <p class="mt-4 text-sm">
-            <a href={`${BASE}/submit`}>Your submissions</a>
+            <a href={`${BASE}/submissions`}>Your submissions</a>
           </p>
         </>
       ) : (

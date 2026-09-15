@@ -52,6 +52,7 @@ import {
   Review,
   SUBMISSION_TYPES,
   SignInRequired,
+  Submissions,
   SubmitChoice,
   SubmissionReview,
   Submit,
@@ -682,8 +683,12 @@ app.get("/account", requireRole("pending"), async (c) => {
   );
 });
 
+/** How many of somebody's submissions the chooser shows before a page of them. */
+const RECENT_SUBMISSIONS = 5;
+
 app.get("/submit", requireRole("contributor"), async (c) => {
   const { user } = c.get("viewer");
+  const mine = await ownSubmissions(c, user);
   return page(
     c,
     <SubmitChoice
@@ -691,11 +696,23 @@ app.get("/submit", requireRole("contributor"), async (c) => {
       open={submissionsOpen(c.env)}
       user={user}
       limit={MAX_UPLOAD_BYTES}
-      mine={await ownSubmissions(c, user)}
+      mine={mine.slice(0, RECENT_SUBMISSIONS)}
+      more={mine.length > RECENT_SUBMISSIONS}
     />,
     { cache: "no-store" },
   );
 });
+
+app.get("/submissions", requireRole("pending"), async (c) =>
+  page(
+    c,
+    <Submissions
+      counts={await tabCounts(c.env.DB)}
+      mine={await ownSubmissions(c, c.get("viewer").user)}
+    />,
+    { cache: "no-store" },
+  ),
+);
 
 app.get("/submit/new", requireRole("contributor"), (c) => submitPage(c));
 

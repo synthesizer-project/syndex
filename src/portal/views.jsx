@@ -326,7 +326,7 @@ const TabLinks = ({ counts, filters, active, stacked = false }) => (
             ? `flex items-baseline justify-between gap-3 rounded-lg px-3 py-2 no-underline ${
                 tab.id === active ? "text-text" : "text-muted hover:text-text"
               }`
-            : `flex items-baseline gap-2 border-b-2 pb-1 no-underline transition-colors ${
+            : `flex items-baseline gap-2 border-b-2 pt-[calc(0.25rem+2px)] pb-1 no-underline transition-colors ${
                 tab.id === active
                   ? "border-accent-light text-text"
                   : "border-transparent text-muted hover:text-text"
@@ -361,11 +361,11 @@ const HeaderMenu = ({ counts, filters, active, nav, showSubmit }) => {
 
   return (
     <details class="header-menu relative ml-auto">
-      <summary class="btn-quiet flex cursor-pointer items-center gap-2 text-xs">
-        <span aria-hidden="true" class="text-base leading-none">
-          &#9776;
-        </span>
-        Menu
+      <summary
+        aria-label="Menu"
+        class="btn-quiet flex cursor-pointer items-center gap-2 px-3 text-base leading-none"
+      >
+        <span aria-hidden="true">&#9776;</span>
         {waiting > 0 && (
           <span class="rounded-full bg-accent-light px-1.5 py-0.5 text-[0.65rem] leading-none text-bg tabular-nums">
             {waiting}
@@ -481,6 +481,7 @@ export const Layout = ({
       <script src={`${BASE}/static/htmx.min.js`} defer></script>
       <script src={`${BASE}/static/filters.js`} defer></script>
       <script src={`${BASE}/static/preview.js`} defer></script>
+      <script src={`${BASE}/static/header.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
       <Background />

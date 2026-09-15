@@ -537,3 +537,22 @@ code {
   background: rgba(43, 96, 144, 0.28);
   color: var(--color-text);
 }
+
+/*
+ * The header sits above the page, not beside it.
+ *
+ * `body > :not(.bg-layer)` in the base layer gives every child of body its
+ * own stacking context at z-index 1. That is what keeps the glow behind
+ * everything, and it also means the menu's z-index counts only against its
+ * siblings inside the header -- while `main`, a later sibling at the same
+ * level, paints over the whole header regardless. An open menu disappeared
+ * behind the first card under it.
+ *
+ * Unlayered, so it wins over the base-layer rule whatever their specificity,
+ * and the landing page's controls get the same treatment: they are a child
+ * of body too, and also sit before `main`.
+ */
+body > header,
+body > .landing-links {
+  z-index: 3;
+}

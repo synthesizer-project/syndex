@@ -2211,6 +2211,8 @@ const tests = {
     // And everything about the reader is in the one control, with the count
     // on the button so it is visible without opening it.
     assert.match(body, /class="header-menu/);
+    // The one thing a details element cannot do for itself.
+    assert.match(body, /static\/header\.js/);
     assert.match(body, /href="\/syndex\/review"/);
     assert.match(body, /href="\/syndex\/accounts"/);
     assert.match(body, /href="\/syndex\/account"/);
@@ -2270,6 +2272,37 @@ const tests = {
     assert.equal(contributor.status, 200);
   },
 
+  async "a full list of submissions has a page rather than a link back"() {
+    // "All your submissions" used to point at the page that starts a new one,
+    // which read like a way out and was a way back to where you already were.
+    const mine = Array.from({ length: 7 }, (_, index) => ({
+      ...SUBMISSION,
+      submission_id: index + 1,
+      name: `grid-${index}`,
+      upload_token: `tok-${index}`,
+    }));
+
+    const chooser = await call(
+      "/syndex/submit",
+      contributorEnv({ rows: { submissions: mine } }),
+      SIGNED_IN,
+    );
+    // The chooser shows the last few, because getting back to a transfer part
+    // way through is the common reason to look.
+    assert.match(chooser.body, /grid-4/);
+    assert.doesNotMatch(chooser.body, /grid-5/);
+    assert.match(chooser.body, /href="\/syndex\/submissions"/);
+
+    const all = await call(
+      "/syndex/submissions",
+      contributorEnv({ rows: { submissions: mine } }),
+      SIGNED_IN,
+    );
+    assert.equal(all.status, 200);
+    assert.match(all.body, /7 in total/);
+    assert.match(all.body, /grid-6/);
+  },
+
   async "an account page says who you are and what that lets you do"() {
     const { body } = await call(
       "/syndex/account",
@@ -2297,6 +2330,7 @@ const tests = {
     assert.doesNotMatch(body, /Grant and withdraw any role/);
     assert.match(body, /What you have reviewed/);
     assert.match(body, /older-grid/);
+    assert.match(body, /href="\/syndex\/submissions"/);
     assert.match(body, /action="\/syndex\/logout"/);
   },
 

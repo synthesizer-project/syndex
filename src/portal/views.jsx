@@ -897,14 +897,13 @@ const AxisPicker = ({ tab, filters, facets }) => {
 /** The filter rail: a labelled sheet on narrow screens, a column on wide. */
 const FilterRail = ({ tab, filters, facets }) => (
   <div data-filter-column="" class="mb-4 lg:mb-0">
-    <button
-      type="button"
-      data-bulk-command=""
-      class="btn mb-3 w-full"
-      hidden
-    >
-      Get download command (<span data-selection-count="">0</span>)
-    </button>
+    {/* Nothing to download when the list is being used to pick one dataset,
+        and nothing selects anything either: the rows carry no boxes. */}
+    {filters.pick === "" && (
+      <button type="button" data-bulk-command="" class="btn mb-3 w-full" hidden>
+        Get download command (<span data-selection-count="">0</span>)
+      </button>
+    )}
     <details class="filter-sheet card p-5" open>
       <summary class="label-caps cursor-pointer">Refine</summary>
       <form
@@ -932,6 +931,12 @@ const FilterRail = ({ tab, filters, facets }) => (
           </button>
         </div>
 
+        {/* Picking travels with every other bit of filter state, so
+            narrowing the list does not quietly turn the picker back into the
+            catalogue. */}
+        {filters.pick !== "" && (
+          <input type="hidden" name="pick" value={filters.pick} />
+        )}
         {filters.type.length > 0 && (
           <input type="hidden" name="type" value={filters.type[0]} />
         )}
@@ -1120,9 +1125,16 @@ const ActiveFilters = ({ tab, filters, total, noun }) => {
  */
 const Name = ({ row, filters }) => (
   <a
-    href={`${BASE}/datasets/${encodeURIComponent(row.name)}?return=${encodeURIComponent(
-      searchUrl(filters),
-    )}`}
+    href={
+      // Picking a dataset for a new release rather than opening it. The only
+      // thing the picker changes about the catalogue's search is where a
+      // result goes.
+      filters.pick === "release"
+        ? `${BASE}/submit/new?release=${encodeURIComponent(row.name)}`
+        : `${BASE}/datasets/${encodeURIComponent(row.name)}?return=${encodeURIComponent(
+            searchUrl(filters),
+          )}`
+    }
     class="block truncate no-underline hover:underline"
     title={row.name}
   >
@@ -1398,6 +1410,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
 /** The results table, scrolling inside its own container. */
 const Results = ({ tab, filters, rows, axes }) => {
   const columns = columnsFor(tab, filters, rows, axes);
+  const picking = filters.pick === "release";
 
   // Horizontal scrolling is contained whatever the screen, so the page never
   // scrolls sideways. On a wide screen the rows scroll inside the card too,
@@ -1414,13 +1427,19 @@ const Results = ({ tab, filters, rows, axes }) => {
       <table class="w-full border-collapse text-sm">
         <thead>
           <tr class="text-left">
-            <th scope="col" class="border-b border-line px-4 py-3">
-              <input
-                type="checkbox"
-                data-select-all=""
-                aria-label="Select all visible datasets"
-              />
-            </th>
+            {/* Selecting is for building a download command, which is not
+                what this list is for when a dataset is being picked. Leaving
+                the boxes out says the name is the thing to click, without
+                having to say it. */}
+            {!picking && (
+              <th scope="col" class="border-b border-line px-4 py-3">
+                <input
+                  type="checkbox"
+                  data-select-all=""
+                  aria-label="Select all visible datasets"
+                />
+              </th>
+            )}
             {columns.map((column) => {
               const sortable = column.sort !== undefined;
               const active = sortable && filters.sort === column.sort;
@@ -1466,15 +1485,17 @@ const Results = ({ tab, filters, rows, axes }) => {
           )}
           {rows.map((row) => (
             <tr class="border-b border-dim transition-colors last:border-0">
-              <td class="px-4 py-2.5 align-baseline">
-                <input
-                  type="checkbox"
-                  value={row.name}
-                  data-size={row.size_bytes}
-                  data-dataset-select=""
-                  aria-label={`Select ${row.name}`}
-                />
-              </td>
+              {!picking && (
+                <td class="px-4 py-2.5 align-baseline">
+                  <input
+                    type="checkbox"
+                    value={row.name}
+                    data-size={row.size_bytes}
+                    data-dataset-select=""
+                    aria-label={`Select ${row.name}`}
+                  />
+                </td>
+              )}
               {columns.map((column) => (
                 <td
                   class={`px-4 py-2.5 align-baseline whitespace-nowrap ${column.numeric ? "text-right tabular-nums" : ""

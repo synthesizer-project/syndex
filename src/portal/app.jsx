@@ -49,9 +49,9 @@ import {
   PreviousSubmissions,
   RequestAccess,
   Review,
-  ChooseDataset,
   SUBMISSION_TYPES,
   SignInRequired,
+  SubmitChoice,
   SubmissionReview,
   Submit,
   Truncated,
@@ -557,12 +557,15 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
   // A new release of something already published. The dataset supplies
   // everything but the file, and the name is fixed: it is what makes this a
   // release of that dataset rather than a second one beside it.
-  const release = Number(c.req.query("release") ?? 0);
+  // Named rather than numbered, because the catalogue's search returns what
+  // the catalogue is keyed by and the name is unique. The submission still
+  // records the id, which is what the foreign key needs.
+  const release = String(c.req.query("release") ?? "");
   let releaseOf = null;
-  if (release > 0) {
+  if (release !== "") {
     releaseOf = await c.env.DB.prepare(
       `SELECT dataset_id, name, display_name, description, data_type, licence
-       FROM datasets WHERE dataset_id = ?`,
+       FROM datasets WHERE name = ?`,
     )
       .bind(release)
       .first();
@@ -595,28 +598,12 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
     }
   }
 
-  const [counts, mine] = await Promise.all([
-    tabCounts(c.env.DB),
-    // Somebody's own submissions, because otherwise there is no way back to
-    // one. The upload page is addressed by a token that exists only in the
-    // URL, so closing the tab used to lose a half-finished transfer for good.
-    c.env.DB.prepare(
-      `SELECT submission_id, name, display_name, state, submitted_at,
-              uploaded_at, upload_token, validation_state
-       FROM submissions WHERE user_id = ?
-       ORDER BY submitted_at DESC LIMIT 50`,
-    )
-      .bind(user.user_id)
-      .all(),
-  ]);
-
   return page(
     c,
     <Submit
-      counts={counts}
+      counts={await tabCounts(c.env.DB)}
       open={submissionsOpen(c.env)}
       user={user}
-      mine={mine.results}
       releaseOf={releaseOf}
       values={values}
       errors={errors}
@@ -626,36 +613,56 @@ async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
   );
 }
 
-app.get("/submit/release", requireRole("contributor"), async (c) => {
-  const query = String(c.req.query("q") ?? "").trim();
+// Picking a dataset to release is the catalogue's own search with the results
+// pointing somewhere else, so it is that page rather than a copy of it. The
+// mode rides in the filters, which means every rail link, sort header and
+// htmx swap carries it without knowing it exists.
+app.get("/submit/release", requireRole("contributor"), (c) =>
+  c.redirect(`${BASE}/search?pick=release`, 302),
+);
 
-  // Matched on both names, because somebody looking for a grid they made
-  // knows what they called it and not necessarily how it was catalogued.
-  const { results } = query
-    ? await c.env.DB.prepare(
-        `SELECT dataset_id, name, display_name, data_type
-         FROM datasets
-         WHERE name LIKE ?1 OR display_name LIKE ?1
-         ORDER BY name LIMIT 25`,
-      )
-        .bind(`%${query}%`)
-        .all()
-    : { results: [] };
+/**
+ * Somebody's own submissions, because otherwise there is no way back to one.
+ *
+ * The upload page is addressed by a token that exists only in the URL, so
+ * closing the tab used to lose a half-finished transfer for good.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object} user Whose submissions to fetch.
+ * @returns {Promise<object[]>} Their submissions, newest first.
+ */
+async function ownSubmissions(c, user) {
+  const { results } = await c.env.DB.prepare(
+    `SELECT s.submission_id, s.name, s.display_name, s.state, s.submitted_at,
+            s.uploaded_at, s.upload_token, s.validation_state,
+            EXISTS (SELECT 1 FROM files f WHERE f.sha256 = s.sha256)
+              AS duplicate
+     FROM submissions s WHERE s.user_id = ?
+     ORDER BY s.submitted_at DESC LIMIT 50`,
+  )
+    .bind(user.user_id)
+    .all();
+  return results;
+}
 
+app.get("/submit", requireRole("contributor"), async (c) => {
+  const { user } = c.get("viewer");
   return page(
     c,
-    <ChooseDataset
+    <SubmitChoice
       counts={await tabCounts(c.env.DB)}
-      query={query}
-      datasets={results}
+      open={submissionsOpen(c.env)}
+      user={user}
+      limit={MAX_UPLOAD_BYTES}
+      mine={await ownSubmissions(c, user)}
     />,
     { cache: "no-store" },
   );
 });
 
-app.get("/submit", requireRole("contributor"), (c) => submitPage(c));
+app.get("/submit/new", requireRole("contributor"), (c) => submitPage(c));
 
-app.post("/submit", requireRole("contributor"), async (c) => {
+app.post("/submit/new", requireRole("contributor"), async (c) => {
   const { user } = c.get("viewer");
 
   if (!submissionsOpen(c.env)) {
@@ -1108,9 +1115,12 @@ async function reviewState(c) {
     // with them is one nobody trusts to be a list of work. The contributor
     // still sees theirs, marked as having sent nothing.
     c.env.DB.prepare(
-      `SELECT * FROM submissions
-       WHERE state = 'pending' AND uploaded_at IS NOT NULL
-       ORDER BY submitted_at LIMIT 100`,
+      `SELECT s.*,
+              EXISTS (SELECT 1 FROM files f WHERE f.sha256 = s.sha256)
+                AS duplicate
+       FROM submissions s
+       WHERE s.state = 'pending' AND s.uploaded_at IS NOT NULL
+       ORDER BY s.submitted_at LIMIT 100`,
     ).all(),
     c.env.DB.prepare(
       `SELECT submission_id, name, state, reviewed_at FROM submissions

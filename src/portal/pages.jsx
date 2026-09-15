@@ -146,7 +146,7 @@ const TYPE_EXAMPLES = {
 const DEFAULT_EXAMPLE = TYPE_EXAMPLES.grid;
 
 /** A definition list of whatever is actually recorded. */
-const Fields = ({ entries }) => {
+const Fields = ({ entries, spaced = false }) => {
   const rows = entries.filter(
     ([, value]) => value !== null && value !== undefined && value !== "",
   );
@@ -155,9 +155,9 @@ const Fields = ({ entries }) => {
   }
   return (
     <dl
-      class={`fields grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm ${
-        rows.length > 6 ? "many-fields" : ""
-      }`}
+      class={`fields grid grid-cols-[max-content_1fr] gap-x-6 text-sm ${
+        spaced ? "gap-y-4" : "gap-y-2"
+      } ${rows.length > 6 ? "many-fields" : ""}`}
     >
       {rows.map(([label, value]) => (
         <>
@@ -420,12 +420,30 @@ export const Landing = ({ counts, datasets, bytes }) => (
 /** One tab: the shell around the rail and the table. */
 export const Browse = ({ tab, counts, filters, children }) => (
   <Layout
-    title={tab.label}
+    title={filters.pick === "release" ? "Which dataset" : tab.label}
     counts={counts}
     active={tab.id === "search" && filters.type.length > 0 ? null : tab.id}
     filters={filters}
   >
-    <h1 class="sr-only">{tab.label}</h1>
+    {filters.pick === "release" ? (
+      // Picking, not browsing. The catalogue's own search, with the results
+      // going to the submission form instead of to a dataset page -- so
+      // every filter and facet is the one somebody has already used to find
+      // a dataset, rather than a second search written beside it.
+      <div class="mb-6">
+        <p class="mb-3 text-sm">
+          <a href={`${BASE}/submit`}>Back to submitting</a>
+        </p>
+        <h1 class="text-3xl sm:text-4xl">Which dataset</h1>
+        <p class="mt-3 max-w-2xl text-muted">
+          Choose the one this is a new version of. It will keep the same name
+          but replace the existing version as the version people download.
+          Note that all old releases are still available regardless.
+        </p>
+      </div>
+    ) : (
+      <h1 class="sr-only">{tab.label}</h1>
+    )}
     {children}
   </Layout>
 );
@@ -1292,90 +1310,130 @@ const Gate = ({ name, question, checked = false, children }) => (
 );
 
 /**
- * Picking the dataset a new release belongs to.
+ * Where a submission starts: which of the two things this is.
  *
- * A search rather than a list: the catalogue is 245 datasets and their names
- * are long enough that scrolling one is worse than typing three characters of
- * it. Matched on the catalogue name and the display name both, because
- * somebody who made a grid knows what they called it and not necessarily how
- * it was catalogued.
+ * Asked first because the answer changes everything after it. A new dataset
+ * is described from nothing and gets a name nobody has used; a new release
+ * keeps the name of the dataset it belongs to and inherits its description.
+ * Sending somebody down one path and refusing them at the end -- which is
+ * what the name check used to do -- is a worse way to find out which they
+ * needed.
  *
  * @param {object} props Component props.
  * @returns {unknown} The rendered page.
  */
-export const ChooseDataset = ({ counts, query, datasets }) => (
-  <Layout
-    title="Submit a new release"
-    counts={counts}
-    active={null}
-    showSubmit={false}
-  >
-    <p class="mb-4 text-sm">
-      <a href={`${BASE}/submit`}>Back to submitting</a>
-    </p>
-    <h1 class="text-3xl sm:text-4xl">Submit a new release</h1>
-    <p class="mt-3 max-w-2xl text-muted">
-      A corrected or regenerated version of something already in the
-      catalogue. It keeps that dataset's name and becomes its current release;
-      everything published before it stays where it is, since anything might
-      already depend on it.
-    </p>
-
-    <form method="get" action={`${BASE}/submit/release`} class="mt-6 max-w-xl">
-      <label for="q" class="block">
-        <span class="label-caps mb-1 block">Which dataset</span>
-        <div class="flex gap-2">
-          <input
-            id="q"
-            name="q"
-            type="search"
-            value={query}
-            autofocus
-            placeholder="bpass, Euclid, draine…"
-            class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
-          />
-          <button type="submit" class="btn">
-            Search
-          </button>
-        </div>
-      </label>
-    </form>
-
-    {query !== "" && datasets.length === 0 && (
-      <p class="mt-6 text-muted">
-        Nothing in the catalogue matches {query}. If this is a dataset that is
-        not published yet, it is a{" "}
-        <a href={`${BASE}/submit`}>new submission</a> rather than a release.
+export const SubmitChoice = ({ counts, open, user, limit, mine = [] }) => (
+  <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
+    <h1 class="text-3xl sm:text-4xl">Submit a dataset</h1>
+    {open && (
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        Submitting as {user.login}
+        {user.email === null ? "" : ` (${user.email})`}. Uploads are limited to{" "}
+        {size(limit)}.
       </p>
     )}
 
-    {datasets.length > 0 && (
-      <ul class="card mt-6 max-w-3xl divide-y divide-line p-0">
-        {datasets.map((dataset) => (
+    {!open && (
+      <div role="status" class="card mt-5 max-w-2xl border-accent-light p-5">
+        <p class="label-caps text-accent-light">Not open yet</p>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          Submission is not accepting uploads yet. Open an issue on{" "}
+          <a
+            href="https://github.com/synthesizer-project/synthesizer/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            the Synthesizer repository
+          </a>{" "}
+          and a maintainer will arrange to take the file.
+        </p>
+      </div>
+    )}
+
+    {open && (
+      <div class="mt-8 grid gap-6 sm:grid-cols-2">
+        {/* The whole card is the link, the way the landing page's data-type
+            cards are. There is one thing to do in each, so a button inside
+            would be a second, smaller target for the same thing -- and the
+            portal already has this pattern rather than needing a new one. */}
+        <a
+          href={`${BASE}/submit/new`}
+          class="card card-link block p-7 text-text no-underline"
+        >
+          <h2 class="text-xl">New dataset</h2>
+          <p class="mt-3 text-sm text-muted">
+            Submit a new dataset not already in the database.
+          </p>
+        </a>
+
+        <a
+          href={`${BASE}/submit/release`}
+          class="card card-link block p-7 text-text no-underline"
+        >
+          <h2 class="text-xl">New release</h2>
+          <p class="mt-3 text-sm text-muted">
+            Find and submit a new version of an existing dataset.
+          </p>
+        </a>
+      </div>
+    )}
+
+    <YourSubmissions mine={mine} />
+  </Layout>
+);
+
+/**
+ * What this account has already sent, and what became of it.
+ *
+ * @param {object} props Component props.
+ * @param {object[]} props.mine The account's own submissions.
+ * @returns {unknown} The rendered list, or nothing when there are none.
+ */
+const YourSubmissions = ({ mine }) =>
+  mine.length === 0 ? null : (
+    <section class="mt-10">
+      <h2 class="mb-4 text-xl">Your submissions</h2>
+      <ul class="card divide-y divide-line p-0">
+        {mine.map((submission) => (
           <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
             <a
-              href={`${BASE}/submit?release=${dataset.dataset_id}`}
-              class="font-mono text-sm break-all"
+              href={`${BASE}/submit/${submission.upload_token}`}
+              class="font-mono text-sm"
             >
-              {dataset.name}
+              {submission.name}
             </a>
             <span class="flex-1 truncate text-sm text-muted">
-              {dataset.display_name}
+              {submission.display_name}
             </span>
-            <span class="label-caps">{dataset.data_type}</span>
+            <span class="text-xs text-muted">
+              {submission.uploaded_at === null
+                ? "no file sent yet"
+                : date(submission.submitted_at)}
+            </span>
+            <StateBadge state={submission.state} />
+            <CheckBadge
+              state={verdictOf(submission, submission.duplicate ? {} : null)}
+            />
+            <a
+              href={`${BASE}/submit/new?like=${submission.upload_token}`}
+              aria-label={`Start a new submission like ${submission.name}`}
+              title="Submit again with these details"
+              class="btn-quiet inline-flex items-center gap-1.5 px-2 py-1 text-xs no-underline"
+            >
+              <ResubmitIcon />
+              Resubmit
+            </a>
           </li>
         ))}
       </ul>
-    )}
-  </Layout>
-);
+    </section>
+  );
 
 export const Submit = ({
   counts,
   open,
   user,
   limit,
-  mine = [],
   releaseOf = null,
   values = {},
   errors = [],
@@ -1384,14 +1442,16 @@ export const Submit = ({
 
   return (
     <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
+      <p class="mb-4 text-sm">
+        <a href={`${BASE}/submit`}>Back to submitting</a>
+      </p>
       <h1 class="text-3xl sm:text-4xl">
-        {releaseOf === null ? "Submit a dataset" : "Submit a new release"}
+        {releaseOf === null ? "A new dataset" : "A new release"}
       </h1>
       <p class="mt-3 max-w-2xl text-muted">
         {releaseOf === null
-          ? "Describe it, then send the file. A maintainer reads every " +
-            "submission before anything reaches the catalogue."
-          : `A new release of ${releaseOf.display_name}. Its details are filled in below; change whatever this version changes, then send the file.`}
+          ? "Describe it, then send the file."
+          : `Of ${releaseOf.display_name}. Its details are filled in below; change whatever this version changes, then send the file.`}
       </p>
       {open && (
         <>
@@ -1432,19 +1492,11 @@ export const Submit = ({
         </div>
       )}
 
-      {open && releaseOf === null && (
-        <p class="mt-5">
-          <a href={`${BASE}/submit/release`} class="btn-quiet text-sm no-underline">
-            Submit a new release of something already published
-          </a>
-        </p>
-      )}
-
       {open && (
         <form
           id="submit-form"
           method="post"
-          action={`${BASE}/submit`}
+          action={`${BASE}/submit/new`}
           // Read by submit.js to swap the placeholders when the type changes.
           // An attribute rather than a script tag: attribute values are
           // entity-decoded by the parser, and a script's text is not, so an
@@ -1592,12 +1644,6 @@ export const Submit = ({
 
             {/* Here rather than in the preamble: it is what to do next, and
                 what to do next belongs beside the button that does it. */}
-            <p class="mt-6 max-w-2xl text-sm text-muted">
-              Before sending the file, install the tooling with{" "}
-              <code>pip install synthesizer-syndex</code> and run{" "}
-              <code>syndex-check YOUR-FILE</code> in the CLI to ensure your
-              file will pass checks.
-            </p>
             <button type="submit" class="btn mt-5">
               Continue to upload
             </button>
@@ -1605,42 +1651,6 @@ export const Submit = ({
         </form>
       )}
 
-      {mine.length > 0 && (
-        <section class="mt-10">
-          <h2 class="mb-4 text-xl">Your submissions</h2>
-          <ul class="card divide-y divide-line p-0">
-            {mine.map((submission) => (
-              <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
-                <a
-                  href={`${BASE}/submit/${submission.upload_token}`}
-                  class="font-mono text-sm"
-                >
-                  {submission.name}
-                </a>
-                <span class="flex-1 truncate text-sm text-muted">
-                  {submission.display_name}
-                </span>
-                <span class="text-xs text-muted">
-                  {submission.uploaded_at === null
-                    ? "no file sent yet"
-                    : date(submission.submitted_at)}
-                </span>
-                <StateBadge state={submission.state} />
-                <CheckBadge state={submission.validation_state} />
-                <a
-                  href={`${BASE}/submit?like=${submission.upload_token}`}
-                  aria-label={`Start a new submission like ${submission.name}`}
-                  title="Submit again with these details"
-                  class="btn-quiet inline-flex items-center gap-1.5 px-2 py-1 text-xs no-underline"
-                >
-                  <ResubmitIcon />
-                  Resubmit
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
       {open && <script src={`${BASE}/static/submit.js`} defer></script>}
     </Layout>
   );
@@ -1678,7 +1688,7 @@ export const Upload = ({
       <h1 class="text-3xl sm:text-4xl">
         {uploaded ? "Submission complete" : "Send the file"}
       </h1>
-      <p class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+      <p class="mt-3 mb-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
         <span class="font-mono break-all text-text">{submission.name}</span>
         <span>submission {submission.submission_id}</span>
         <StateBadge state={uploaded ? submission.state : "no file yet"} />
@@ -1713,7 +1723,7 @@ export const Upload = ({
               {submission.state === "rejected" && (
                 <p class="mt-3 text-sm text-muted">
                   Fix what is described above and submit it again from{" "}
-                  <a href={`${BASE}/submit?like=${submission.upload_token}`}>
+                  <a href={`${BASE}/submit/new?like=${submission.upload_token}`}>
                     your submissions
                   </a>
                   , which fills the form in from this one.
@@ -1729,6 +1739,25 @@ export const Upload = ({
         </>
       ) : (
         <>
+          <Section title="Check your upload">
+            <p class="text-sm leading-relaxed text-muted">
+              Your submission will go through automated checks when you submit
+              it. To make sure your submission passes, use the CLI to check.
+            </p>
+            <div class="mt-3">
+              <Command>syndex-check YOUR-FILE</Command>
+            </div>
+            <p class="mt-3 text-xs text-muted">
+              <a
+                href="https://github.com/synthesizer-project/syndex#readme"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Installation instructions
+              </a>
+            </p>
+          </Section>
+
           <Section title="From this browser">
             <p class="mb-4 text-sm text-muted">
               Up to {size(partSize * maxParts)} maximum. If your file exceeds
@@ -1975,7 +2004,9 @@ const SubmissionCard = ({ submission }) => {
         <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span class="font-mono text-lg break-all">{submission.name}</span>
           <StateBadge state={submission.state} />
-          <CheckBadge state={submission.validation_state} />
+          <CheckBadge
+            state={verdictOf(submission, submission.duplicate ? {} : null)}
+          />
         </div>
         <p class="mt-1 text-sm text-muted">{submission.display_name}</p>
 
@@ -1993,31 +2024,60 @@ const SubmissionCard = ({ submission }) => {
 };
 
 /**
+ * The verdict a page shows, which is not always the one the checker recorded.
+ *
+ * A file whose bytes are already in the catalogue passes every check there
+ * is: it is a valid grid, because it is a grid that was published. It still
+ * cannot be published again, so "passed" is the wrong word for it -- the
+ * submission is going nowhere and saying otherwise sends somebody off to wait
+ * for a review that can only end one way.
+ *
+ * Computed rather than stored. The checker reads the file and knows nothing
+ * of the catalogue, and whether something is a duplicate changes as the
+ * catalogue does, so freezing this into `validation_state` would record a
+ * judgement that could quietly become wrong.
+ *
+ * @param {object} submission The submission row.
+ * @param {object | null} duplicate Whatever already holds these bytes.
+ * @returns {string | null} The state to show.
+ */
+const verdictOf = (submission, duplicate = null) =>
+  duplicate === null || submission.validation_state === "running"
+    ? submission.validation_state
+    : "failed";
+
+/**
  * What the checker made of a file, in a word and a colour.
  *
  * @param {object} props Component props.
  * @param {string | null} props.state The recorded validation state.
  * @returns {unknown} The rendered badge, or nothing when none has run.
  */
-const CheckBadge = ({ state }) => {
+const CheckBadge = ({ state, large = false }) => {
   if (state === null || state === undefined) {
     return null;
   }
-  const words = {
-    running: "checking…",
-    passed: "checks passed",
-    failed: "checks failed",
-    ambiguous: "needs categorising",
+
+  // Failure is the one that has to carry across a page at a glance, so it is
+  // the only filled one. Passing is stated rather than shouted: a reviewer
+  // reads the file either way, and a loud green tick is an invitation not to.
+  const looks = {
+    running: ["checking…", "border border-line text-muted"],
+    passed: ["passed", "border border-accent-light text-accent-light"],
+    failed: ["failed", "bg-accent-light text-bg"],
+    ambiguous: ["needs categorising", "border border-line text-muted"],
   };
+  const [word, style] = looks[state] ?? [state, "border border-line text-muted"];
+
+  // Large where it is the answer the section exists to give, small where it
+  // is one fact about a row among several.
   return (
     <span
-      class={`rounded-full px-2.5 py-0.5 text-xs ${
-        state === "failed"
-          ? "bg-accent-light text-bg"
-          : "border border-line text-muted"
-      }`}
+      class={`rounded-full ${
+        large ? "px-4 py-1 text-base" : "px-2.5 py-0.5 text-xs"
+      } ${style}`}
     >
-      {words[state] ?? state}
+      {word}
     </span>
   );
 };
@@ -2058,7 +2118,10 @@ export const CheckReport = ({
       hx-trigger={running ? "every 5s" : undefined}
       hx-swap="outerHTML"
     >
-    <Section title="What the checker found">
+    <Section
+      title="Validation"
+      action={<CheckBadge state={verdictOf(submission, duplicate)} large />}
+    >
       {duplicate !== null && (
         <div role="alert" class="mb-4 rounded border border-accent-light p-4 text-sm">
           <p class="label-caps text-accent-light">Already in the catalogue</p>
@@ -2099,7 +2162,6 @@ export const CheckReport = ({
         <>
           <Fields
             entries={[
-              ["verdict", report.state],
               ["detected as", submission.detected_data_type],
               ["because", report.reason],
               ["format", report.format],
@@ -2191,7 +2253,9 @@ const Submission = ({ submission, bucket }) => {
       <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 class="font-mono text-lg break-all">{submission.name}</h3>
         <StateBadge state={submission.state} />
-        <CheckBadge state={submission.validation_state} />
+        <CheckBadge
+          state={verdictOf(submission, submission.duplicate ? {} : null)}
+        />
         <span class="text-sm text-muted">{submission.display_name}</span>
       </div>
 
@@ -2226,16 +2290,22 @@ const Submission = ({ submission, bucket }) => {
         </Fact>
       </div>
 
-      <Fields
-        entries={[
-          ["description", submission.description],
-          ["citations", submission.citations],
-          ["licence", submission.licence],
-          ["notes", submission.notes],
-          ["reviewer note", submission.reviewer_note],
-          ["reviewed", submission.reviewed_at ? date(submission.reviewed_at) : null],
-        ]}
-      />
+      <div class="mt-5 border-t border-line pt-5">
+        <Fields
+          spaced
+          entries={[
+            ["description", submission.description],
+            ["citations", submission.citations],
+            ["licence", submission.licence],
+            ["notes", submission.notes],
+            ["reviewer note", submission.reviewer_note],
+            [
+              "reviewed",
+              submission.reviewed_at ? date(submission.reviewed_at) : null,
+            ],
+          ]}
+        />
+      </div>
 
       {pending && arrived && (
         // Three steps rather than one list of commands, each acknowledged
@@ -2245,12 +2315,12 @@ const Submission = ({ submission, bucket }) => {
         // having fetched and opened the file is approving something nobody
         // has looked at. The ticks do not enforce that; they make skipping it
         // a thing somebody did rather than a thing that happened.
-        <ol class="mt-5 space-y-3 border-t border-line pt-4">
+        <ol class="review-steps mt-5 space-y-3 border-t border-line pt-4">
           <ReviewStep
             id={`fetch-${submission.submission_id}`}
             number={1}
             title="Fetch the file"
-            hint="It comes out of the submissions bucket, not the catalogue's."
+            hint="Download from the submissions bucket."
           >
             <Command>
               npx wrangler r2 object get {bucket}/{submission.r2_key} --file{" "}
@@ -2262,7 +2332,10 @@ const Submission = ({ submission, bucket }) => {
             id={`check-${submission.submission_id}`}
             number={2}
             title="Check it yourself"
-            hint="The same checker the submission was put through, on the file you now hold."
+            hint={
+              "Review the file format, structure, and metadata, and " +
+              "optionally rerun the validation for yourself."
+            }
           >
             <Command>syndex-check {submission.name}</Command>
           </ReviewStep>
@@ -2277,8 +2350,8 @@ const Submission = ({ submission, bucket }) => {
             }
             hint={
               submission.release_of_name
-                ? "It joins the releases of that dataset and becomes the current one. Everything published before it stays."
-                : "Approving records the decision. This is what puts it in the catalogue."
+                ? "Publish it as a new release of that dataset and approve below if all looks well."
+                : "Publish it to the database and approve below if all looks well."
             }
           >
             <Command>
@@ -2309,6 +2382,7 @@ const Submission = ({ submission, bucket }) => {
               id={`note-${submission.submission_id}`}
               name="reviewer_note"
               maxlength="1000"
+              placeholder="Why, especially if you are rejecting it — this is what the contributor is told."
               class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
             />
           </label>

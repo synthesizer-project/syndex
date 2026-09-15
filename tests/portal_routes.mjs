@@ -109,7 +109,9 @@ function resultsFor(sql, rows) {
       },
     ];
   }
-  if (sql.includes("FROM files f")) {
+  // The published twin of a digest. Narrower than "FROM files f", which the
+  // list queries now also contain as an EXISTS subquery.
+  if (sql.includes("JOIN releases r ON r.file_id")) {
     return rows.publishedTwin ?? [];
   }
   if (sql.includes("WHERE sha256 = ?")) {
@@ -155,18 +157,18 @@ function resultsFor(sql, rows) {
   if (sql.includes("FROM grid_axes WHERE release_id")) {
     return rows.axes ?? AXIS_ROWS;
   }
+  // The dataset a new release is prefilled from. Matched on its whole select
+  // list, since "FROM datasets WHERE name = ?" is also the collision check.
+  if (sql.includes("SELECT dataset_id, name, display_name")) {
+    return rows.releaseOf ?? [];
+  }
   // The name collision check, which is two questions: is it published, and
   // is somebody already submitting it.
   if (sql.includes("FROM datasets WHERE name = ?")) {
     return rows.published ?? [];
   }
   // The dataset a new release belongs to, and the search that picks it.
-  if (sql.includes("FROM datasets WHERE dataset_id = ?")) {
-    return rows.releaseOf ?? [];
-  }
-  if (sql.includes("name LIKE ?1")) {
-    return rows.datasetMatches ?? [];
-  }
+
   if (sql.includes("WHERE name = ? AND state = 'pending'")) {
     return rows.waiting ?? [];
   }
@@ -381,7 +383,7 @@ function submissionEnv({ rows = {}, objects = [], issued = [] } = {}) {
  */
 function postSubmission(env, fields = {}) {
   return call(
-    "/syndex/submit",
+    "/syndex/submit/new",
     env,
     signedInPost({
       name: "example-grid",
@@ -1253,11 +1255,11 @@ const tests = {
 
     // The form comes filled in from the dataset, with the name fixed.
     const { body } = await call(
-      "/syndex/submit?release=12",
+      `/syndex/submit/new?release=${dataset.name}`,
       contributorEnv({ rows: { releaseOf: [dataset] } }),
       SIGNED_IN,
     );
-    assert.match(body, /Submit a new release/);
+    assert.match(body, /A new release/);
     assert.match(body, /<input type="hidden" name="release_of" value="12"/);
     assert.match(body, /name="name"[^>]*readonly/);
 
@@ -1293,26 +1295,49 @@ const tests = {
     assert.match(body, /submit a new release of it instead/);
   },
 
-  async "the dataset a release belongs to is searched for, not scrolled"() {
+  async "picking a dataset to release is the catalogue's own search"() {
+    // Not a second search beside it. The mode rides in the filters, so every
+    // rail link, sort header and htmx swap carries it without knowing it
+    // exists -- and the only thing it changes is where a result goes.
+    const redirect = await call(
+      "/syndex/submit/release",
+      contributorEnv(),
+      SIGNED_IN,
+    );
+    assert.equal(redirect.status, 302);
+    assert.equal(redirect.headers.get("location"), "/syndex/search?pick=release");
+
     const { body } = await call(
-      "/syndex/submit/release?q=bpass",
-      contributorEnv({
-        rows: {
-          datasetMatches: [
-            {
-              dataset_id: 12,
-              name: "bpass-2p2p1-bin-chabrier03-0p1-300p0",
-              display_name: "BPASS 2.2.1 binary",
-              data_type: "grid",
-            },
-          ],
-        },
-      }),
+      "/syndex/search?pick=release",
+      { DB: stubDb({ rows: { viewer: USER } }) },
       SIGNED_IN,
     );
 
-    assert.match(body, /href="\/syndex\/submit\?release=12"/);
-    assert.match(body, /bpass-2p2p1-bin-chabrier03-0p1-300p0/);
+    assert.match(body, /Which dataset/);
+    // A result goes to the submission form rather than to a dataset page.
+    assert.match(
+      body,
+      new RegExp(`href="/syndex/submit/new\\?release=${GRID_ROW.name}"`),
+    );
+    assert.doesNotMatch(body, new RegExp(`/syndex/datasets/${GRID_ROW.name}`));
+    // And the mode travels with everything that changes the list: the rail's
+    // links, and the filter form's own hidden state.
+    assert.match(body, /pick=release/);
+    assert.match(body, /<input type="hidden" name="pick" value="release"/);
+
+    // Nothing to select and nothing to download: the boxes are what would
+    // otherwise say "tick these" when the thing to do is click a name.
+    assert.doesNotMatch(body, /data-dataset-select/);
+    assert.doesNotMatch(body, /data-select-all/);
+    assert.doesNotMatch(body, /Get download command/);
+  },
+
+  async "browsing keeps the selection controls the picker drops"() {
+    const { body } = await call("/syndex/search", { DB: stubDb() });
+
+    assert.match(body, /data-dataset-select/);
+    assert.match(body, /data-select-all/);
+    assert.match(body, /Get download command/);
   },
 
   async "a submission can be started again from one already sent"() {
@@ -1326,7 +1351,7 @@ const tests = {
       notes: "Replacing a truncated file.",
     };
     const { body } = await call(
-      "/syndex/submit?like=tok-1",
+      "/syndex/submit/new?like=tok-1",
       contributorEnv({ rows: { submission: previous } }),
       SIGNED_IN,
     );
@@ -1348,7 +1373,7 @@ const tests = {
   async "one contributor cannot start again from another's submission"() {
     // The token addresses a submission and does not authorise reading it.
     const { body } = await call(
-      "/syndex/submit?like=somebody-elses",
+      "/syndex/submit/new?like=somebody-elses",
       contributorEnv({ rows: { submission: undefined } }),
       SIGNED_IN,
     );
@@ -1358,7 +1383,7 @@ const tests = {
   },
 
   async "the form asks nothing until it knows what it is being told about"() {
-    const { body } = await call("/syndex/submit", contributorEnv(), SIGNED_IN);
+    const { body } = await call("/syndex/submit/new", contributorEnv(), SIGNED_IN);
 
     // No type is chosen, and the placeholder is what is selected -- so the
     // CSS that hides everything below it applies.
@@ -1383,7 +1408,7 @@ const tests = {
   async "the form can describe every kind of data the catalogue holds"() {
     // reference_data was in the catalogue and missing from this list, so
     // there was a kind of dataset nobody could submit.
-    const { body } = await call("/syndex/submit", contributorEnv(), SIGNED_IN);
+    const { body } = await call("/syndex/submit/new", contributorEnv(), SIGNED_IN);
     for (const type of [
       "grid",
       "dust_grid",
@@ -1462,7 +1487,7 @@ const tests = {
     assert.match(body, /The axes are named in the singular/);
     assert.match(body, /does not say what kind of grid it is/);
     // And a way to act on it rather than starting from nothing.
-    assert.match(body, /submit\?like=/);
+    assert.match(body, /submit\/new\?like=/);
     // The reviewer's prompt to run the checker themselves is not for them.
     assert.doesNotMatch(body, /Fetch the file and run/);
   },
@@ -1497,17 +1522,22 @@ const tests = {
     // closed and the handler refuses, instead of accepting a file it has
     // nowhere to put.
     const env = { DB: stubDb({ rows: { viewer: USER } }) };
-    const { body } = await call("/syndex/submit", env, SIGNED_IN);
+    const { body } = await call("/syndex/submit/new", env, SIGNED_IN);
     assert.match(body, />Not open yet<\/p>/);
     // A closed door still has to say where to knock.
     assert.match(body, /github\.com\/synthesizer-project\/synthesizer\/issues/);
-    assert.doesNotMatch(body, /action="\/syndex\/submit"/);
+    assert.doesNotMatch(body, /action="\/syndex\/submit\/new"/);
     assert.equal((await postSubmission(env)).status, 503);
+
+    // The chooser says the same thing, since neither route can take a file.
+    const chooser = await call("/syndex/submit", env, SIGNED_IN);
+    assert.match(chooser.body, />Not open yet<\/p>/);
+    assert.doesNotMatch(chooser.body, /New release/);
 
     // Configured, the form is there.
     const open = contributorEnv();
-    const offered = await call("/syndex/submit", open, SIGNED_IN);
-    assert.match(offered.body, /action="\/syndex\/submit"/);
+    const offered = await call("/syndex/submit/new", open, SIGNED_IN);
+    assert.match(offered.body, /action="\/syndex\/submit\/new"/);
     assert.doesNotMatch(offered.body, />Not open yet<\/p>/);
     // Turnstile told a script from a person on an anonymous form. There is
     // no anonymous form.
@@ -1756,7 +1786,7 @@ const tests = {
     // so this must be accepted rather than refused for a bad bibcode, and
     // must store neither the bibcode nor the licence.
     const { status } = await call(
-      "/syndex/submit",
+      "/syndex/submit/new",
       env,
       signedInPost({
         name: "example-grid",
@@ -1786,7 +1816,7 @@ const tests = {
       ["citation", "2020MNRAS.491..944C"],
       ["citation", ""],
     ]);
-    const { status } = await call("/syndex/submit", env, {
+    const { status } = await call("/syndex/submit/new", env, {
       method: "POST",
       body,
       headers: {
@@ -1977,6 +2007,10 @@ const tests = {
     assert.match(body, /Check it yourself/);
     assert.match(body, /Publish it/);
     assert.match(body, /id="fetch-7"[^>]*class="peer/);
+    // Steps in one list, so the CSS that gates each on the one before it has
+    // siblings to walk.
+    assert.match(body, /class="review-steps/);
+    assert.equal(body.match(/class="review-step"/g).length, 3);
   },
 
   async "the checker's verdict reaches the reviewer"() {
@@ -2014,7 +2048,7 @@ const tests = {
     // The error is the reason a submission gets sent back, so it is in the
     // open rather than behind something to expand.
     assert.match(body, /does not say what kind of grid it is/);
-    assert.match(body, /checks failed/);
+    assert.match(body, />failed</);
     assert.match(body, /1 warning/);
     assert.match(body, /b{64}/);
   },
@@ -2041,6 +2075,11 @@ const tests = {
     assert.match(body, /byte for byte the same file as/);
     assert.match(body, /bpass-2p2p1-bin-chabrier03-0p1-300p0/);
     assert.match(body, /Already in the catalogue/);
+    // A file that is already published passes every check there is -- it is
+    // a valid grid, because it is a grid that was published. It still cannot
+    // go anywhere, so the verdict must not read as a pass.
+    assert.match(body, /<h2[^>]*>Validation<\/h2><span[^>]*>failed</);
+    assert.doesNotMatch(body, />passed</);
   },
 
   async "a verdict is only taken from the runner that was asked"() {

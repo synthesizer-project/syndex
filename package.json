@@ -20,6 +20,6 @@
     "esbuild": "0.27.2",
     "htmx.org": "2.0.10",
     "tailwindcss": "4.3.3",
-    "wrangler": "4.129.0"
+    "wrangler": "^4.131.2"
   }
 }

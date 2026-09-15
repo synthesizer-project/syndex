@@ -453,6 +453,50 @@ dialog[open] {
 }
 
 /*
+ * A step waits for the one before it.
+ *
+ * Shown rather than hidden, so a reviewer can see what the whole job is
+ * before starting it, but dimmed and inert until its turn -- which is what
+ * stops the page reading as three independent things to do in any order,
+ * when the third only makes sense after the first two.
+ *
+ * Sibling :has() chains rather than script: the second step opens when the
+ * first is ticked, and the third when the first two are. Each rule is one
+ * more link in the chain.
+ *
+ * It nudges rather than enforces. Nothing here stops a reviewer approving a
+ * submission without ticking anything, and a keyboard can still reach a
+ * dimmed box; the point is that skipping a step is visibly a thing somebody
+ * did, which is all the ticks were ever for.
+ */
+.review-step + .review-step {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.review-step + .review-step .tick::after {
+  content: "waiting";
+}
+
+.review-step:has(input:checked) + .review-step,
+.review-step:has(input:checked) + .review-step:has(input:checked) + .review-step {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.review-step:has(input:checked) + .review-step .tick::after,
+.review-step:has(input:checked)
+  + .review-step:has(input:checked)
+  + .review-step
+  .tick::after {
+  content: "to do";
+}
+
+.review-step:has(input:checked) + .review-step:has(input:checked) .tick::after {
+  content: "done";
+}
+
+/*
  * Inline code: a command in a sentence.
  *
  * A bare element selector, so the utilities on `Command`'s block element --

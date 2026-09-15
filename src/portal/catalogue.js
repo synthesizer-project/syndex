@@ -162,6 +162,12 @@ export function parseFilters(params) {
 
   return {
     q: (params.get("q") ?? "").trim(),
+    // Picking a dataset to submit a new release of, rather than browsing.
+    // It lives with the filters so that every link the rail, the sort
+    // headers and htmx build carries it without any of them knowing about
+    // it: the alternative was a second search page beside this one, with its
+    // own facets to keep in step.
+    pick: params.get("pick") === "release" ? "release" : "",
     sort:
       sortable.has(requestedSort) || requestedSort.startsWith("axis.")
         ? requestedSort
@@ -212,6 +218,11 @@ export function toQuery(filters, changes = {}) {
   const params = new URLSearchParams();
   if (state.q !== "") {
     params.set("q", state.q);
+  }
+  // Carried through every filter change, so that picking a dataset survives
+  // narrowing the list down to it.
+  if (state.pick !== "") {
+    params.set("pick", state.pick);
   }
   if (state.sort !== "") {
     params.set("sort", state.sort);

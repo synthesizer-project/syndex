@@ -29,11 +29,14 @@ from typing import Any
 
 from syndex.upload import detect_format, extract_hdf5, extract_instrument_hdf5
 
-# The catalogue types a file can be sorted into. Mirrors the DATA_TYPES list
-# the submission form offers, which is the same set the `datasets` table
+# The catalogue types a file can be sorted into: the set the `datasets` table
 # stores. Only the first three can be recognised from a file's contents; the
-# rest are formats that carry no self-description and are categorised by a
-# reviewer.
+# rest carry no self-description and are categorised by a reviewer.
+#
+# The submission form offers one more, "other", for data that is none of
+# these. That is a submission-time answer rather than a catalogue type -- it
+# says "a reviewer will have to decide", and what they decide may be a type
+# that does not exist yet -- so it is deliberately not in this list.
 DATA_TYPES = (
     "grid",
     "dust_grid",
@@ -41,6 +44,7 @@ DATA_TYPES = (
     "simulation_data",
     "generation_data",
     "synference_data",
+    "reference_data",
     "cache",
 )
 

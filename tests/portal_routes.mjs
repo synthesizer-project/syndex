@@ -99,8 +99,52 @@ function resultsFor(sql, rows) {
   if (sql.includes("GROUP BY value")) {
     return rows.facets ?? [{ value: "BPASS", n: 47 }];
   }
+  // Before the generic count, which would otherwise answer for it.
+  if (sql.includes("AS accounts")) {
+    return [
+      {
+        accounts: rows.accountCount ?? 0,
+        approved: rows.approvedCount ?? 0,
+        rejected: rows.rejectedCount ?? 0,
+      },
+    ];
+  }
+  if (sql.includes("FROM files f")) {
+    return rows.publishedTwin ?? [];
+  }
+  if (sql.includes("WHERE sha256 = ?")) {
+    return rows.pendingTwin ?? [];
+  }
+  if (sql.includes("ORDER BY reviewed_at DESC")) {
+    return rows.decided ?? [];
+  }
+  // The queue's own list, which is narrower than every other statement that
+  // mentions a pending state.
+  if (sql.includes("ORDER BY submitted_at LIMIT")) {
+    return rows.submissions ?? [];
+  }
   if (sql.includes("COUNT(*) AS n")) {
     return [{ n: 3 }];
+  }
+  // Who holds the session cookie this request carried. `null` for nobody,
+  // which is what every test that does not sign in gets.
+  if (sql.includes("FROM sessions s")) {
+    return rows.viewer === undefined ? [] : [rows.viewer];
+  }
+  if (sql.includes("AS waiting")) {
+    return [{ waiting: rows.waiting ?? 0 }];
+  }
+  if (sql.includes("UPDATE users")) {
+    return rows.roleChange === undefined ? [] : [rows.roleChange];
+  }
+  // The account a role change is aimed at, looked up before anything is
+  // written so that what it already holds can be checked too.
+  if (sql.includes("FROM users WHERE user_id")) {
+    return rows.target === undefined ? [] : [rows.target];
+  }
+
+  if (sql.includes("FROM users")) {
+    return rows.people ?? [];
   }
   if (sql.includes("FROM file_citations")) {
     return rows.citations ?? [];
@@ -111,8 +155,19 @@ function resultsFor(sql, rows) {
   if (sql.includes("FROM grid_axes WHERE release_id")) {
     return rows.axes ?? AXIS_ROWS;
   }
-  if (sql.includes("UNION ALL")) {
-    return rows.taken ?? [];
+  // The name collision check, which is two questions: is it published, and
+  // is somebody already submitting it.
+  if (sql.includes("SELECT 1 FROM datasets WHERE name")) {
+    return rows.published ?? [];
+  }
+  if (sql.includes("WHERE name = ? AND state = 'pending'")) {
+    return rows.waiting ?? [];
+  }
+  if (sql.includes("AS mine")) {
+    return [rows.queue ?? { mine: 0, everyone: 0 }];
+  }
+  if (sql.includes("FROM submission_parts")) {
+    return rows.parts ?? [];
   }
   if (sql.includes("INSERT INTO submissions")) {
     return [{ submission_id: 7 }];
@@ -137,6 +192,36 @@ function resultsFor(sql, rows) {
   }
   return rows.datasets ?? [GRID_ROW];
 }
+
+/** A signed-in account, as the session join returns it. */
+const USER = {
+  user_id: 3,
+  github_id: 4242,
+  login: "contributor-one",
+  name: "A Contributor",
+  email: "someone@example.org",
+  role: "contributor",
+  created_at: "2026-09-01T00:00:00Z",
+  last_seen_at: "2026-09-14T00:00:00Z",
+  access_requested_at: null,
+  access_request_note: null,
+};
+
+/** The cookie a signed-in request carries. Any value: the stub answers the join. */
+const SESSION_COOKIE = `syndex_session=${"a".repeat(64)}`;
+
+/** Request init carrying that cookie, for a signed-in GET. */
+const SIGNED_IN = { headers: { cookie: SESSION_COOKIE } };
+
+/** Request init for a signed-in form post. */
+const signedInPost = (fields) => ({
+  method: "POST",
+  body: new URLSearchParams(fields),
+  headers: {
+    cookie: SESSION_COOKIE,
+    "content-type": "application/x-www-form-urlencoded",
+  },
+});
 
 /**
  * Build a stub D1 binding that records every statement it is given.
@@ -217,7 +302,11 @@ const SUBMISSION = {
   licence: null,
   citations: null,
   upload_token: "11111111-2222-3333-4444-555555555555",
-  filename: null,
+  // The key is fixed at registration, from the catalogue name, so one
+  // submission is one object whatever a later request calls the file.
+  filename: "example-grid",
+  upload_id: null,
+  user_id: 3,
   r2_key: null,
   uploaded_at: null,
   uploaded_size_bytes: null,
@@ -230,71 +319,81 @@ const SUBMISSION = {
 /**
  * Everything the submission path needs to be considered configured.
  *
- * The values are local stand-ins: a presigned URL signed with them is
- * rejected by R2, which is fine, since what is under test is what the
- * portal signs rather than whether R2 accepts it.
+ * Only the bucket, now that the Worker writes the bytes itself: the R2
+ * signing keys, the account id and the token that minted temporary
+ * credentials all went with the code that used them.
+ *
+ * The multipart upload is recorded rather than performed, so a test can ask
+ * which parts were written and what was completed without a bucket existing.
  *
  * @param {object} options Rows for the stub database, and R2 contents.
- * @returns {object} Stub bindings.
+ * @returns {object} Stub bindings, with the recorded upload on `.uploaded`.
  */
-function submissionEnv({ rows = {}, objects = [] } = {}) {
+function submissionEnv({ rows = {}, objects = [], issued = [] } = {}) {
+  const uploaded = { parts: [], completed: null, aborted: false, created: 0 };
+
+  const multipart = (uploadId) => ({
+    uploadId,
+    uploadPart: async (partNumber, body) => {
+      // Drain the body the way R2 would, so a handler that failed to pass a
+      // stream through shows up here rather than silently passing.
+      const bytes = body === null ? new Uint8Array() : await new Response(body).arrayBuffer();
+      uploaded.parts.push({ partNumber, size: bytes.byteLength });
+      return { partNumber, etag: `etag-${partNumber}` };
+    },
+    complete: async (parts) => {
+      uploaded.completed = parts;
+    },
+    abort: async () => {
+      uploaded.aborted = true;
+    },
+  });
+
   return {
-    DB: stubDb({ rows }),
+    DB: stubDb({ rows, issued }),
     SUBMISSIONS: {
+      createMultipartUpload: async () => {
+        uploaded.created += 1;
+        return multipart("upload-1");
+      },
+      resumeMultipartUpload: (_key, uploadId) => multipart(uploadId),
+      head: async (key) => objects.find((object) => object.key === key) ?? null,
       list: async ({ prefix }) => ({
         objects: objects.filter((object) => object.key.startsWith(prefix)),
       }),
     },
-    SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
-    SYNTHESIZER_SUBMISSIONS_BUCKET: "synthesizer-submissions",
-    SYNTHESIZER_SUBMISSIONS_ACCESS_KEY_ID: "test-key",
-    SYNTHESIZER_SUBMISSIONS_SECRET_ACCESS_KEY: "test-secret",
-    TURNSTILE_SITEKEY: "1x00000000000000000000AA",
-    TURNSTILE_SECRET: "1x0000000000000000000000000000000AA",
+    uploaded,
   };
 }
 
 /**
- * Answer Turnstile's siteverify without leaving the machine.
- *
- * @param {boolean} success What the challenge should report.
- * @returns {Function} A function restoring the real fetch.
- */
-function stubChallenge(success) {
-  const real = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    if (String(url).includes("siteverify")) {
-      return Response.json({ success, "error-codes": success ? [] : ["x"] });
-    }
-    throw new Error(`unexpected fetch of ${url}`);
-  };
-  return () => {
-    globalThis.fetch = real;
-  };
-}
-
-/**
- * Post one submission form.
+ * Post one submission form, as a signed-in contributor.
  *
  * @param {object} env Stub bindings.
  * @param {object} fields Field overrides.
  * @returns {Promise<object>} The response.
  */
 function postSubmission(env, fields = {}) {
-  const body = new URLSearchParams({
-    name: "example-grid",
-    display_name: "Example grid",
-    data_type: "grid",
-    submitter_name: "A Contributor",
-    submitter_email: "a@example.org",
-    "cf-turnstile-response": "XXXX.DUMMY.TOKEN.XXXX",
-    ...fields,
-  });
-  return call("/syndex/submit", env, {
-    method: "POST",
-    body,
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-  });
+  return call(
+    "/syndex/submit",
+    env,
+    signedInPost({
+      name: "example-grid",
+      display_name: "Example grid",
+      data_type: "grid",
+      ...fields,
+    }),
+  );
+}
+
+/**
+ * Bindings for a signed-in contributor submitting a file.
+ *
+ * @param {object} options Extra rows, and R2 contents.
+ * @returns {object} Stub bindings.
+ */
+function contributorEnv({ rows = {}, ...rest } = {}) {
+  return submissionEnv({ rows: { viewer: USER, ...rows }, ...rest });
 }
 
 const tests = {
@@ -311,7 +410,7 @@ const tests = {
     const portal = await call("/syndex/search", env);
     assert.equal(portal.status, 200);
     assert.match(portal.headers.get("content-type"), /text\/html/);
-    assert.match(portal.headers.get("vary"), /^HX-Request\b/);
+    assert.match(portal.headers.get("vary"), /^Cookie, HX-Request\b/);
     assert.match(portal.body, /class="bg-layer"/);
     assert.match(portal.body, /viewBox="0 0 1440 900"/);
     const oldTab = await call("/syndex/grids?q=bpass", env);
@@ -548,10 +647,7 @@ const tests = {
     // And it round-trips through the form without JavaScript.
     assert.match(body, /<input type="hidden" name="axis" value="ages"\/>/);
     assert.match(body, /<form id="filters" method="get"/);
-    assert.match(
-      body,
-      /href="\/syndex\/submit" class="btn absolute top-4 right-6/,
-    );
+    assert.match(body, /href="\/syndex\/submit" class="btn text-xs no-underline/);
     assert.match(body, /<button type="submit" class="btn mt-2 w-full">Search<\/button>/);
     assert.doesNotMatch(body, /Apply filters/);
     assert.match(body, />select range<\/summary>/);
@@ -603,7 +699,7 @@ const tests = {
     assert.match(body, /action="\/syndex\/search"/);
     assert.match(body, /name, description, type or filename/);
     assert.doesNotMatch(body, /synthesizer-download --dataset NAME/);
-    assert.match(body, /aria-label="Syndex links"/);
+    assert.match(body, /aria-label="Account"/);
     assert.match(body, /Submit a dataset/);
     assert.match(body, /synthesizer-project\.github\.io/);
     assert.doesNotMatch(body, />API<\/a>/);
@@ -803,6 +899,7 @@ const tests = {
     // The rail is swapped with the table: its counts describe the search.
     assert.match(body, /id="filters"/);
     assert.equal(headers.get("cache-control"), "no-store");
+    // A fragment carries no header, so it does not vary by who asked.
     assert.match(headers.get("vary"), /^HX-Request\b/);
   },
 
@@ -1138,142 +1235,393 @@ const tests = {
     );
   },
 
-  async "the form is closed rather than half working"() {
-    // Everything the upload needs is configuration with no sensible
-    // default, so an unconfigured portal says so instead of taking a file
-    // it has nowhere to put.
-    const env = { DB: stubDb() };
-    const { body } = await call("/syndex/submit", env);
+  async "a submission can be started again from one already sent"() {
+    const previous = {
+      name: "example-grid",
+      display_name: "Example grid",
+      description: "A grid.",
+      data_type: "dust_grid",
+      licence: "CC-BY-4.0",
+      citations: ["2017PASA...34...58E", "2020MNRAS.491..944C"].join("\n"),
+      notes: "Replacing a truncated file.",
+    };
+    const { body } = await call(
+      "/syndex/submit?like=tok-1",
+      contributorEnv({ rows: { submission: previous } }),
+      SIGNED_IN,
+    );
+
+    // Everything comes back, so changing one detail does not mean retyping
+    // six -- which is how somebody is put off fixing a rejected submission.
+    assert.match(body, /value="example-grid"/);
+    assert.match(body, /<option value="dust_grid" selected/);
+    assert.match(body, /value="CC-BY-4.0"/);
+    assert.match(body, /value="2017PASA...34...58E"/);
+    assert.match(body, /value="2020MNRAS.491..944C"/);
+    // And the questions answer themselves from what was answered last time.
+    assert.match(body, /id="has_citations"[^>]*checked/);
+    assert.match(body, /id="has_licence"[^>]*checked/);
+    // A type is chosen, so the rest of the form is not hidden.
+    assert.doesNotMatch(body, /<option value="" disabled="" selected=""/);
+  },
+
+  async "one contributor cannot start again from another's submission"() {
+    // The token addresses a submission and does not authorise reading it.
+    const { body } = await call(
+      "/syndex/submit?like=somebody-elses",
+      contributorEnv({ rows: { submission: undefined } }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /<option value="" disabled="" selected=""/);
+    assert.doesNotMatch(body, /value="example-grid"/);
+  },
+
+  async "the form asks nothing until it knows what it is being told about"() {
+    const { body } = await call("/syndex/submit", contributorEnv(), SIGNED_IN);
+
+    // No type is chosen, and the placeholder is what is selected -- so the
+    // CSS that hides everything below it applies.
+    assert.match(body, /<option value="" disabled="" selected="">Select a data/);
+    assert.doesNotMatch(body, /<option value="grid" selected/);
+    assert.match(body, /class="needs-type contents"/);
+
+    // The example sits in the box as placeholder text, starting on the
+    // commonest type; submit.js swaps it when another is chosen.
+    assert.match(body, /placeholder="bpass-2p2p1-bin-chabrier03-0p1-300p0"/);
+    assert.match(body, /No spaces/);
+    // Every type's example travels with the form, so the swap needs no
+    // request and works the moment the select changes.
+    assert.match(body, /data-examples="/);
+    assert.match(body, /svo-filter-cache/);
+
+    // Citation and licence are separate questions and separate cards.
+    assert.match(body, /<legend[^>]*>Citation<\/legend>/);
+    assert.match(body, /<legend[^>]*>Licence<\/legend>/);
+  },
+
+  async "the form can describe every kind of data the catalogue holds"() {
+    // reference_data was in the catalogue and missing from this list, so
+    // there was a kind of dataset nobody could submit.
+    const { body } = await call("/syndex/submit", contributorEnv(), SIGNED_IN);
+    for (const type of [
+      "grid",
+      "dust_grid",
+      "instrument",
+      "simulation_data",
+      "generation_data",
+      "synference_data",
+      "reference_data",
+      "cache",
+      // Not a catalogue type: a submission saying "this is none of those",
+      // which beats a contributor picking whichever listed type is least
+      // wrong and a reviewer then having to work out that they did.
+      "other",
+    ]) {
+      assert.match(body, new RegExp(`<option value="${type}"`));
+    }
+  },
+
+  async "other is accepted, and does not reach syndex-upload as a type"() {
+    const accepted = await postSubmission(contributorEnv(), {
+      data_type: "other",
+    });
+    assert.equal(accepted.status, 303);
+
+    const { body } = await call(
+      "/syndex/review/1",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          submissions: [
+            {
+              ...SUBMISSION,
+              data_type: "other",
+              uploaded_at: "2026-09-14T10:00:00Z",
+              uploaded_size_bytes: 10,
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    // Publishing it as "other" would put a non-type into the catalogue, so
+    // the command asks the reviewer for one instead of offering a default.
+    assert.match(body, /--data-type CHOOSE-A-TYPE/);
+    assert.doesNotMatch(body, /--data-type other/);
+    assert.match(body, /the type is yours to choose/);
+  },
+
+  async "a contributor is told what the checker found and what was decided"() {
+    // Being told a submission was rejected and not why is the one thing worse
+    // than not being told at all.
+    const { body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}`,
+      contributorEnv({
+        rows: {
+          submission: {
+            ...SUBMISSION,
+            state: "rejected",
+            uploaded_at: "2026-09-14T10:00:00Z",
+            uploaded_size_bytes: 10,
+            reviewed_at: "2026-09-15T09:00:00Z",
+            reviewer_note: "The axes are named in the singular.",
+            validation_state: "failed",
+            validation_report_json: JSON.stringify({
+              state: "failed",
+              errors: ["the grid does not say what kind of grid it is"],
+            }),
+          },
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /Not accepted/);
+    assert.match(body, /The axes are named in the singular/);
+    assert.match(body, /does not say what kind of grid it is/);
+    // And a way to act on it rather than starting from nothing.
+    assert.match(body, /submit\?like=/);
+    // The reviewer's prompt to run the checker themselves is not for them.
+    assert.doesNotMatch(body, /Fetch the file and run/);
+  },
+
+  async "a contributor can find their way back to a submission"() {
+    // The upload page is addressed by a token that exists only in its URL, so
+    // without this list closing the tab loses a half-finished transfer.
+    const { body } = await call(
+      "/syndex/submit",
+      contributorEnv({
+        rows: {
+          submissions: [
+            {
+              ...SUBMISSION,
+              upload_token: "tok-1",
+              name: "half-sent",
+              uploaded_at: null,
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /Your submissions/);
+    assert.match(body, /href="\/syndex\/submit\/tok-1"/);
+    assert.match(body, /no file sent yet/);
+  },
+
+  async "an unconfigured portal says so rather than taking a file"() {
+    // The bucket is the only configuration left. Without it the form renders
+    // closed and the handler refuses, instead of accepting a file it has
+    // nowhere to put.
+    const env = { DB: stubDb({ rows: { viewer: USER } }) };
+    const { body } = await call("/syndex/submit", env, SIGNED_IN);
     assert.match(body, />Not open yet<\/p>/);
-    assert.match(body, /not accepting uploads yet/);
     // A closed door still has to say where to knock.
     assert.match(body, /github\.com\/synthesizer-project\/synthesizer\/issues/);
-    assert.doesNotMatch(
-      body,
-      /href="\/syndex\/submit" class="btn absolute/,
-    );
-    assert.doesNotMatch(body, /cf-turnstile/);
-
+    assert.doesNotMatch(body, /action="\/syndex\/submit"/);
     assert.equal((await postSubmission(env)).status, 503);
-    const configured = submissionEnv();
-    const configuredPage = await call("/syndex/submit", configured);
-    assert.match(configuredPage.body, />Not open yet<\/p>/);
-    assert.doesNotMatch(configuredPage.body, /<form/);
-    assert.equal((await postSubmission(configured)).status, 503);
+
+    // Configured, the form is there.
+    const open = contributorEnv();
+    const offered = await call("/syndex/submit", open, SIGNED_IN);
+    assert.match(offered.body, /action="\/syndex\/submit"/);
+    assert.doesNotMatch(offered.body, />Not open yet<\/p>/);
+    // Turnstile told a script from a person on an anonymous form. There is
+    // no anonymous form.
+    assert.doesNotMatch(offered.body, /cf-turnstile/);
+    // And it no longer asks for a name and address the account already has.
+    assert.doesNotMatch(offered.body, /name="submitter_email"/);
   },
 
   async "the upload page offers both ways up"() {
-    const env = submissionEnv({ rows: { submission: SUBMISSION } });
-    const { status, body } = await call(
+    const env = contributorEnv({ rows: { submission: SUBMISSION } });
+    const { body } = await call(
       `/syndex/submit/${SUBMISSION.upload_token}`,
       env,
+      SIGNED_IN,
     );
 
-    assert.equal(status, 200);
-    assert.match(body, /1 GB/);
-    // The picker is inert until the script reveals it, so a browser with no
-    // JavaScript is never shown a control that could not work.
-    assert.match(body, /<input type="file" id="pick" hidden/);
-    assert.match(body, /Sending a file from the browser needs JavaScript/);
-    // And the confirm form is an ordinary POST for whoever used rclone.
-    assert.match(body, /id="confirm"/);
+    assert.match(body, /From this browser/);
+    assert.match(body, /Choose file/);
+    assert.match(body, /data-part-size="94371840"/);
+    // A file that will not fit gets a warning, not a line of status text:
+    // this is the one case where the page cannot do what was asked of it.
+    assert.match(body, /id="too-large"[^>]*role="alert"/);
+    assert.match(body, /Too large to upload via the browser/);
+    // The terminal client is not written, and the page says so rather than
+    // printing a command that would fail for whoever typed it.
+    assert.match(body, /From a machine that already has the file/);
+    assert.match(body, /Work in progress/);
+    // Nothing is minted by looking at the page.
+    assert.doesNotMatch(body, /AWS_ACCESS_KEY_ID/);
+    // The digest asked a contributor to do by hand what the sizes answer.
+    assert.doesNotMatch(body, /sha256/i);
   },
 
-  async "an upload url is signed for exactly one key"() {
-    const env = submissionEnv({ rows: { submission: SUBMISSION } });
-    const { status, body } = await call(
-      `/syndex/submit/${SUBMISSION.upload_token}/upload-url`,
+  async "a part is streamed into storage and recorded by number"() {
+    const issued = [];
+    const env = contributorEnv({ rows: { submission: SUBMISSION }, issued });
+    const { status } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/part/3`,
       env,
-      {
-        method: "POST",
-        body: JSON.stringify({ filename: "../../escape/../grid.hdf5" }),
-        headers: { "content-type": "application/json" },
-      },
+      { method: "POST", body: "0123456789", headers: { cookie: SESSION_COOKIE } },
     );
 
     assert.equal(status, 200);
-    const { url, key } = JSON.parse(body);
-
-    // A filename cannot climb out of its own submission's prefix.
-    assert.equal(key, `submissions/${SUBMISSION.upload_token}/grid.hdf5`);
-    assert.doesNotMatch(key, /\.\./);
-
-    // It points at R2's own endpoint, not at this Worker, and it is signed
-    // and expiring rather than open.
-    const target = new URL(url);
-    assert.match(target.hostname, /\.r2\.cloudflarestorage\.com$/);
-    assert.equal(target.pathname, `/synthesizer-submissions/${key}`);
-    assert.equal(target.searchParams.get("X-Amz-Expires"), "3600");
-    assert.ok(target.searchParams.get("X-Amz-Signature"));
+    // The bytes reached R2 as a stream, not as something this code read.
+    assert.deepEqual(env.uploaded.parts, [{ partNumber: 3, size: 10 }]);
+    // Recorded so that re-sending the same part replaces it rather than
+    // adding a second entry for it.
+    const recorded = statement(issued, "INSERT INTO submission_parts");
+    assert.match(recorded.sql, /ON CONFLICT \(submission_id, part_number\)/);
+    assert.deepEqual(recorded.params, [SUBMISSION.submission_id, 3, "etag-3"]);
   },
 
-  async "a submission that already has its file is not given another url"() {
-    const env = submissionEnv({
+  async "the ceiling is a part count, which a client cannot misreport"() {
+    const env = contributorEnv({ rows: { submission: SUBMISSION } });
+    const { status, body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/part/401`,
+      env,
+      { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } },
+    );
+
+    assert.equal(status, 413);
+    assert.match(body, /at most 400 parts/);
+    assert.deepEqual(env.uploaded.parts, []);
+  },
+
+  async "a submission that already has its file takes no more parts"() {
+    const env = contributorEnv({
       rows: {
-        submission: { ...SUBMISSION, uploaded_at: "2026-09-07T11:00:00Z" },
+        submission: {
+          ...SUBMISSION,
+          uploaded_at: "2026-09-14T10:00:00Z",
+        },
       },
     });
     const { status } = await call(
-      `/syndex/submit/${SUBMISSION.upload_token}/upload-url`,
+      `/syndex/submit/${SUBMISSION.upload_token}/part/1`,
       env,
-      { method: "POST", body: "{}", headers: { "content-type": "application/json" } },
+      { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } },
     );
 
     assert.equal(status, 409);
+    assert.deepEqual(env.uploaded.parts, []);
   },
 
-  async "completion believes the bucket, not the browser"() {
-    const key = `submissions/${SUBMISSION.upload_token}/grid.hdf5`;
-    const env = submissionEnv({
-      rows: { submission: SUBMISSION },
-      objects: [{ key, size: 4096 }],
+  async "one submission belongs to one account"() {
+    // The token addresses a submission; it does not authorise it. Someone
+    // else's token is not a way into their upload.
+    const env = contributorEnv({
+      rows: { submission: { ...SUBMISSION, user_id: 99 } },
     });
+
+    assert.equal(
+      (await call(`/syndex/submit/${SUBMISSION.upload_token}`, env, SIGNED_IN))
+        .status,
+      404,
+    );
+    assert.equal(
+      (
+        await call(`/syndex/submit/${SUBMISSION.upload_token}/part/1`, env, {
+          method: "POST",
+          body: "x",
+          headers: { cookie: SESSION_COOKIE },
+        })
+      ).status,
+      404,
+    );
+
+    // A reviewer may open anybody's, since reading them is the job.
+    const reviewer = contributorEnv({
+      rows: {
+        viewer: { ...USER, role: "reviewer" },
+        submission: { ...SUBMISSION, user_id: 99 },
+      },
+    });
+    assert.equal(
+      (
+        await call(
+          `/syndex/submit/${SUBMISSION.upload_token}`,
+          reviewer,
+          SIGNED_IN,
+        )
+      ).status,
+      200,
+    );
+  },
+
+  async "completion assembles the parts and believes the bucket"() {
     const issued = [];
-    env.DB = stubDb({ rows: { submission: SUBMISSION }, issued });
+    const key = `submissions/${SUBMISSION.upload_token}/example-grid`;
+    const env = contributorEnv({
+      rows: {
+        submission: SUBMISSION,
+        parts: [
+          { part_number: 1, etag: "etag-1" },
+          { part_number: 2, etag: "etag-2" },
+        ],
+      },
+      objects: [{ key, size: 4096 }],
+      issued,
+    });
 
     const { status, headers } = await call(
       `/syndex/submit/${SUBMISSION.upload_token}/complete`,
       env,
-      {
-        method: "POST",
-        body: new URLSearchParams({ declared_sha256: "a".repeat(64) }),
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-      },
+      signedInPost({ expected_size: "4096" }),
     );
 
     assert.equal(status, 303);
-    assert.match(headers.get("location"), /\/syndex\/submit\//);
+    assert.equal(
+      headers.get("location"),
+      `/syndex/submit/${SUBMISSION.upload_token}`,
+    );
+    assert.deepEqual(env.uploaded.completed, [
+      { partNumber: 1, etag: "etag-1" },
+      { partNumber: 2, etag: "etag-2" },
+    ]);
 
-    // The size and filename recorded are R2's, and the digest is only kept
-    // when it is one.
-    const update = statement(issued, "UPDATE submissions");
+    // The size is what R2 says, not what anything else claimed.
+    const update = statement(issued, "SET uploaded_at");
     assert.equal(update.params[1], 4096);
-    assert.equal(update.params[2], "grid.hdf5");
-    assert.equal(update.params[3], key);
-    assert.equal(update.params[4], "a".repeat(64));
+    assert.equal(update.params[2], key);
   },
 
-  async "a digest that is not one is not recorded"() {
-    const key = `submissions/${SUBMISSION.upload_token}/grid.hdf5`;
+  async "a transfer that stopped part way is not marked as complete"() {
     const issued = [];
-    const env = submissionEnv({ objects: [{ key, size: 10 }] });
-    env.DB = stubDb({ rows: { submission: SUBMISSION }, issued });
-
-    await call(`/syndex/submit/${SUBMISSION.upload_token}/complete`, env, {
-      method: "POST",
-      body: new URLSearchParams({ declared_sha256: "not-a-digest" }),
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+    const key = `submissions/${SUBMISSION.upload_token}/example-grid`;
+    const env = contributorEnv({
+      rows: { submission: SUBMISSION, parts: [{ part_number: 1, etag: "e" }] },
+      objects: [{ key, size: 1024 }],
+      issued,
     });
 
-    assert.equal(statement(issued, "UPDATE submissions").params[4], null);
-  },
-
-  async "an upload that never arrived says so"() {
-    const env = submissionEnv({ rows: { submission: SUBMISSION }, objects: [] });
     const { status, body } = await call(
       `/syndex/submit/${SUBMISSION.upload_token}/complete`,
       env,
-      { method: "POST", body: "", headers: { "content-type": "application/x-www-form-urlencoded" } },
+      // The browser knows what it set out to send; the bucket knows what it
+      // holds. A mismatch is the one failure a transfer this long has.
+      signedInPost({ expected_size: "8192" }),
+    );
+
+    assert.equal(status, 409);
+    assert.match(body, /1 kB arrived, out of 8.2 kB/);
+    assert.throws(() => statement(issued, "SET uploaded_at"));
+  },
+
+  async "an upload that never arrived says so"() {
+    const env = contributorEnv({
+      rows: { submission: { ...SUBMISSION, filename: "example-grid.hdf5" } },
+      objects: [],
+    });
+    const { status, body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/complete`,
+      env,
+      signedInPost({}),
     );
 
     assert.equal(status, 404);
@@ -1281,57 +1629,963 @@ const tests = {
   },
 
   async "an unknown token is not a way to browse the queue"() {
-    const env = submissionEnv({ rows: { submission: undefined } });
-    assert.equal((await call("/syndex/submit/nope", env)).status, 404);
-    assert.equal(
-      (
-        await call("/syndex/submit/nope/upload-url", env, {
-          method: "POST",
-          body: "{}",
-          headers: { "content-type": "application/json" },
-        })
-      ).status,
-      404,
-    );
+    const env = contributorEnv({ rows: { submission: undefined } });
+    const { status, body } = await call("/syndex/submit/nope", env, SIGNED_IN);
+
+    assert.equal(status, 404);
+    assert.doesNotMatch(body, /example-grid/);
   },
 
-  async "the review queue is closed until it is configured"() {
-    const unconfigured = { DB: stubDb() };
-    assert.equal((await call("/syndex/review", unconfigured)).status, 503);
+  async "the form refuses what the catalogue could not store"() {
+    const env = contributorEnv();
 
-    const configured = {
-      DB: stubDb(),
-      SYNDEX_REVIEW_USER: "reviewer",
-      SYNDEX_REVIEW_PASSWORD: "secret",
-    };
-    const challenged = await call("/syndex/review", configured);
-    assert.equal(challenged.status, 401);
-    assert.match(challenged.headers.get("www-authenticate"), /Basic/);
+    const badName = await postSubmission(env, { name: "Not A Name" });
+    assert.equal(badName.status, 400);
+    assert.match(badName.body, /lowercase letters, digits and hyphens/);
 
-    const authorised = await call("/syndex/review", configured, {
-      headers: { authorization: `Basic ${btoa("reviewer:secret")}` },
+    const badType = await postSubmission(env, { data_type: "nonsense" });
+    assert.equal(badType.status, 400);
+    assert.match(badType.body, /one of the listed data types/);
+
+    const badBibcode = await postSubmission(env, {
+      has_citations: "yes",
+      citation: "not-a-bibcode",
     });
-    assert.equal(authorised.status, 200);
-    assert.match(authorised.body, /Nothing is waiting/);
+    assert.equal(badBibcode.status, 400);
+    assert.match(badBibcode.body, /Not an ADS bibcode/);
+
+    // Saying yes and then giving nothing is a question half answered.
+    const empty = await postSubmission(env, { has_citations: "yes" });
+    assert.equal(empty.status, 400);
+    assert.match(empty.body, /at least one bibcode/);
+
+    // A real one is accepted, which is what stops the check being a nuisance.
+    const good = await postSubmission(env, {
+      has_citations: "yes",
+      citation: "2017PASA...34...58E",
+    });
+    assert.equal(good.status, 303);
   },
 
-  async "reviewing records a decision and does not publish anything"() {
-    const env = {
-      DB: stubDb(),
-      SYNDEX_REVIEW_USER: "reviewer",
-      SYNDEX_REVIEW_PASSWORD: "secret",
-    };
-    const { status, body } = await call("/syndex/review/7", env, {
+  async "a question unticked is the answer, whatever the hidden boxes hold"() {
+    const issued = [];
+    const env = contributorEnv({ issued });
+
+    // A hidden field still submits. Somebody who fills a box and then unticks
+    // the question has changed their mind, and the tick is what to honour --
+    // so this must be accepted rather than refused for a bad bibcode, and
+    // must store neither the bibcode nor the licence.
+    const { status } = await call(
+      "/syndex/submit",
+      env,
+      signedInPost({
+        name: "example-grid",
+        display_name: "Example grid",
+        data_type: "grid",
+        citation: "not-a-bibcode",
+        licence: "whatever",
+      }),
+    );
+
+    assert.equal(status, 303);
+    const insert = statement(issued, "INSERT INTO submissions");
+    assert.ok(!insert.params.includes("not-a-bibcode"));
+    assert.ok(!insert.params.includes("whatever"));
+  },
+
+  async "several citation rows arrive as several citations"() {
+    const issued = [];
+    const env = contributorEnv({ issued });
+    const body = new URLSearchParams([
+      ["name", "example-grid"],
+      ["display_name", "Example grid"],
+      ["data_type", "grid"],
+      ["has_citations", "yes"],
+      // Repeated, which is how the form sends one box per reference.
+      ["citation", "2017PASA...34...58E"],
+      ["citation", "2020MNRAS.491..944C"],
+      ["citation", ""],
+    ]);
+    const { status } = await call("/syndex/submit", env, {
       method: "POST",
-      body: new URLSearchParams({ decision: "approved", reviewer_note: "Fine" }),
+      body,
       headers: {
-        authorization: `Basic ${btoa("reviewer:secret")}`,
+        cookie: SESSION_COOKIE,
         "content-type": "application/x-www-form-urlencoded",
       },
     });
 
+    assert.equal(status, 303);
+    // Empty rows are not citations, and the rest are stored one per line.
+    const insert = statement(issued, "INSERT INTO submissions");
+    assert.ok(
+      insert.params.includes("2017PASA...34...58E\n2020MNRAS.491..944C"),
+    );
+  },
+
+  async "a name already in the catalogue is refused before any bytes are sent"() {
+    const { status, body } = await postSubmission(
+      contributorEnv({ rows: { published: [{ 1: 1 }] } }),
+    );
+
+    assert.equal(status, 400);
+    assert.match(body, /already in the catalogue/);
+  },
+
+  async "somebody else's pending name is refused, your own is not"() {
+    const theirs = await postSubmission(
+      contributorEnv({
+        rows: {
+          waiting: [{ submission_id: 5, upload_token: "tok-5", user_id: 99 }],
+        },
+      }),
+    );
+    assert.equal(theirs.status, 400);
+    assert.match(theirs.body, /Somebody else is already submitting/);
+
+    // Your own is the same person submitting the same dataset again, which is
+    // what resubmitting is. It updates the row rather than refusing, so an
+    // abandoned registration cannot block the thing it was created for.
+    const issued = [];
+    const ours = await postSubmission(
+      contributorEnv({
+        rows: {
+          waiting: [
+            { submission_id: 5, upload_token: "tok-5", user_id: USER.user_id },
+          ],
+        },
+        issued,
+      }),
+      { display_name: "A better name" },
+    );
+
+    assert.equal(ours.status, 303);
+    assert.equal(ours.headers.get("location"), "/syndex/submit/tok-5");
+    // Brought up to date rather than duplicated: no second row, and the token
+    // and whatever file it already has are kept.
+    assert.throws(() => statement(issued, "INSERT INTO submissions"));
+    const update = statement(issued, "UPDATE submissions\n       SET display_name");
+    assert.equal(update.params[0], "A better name");
+  },
+
+  async "one account may not fill the queue on its own"() {
+    const mine = contributorEnv({ rows: { queue: { mine: 10, everyone: 10 } } });
+    const refused = await postSubmission(mine);
+    assert.equal(refused.status, 400);
+    assert.match(refused.body, /most one account may have at a time/);
+
+    const everyone = contributorEnv({ rows: { queue: { mine: 0, everyone: 50 } } });
+    const full = await postSubmission(everyone);
+    assert.equal(full.status, 400);
+    assert.match(full.body, /review queue is full/);
+  },
+
+  async "a registered submission fixes its own key"() {
+    const issued = [];
+    const env = contributorEnv({ issued });
+    await postSubmission(env, { name: "example-grid" });
+
+    // The key comes from the catalogue name, decided before a byte is
+    // accepted, so one submission is one object whatever a later request says
+    // the file is called.
+    const insert = statement(issued, "INSERT INTO submissions");
+    assert.ok(insert.params.includes("example-grid"));
+    // And it is owned, which is what makes the per-account cap mean anything.
+    assert.equal(insert.params.at(-1), USER.user_id);
+  },
+
+  async "the review queue needs a reviewer, not a shared password"() {
+    // Nobody signed in: offered the sign-in rather than a 404, since that is
+    // the step they are missing.
+    const anonymous = await call("/syndex/review", { DB: stubDb() });
+    assert.equal(anonymous.status, 401);
+    assert.match(anonymous.body, /Sign in/);
+
+    // Signed in, but without the role. Refused, and told what it would take.
+    const contributor = await call("/syndex/review", {
+      DB: stubDb({ rows: { viewer: USER } }),
+    }, SIGNED_IN);
+    assert.equal(contributor.status, 403);
+    assert.match(contributor.body, /for reviewers, and your account is a/);
+
+    const reviewer = await call("/syndex/review", {
+      DB: stubDb({ rows: { viewer: { ...USER, role: "reviewer" } } }),
+    }, SIGNED_IN);
+    assert.equal(reviewer.status, 200);
+    assert.match(reviewer.body, /Nothing waiting to be read/);
+    // An empty queue shows nothing but that it is empty: the access section
+    // and the decided list are only there when they hold something.
+    assert.doesNotMatch(reviewer.body, /Waiting for access/);
+    assert.doesNotMatch(reviewer.body, /Already decided/);
+  },
+
+  async "the queue summarises, and the deciding happens on its own page"() {
+    const { body } = await call(
+      "/syndex/review",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          submissions: [
+            {
+              ...SUBMISSION,
+              submission_id: 1,
+              uploaded_at: "2026-09-14T10:00:00Z",
+              uploaded_size_bytes: 6969264,
+            },
+          ],
+          decided: [
+            {
+              submission_id: 2,
+              name: "older-grid",
+              state: "rejected",
+              reviewed_at: "2026-09-13T10:00:00Z",
+            },
+          ],
+          approvedCount: 3,
+          rejectedCount: 1,
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    // A card per waiting submission, carrying what decides whether to open it.
+    assert.match(body, /Waiting to be read \(1\)/);
+    assert.match(body, /href="\/syndex\/review\/1"/);
+    assert.match(body, />grid</);
+    assert.match(body, />7 MB</);
+    assert.match(body, /A Contributor/);
+
+    // And nothing that belongs on the submission's own page.
+    assert.doesNotMatch(body, /Approve/);
+    assert.doesNotMatch(body, /wrangler r2 object get/);
+
+    // One card for everything settled. What happens to a submission is the
+    // useful summary; how many have been looked at is not.
+    assert.match(body, /Past submissions/);
+    assert.match(body, />3<\/span><span class="label-caps">approved/);
+    assert.match(body, />1<\/span><span class="label-caps">rejected/);
+    assert.match(body, /older-grid/);
+    assert.match(body, /href="\/syndex\/review\/previous"/);
+  },
+
+  async "a submission is decided on a page of its own"() {
+    const env = submissionEnv({
+      rows: {
+        viewer: { ...USER, role: "reviewer" },
+        submissions: [
+          {
+            ...SUBMISSION,
+            uploaded_at: "2026-09-14T10:00:00Z",
+            uploaded_size_bytes: 6969264,
+          },
+        ],
+      },
+    });
+    const { status, body } = await call("/syndex/review/1", env, SIGNED_IN);
+
+    assert.equal(status, 200);
+    // Everything the card left out.
+    assert.match(body, /Approve/);
+    assert.match(body, /Reject/);
+    assert.match(body, /wrangler r2 object get/);
+    assert.match(body, /not declared/);
+    assert.match(body, /Back to the queue/);
+  },
+
+  async "the checker's verdict reaches the reviewer"() {
+    const report = {
+      state: "failed",
+      data_type: "grid",
+      reason: "axes plus spectra, but nothing identifying which kind of grid",
+      format: "hdf5",
+      errors: ["the grid does not say what kind of grid it is"],
+      warnings: ["axis 'age' is singular"],
+      detected: { grid_type: null, axes: [{ name: "age", count: 2 }] },
+    };
+    const { body } = await call(
+      "/syndex/review/1",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          submissions: [
+            {
+              ...SUBMISSION,
+              uploaded_at: "2026-09-14T10:00:00Z",
+              uploaded_size_bytes: 10,
+              validation_state: "failed",
+              validation_report_json: JSON.stringify(report),
+              detected_data_type: "grid",
+              sha256: "b".repeat(64),
+              validated_at: "2026-09-14T10:02:00Z",
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    // The error is the reason a submission gets sent back, so it is in the
+    // open rather than behind something to expand.
+    assert.match(body, /does not say what kind of grid it is/);
+    assert.match(body, /checks failed/);
+    assert.match(body, /1 warning/);
+    assert.match(body, /b{64}/);
+  },
+
+  async "bytes already in the catalogue are said so before anything else"() {
+    const { body } = await call(
+      "/syndex/review/1",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          submissions: [
+            {
+              ...SUBMISSION,
+              uploaded_at: "2026-09-14T10:00:00Z",
+              sha256: "c".repeat(64),
+            },
+          ],
+          publishedTwin: [{ name: "bpass-2p2p1-bin-chabrier03-0p1-300p0" }],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /same bytes as/);
+    assert.match(body, /bpass-2p2p1-bin-chabrier03-0p1-300p0/);
+    assert.match(body, /already in the catalogue/);
+  },
+
+  async "a verdict is only taken from the runner that was asked"() {
+    const env = submissionEnv({ rows: {} });
+    env.SYNDEX_REPORT_SECRET = "a-shared-secret";
+
+    const unsigned = await call("/syndex/validate/1", env, {
+      method: "POST",
+      body: JSON.stringify({ state: "passed" }),
+      headers: { "content-type": "application/json" },
+    });
+    assert.equal(unsigned.status, 403);
+
+    const wrong = await call("/syndex/validate/1", env, {
+      method: "POST",
+      body: JSON.stringify({ state: "passed" }),
+      headers: {
+        authorization: "Bearer not-the-secret",
+        "content-type": "application/json",
+      },
+    });
+    assert.equal(wrong.status, 403);
+  },
+
+  async "a report of an unexpected shape is read as a failure"() {
+    const issued = [];
+    const env = submissionEnv({ rows: { roleChange: { submission_id: 1 } }, issued });
+    env.SYNDEX_REPORT_SECRET = "a-shared-secret";
+
+    // The runner installs a version of the checker this Worker did not, so a
+    // state it does not recognise has to mean "a person should look", never
+    // "let it through".
+    await call("/syndex/validate/1", env, {
+      method: "POST",
+      body: JSON.stringify({ state: "brilliant", sha256: "not-a-digest" }),
+      headers: {
+        authorization: "Bearer a-shared-secret",
+        "content-type": "application/json",
+      },
+    });
+
+    const update = statement(issued, "SET validation_state");
+    assert.equal(update.params[0], "failed");
+    assert.equal(update.params[3], null);
+  },
+
+  async "a submission that is not there says so"() {
+    const { status } = await call(
+      "/syndex/review/999",
+      submissionEnv({
+        rows: { viewer: { ...USER, role: "reviewer" }, submissions: [] },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.equal(status, 404);
+  },
+
+  async "the waiting badge counts after the decision, not before it"() {
+    const issued = [];
+    await call(
+      "/syndex/review/7",
+      submissionEnv({
+        rows: { viewer: { ...USER, role: "reviewer" } },
+        issued,
+      }),
+      signedInPost({ decision: "approved" }),
+    );
+
+    // The count used to be taken when the request arrived, so a queue
+    // rendered back after a decision still included the thing just decided
+    // and the badge kept its number until the page was reloaded by hand.
+    const decided = issued.findIndex((one) => one.sql.includes("UPDATE submissions"));
+    const counted = issued.findIndex((one) => one.sql.includes("AS waiting"));
+    assert.ok(decided !== -1, "the decision was written");
+    assert.ok(counted !== -1, "the badge was counted");
+    assert.ok(counted > decided, "counted after the write, not before it");
+  },
+
+  async "an issue says where to act and who it will work for"() {
+    // The issue is read by everyone who can see the repository, which is a
+    // wider group than the people who can act on it.
+    const { notifySubmission } = await import("../src/portal/notify.js");
+    const sent = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push(JSON.parse(init.body));
+      return Response.json({}, { status: 201 });
+    };
+    try {
+      await notifySubmission(
+        { GITHUB_ISSUE_REPO: "o/r", GITHUB_ISSUE_TOKEN: "t" },
+        "https://synthesizer-project.org",
+        { ...SUBMISSION, uploaded_size_bytes: 10 },
+      );
+    } finally {
+      globalThis.fetch = real;
+    }
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].body, /https:\/\/synthesizer-project\.org\/syndex\/review/);
+    assert.match(sent[0].body, /needs the reviewer role/);
+    // An address given to a reviewer is not for a repository's readers.
+    assert.doesNotMatch(sent[0].body, /@example\.org/);
+  },
+
+  async "reviewing records a decision and does not publish anything"() {
+    const { status, body } = await call("/syndex/review/7", {
+      DB: stubDb({ rows: { viewer: { ...USER, role: "reviewer" } } }),
+    }, signedInPost({ decision: "approved", reviewer_note: "Fine" }));
+
     assert.equal(status, 200);
     assert.match(body, /marked approved/);
+  },
+
+  async "a signed-in page is never cached by anything shared"() {
+    const anonymous = await call("/syndex/search", { DB: stubDb() });
+    assert.equal(anonymous.headers.get("cache-control"), "public, max-age=60");
+
+    const signedIn = await call("/syndex/search", {
+      DB: stubDb({ rows: { viewer: USER } }),
+    }, SIGNED_IN);
+    assert.equal(signedIn.headers.get("cache-control"), "private, no-store");
+  },
+
+  async "the header offers what the reader can actually do"() {
+    const anonymous = (await call("/syndex/search", { DB: stubDb() })).body;
+    assert.match(anonymous, /Sign in/);
+    assert.doesNotMatch(anonymous, /Sign out/);
+    assert.doesNotMatch(anonymous, /href="\/syndex\/review"/);
+
+    const contributor = (
+      await call("/syndex/search", {
+        DB: stubDb({ rows: { viewer: USER } }),
+      }, SIGNED_IN)
+    ).body;
+    assert.match(contributor, /Sign out/);
+    assert.doesNotMatch(contributor, /href="\/syndex\/review"/);
+
+    const reviewer = (
+      await call("/syndex/search", {
+        DB: stubDb({ rows: { viewer: { ...USER, role: "reviewer" }, waiting: 4 } }),
+      }, SIGNED_IN)
+    ).body;
+    assert.match(reviewer, /href="\/syndex\/review"/);
+    // The badge says how much is waiting, so it is seen without going looking.
+    assert.match(reviewer, />4</);
+  },
+
+  async "submitting needs access, and a pending account is told where to ask"() {
+    const anonymous = await call("/syndex/submit", { DB: stubDb() });
+    assert.equal(anonymous.status, 401);
+
+    const pending = await call("/syndex/submit", {
+      DB: stubDb({ rows: { viewer: { ...USER, role: "pending" } } }),
+    }, SIGNED_IN);
+    assert.equal(pending.status, 303);
+    assert.equal(pending.headers.get("location"), "/syndex/access");
+
+    const contributor = await call("/syndex/submit", {
+      DB: stubDb({ rows: { viewer: USER } }),
+    }, SIGNED_IN);
+    assert.equal(contributor.status, 200);
+  },
+
+  async "an access request is recorded once and reported"() {
+    const issued = [];
+    const { status, body } = await call("/syndex/access", {
+      DB: stubDb({
+        rows: { viewer: { ...USER, role: "pending" }, roleChange: { user_id: 3 } },
+        issued,
+      }),
+    }, signedInPost({ note: "A BPASS grid at higher resolution." }));
+
+    assert.equal(status, 200);
+    assert.match(body, /Request sent/);
+    // Only while still pending: an account that has since been granted access
+    // does not rejoin the queue by asking again.
+    const update = statement(issued, "SET access_requested_at");
+    assert.match(update.sql, /role = 'pending'/);
+    assert.deepEqual(update.params.slice(1), [
+      "A BPASS grid at higher resolution.",
+      3,
+    ]);
+  },
+
+  async "an empty access request is refused"() {
+    const { status, body } = await call("/syndex/access", {
+      DB: stubDb({ rows: { viewer: { ...USER, role: "pending" } } }),
+    }, signedInPost({ note: "   " }));
+
+    assert.equal(status, 400);
+    assert.match(body, /say what you would like to contribute/);
+  },
+
+  async "signing in refuses a callback whose state does not match"() {
+    const env = {
+      DB: stubDb(),
+      GITHUB_CLIENT_ID: "id",
+      GITHUB_CLIENT_SECRET: "secret",
+    };
+
+    // No state cookie at all: nothing to have started this flow.
+    const unsolicited = await call("/syndex/auth/callback?code=x&state=y", env);
+    assert.equal(unsolicited.status, 400);
+
+    // A cookie for a different nonce than the one echoed back.
+    const mismatched = await call("/syndex/auth/callback?code=x&state=y", env, {
+      headers: { cookie: "syndex_oauth=other:/syndex" },
+    });
+    assert.equal(mismatched.status, 400);
+  },
+
+  async "signing in sends the visitor to GitHub and back to where they were"() {
+    const { status, headers } = await call(
+      "/syndex/login?return=%2Fsyndex%2Fsearch%3Ftype%3Dgrid",
+      { DB: stubDb(), GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret" },
+    );
+
+    assert.equal(status, 302);
+    const target = new URL(headers.get("location"));
+    assert.equal(target.origin + target.pathname, "https://github.com/login/oauth/authorize");
+    assert.equal(target.searchParams.get("client_id"), "id");
+    assert.equal(
+      target.searchParams.get("redirect_uri"),
+      "https://synthesizer-project.org/syndex/auth/callback",
+    );
+    // The destination rides in the cookie, not in a parameter the caller of
+    // the callback could rewrite.
+    const cookie = headers.get("set-cookie");
+    assert.match(cookie, /syndex_oauth=[0-9a-f]{64}%3A%2Fsyndex%2Fsearch%3Ftype%3Dgrid/);
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Lax/);
+  },
+
+  async "a return path outside the portal is refused"() {
+    const { headers } = await call(
+      "/syndex/login?return=https%3A%2F%2Fexample.com%2Fphish",
+      { DB: stubDb(), GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret" },
+    );
+    assert.match(headers.get("set-cookie"), /syndex_oauth=[0-9a-f]{64}%3A%2Fsyndex;/);
+
+    const schemeRelative = await call("/syndex/login?return=%2F%2Fexample.com", {
+      DB: stubDb(),
+      GITHUB_CLIENT_ID: "id",
+      GITHUB_CLIENT_SECRET: "secret",
+    });
+    assert.match(
+      schemeRelative.headers.get("set-cookie"),
+      /syndex_oauth=[0-9a-f]{64}%3A%2Fsyndex;/,
+    );
+  },
+
+  async "signing in is unavailable rather than broken when unconfigured"() {
+    const { status } = await call("/syndex/login", { DB: stubDb() });
+    assert.equal(status, 503);
+  },
+
+  async "an access request is answered from an overlay, not a buried form"() {
+    const person = {
+      user_id: 9,
+      login: "someone",
+      name: "Someone",
+      role: "pending",
+      created_at: "2026-09-01T00:00:00Z",
+      last_seen_at: "2026-09-13T00:00:00Z",
+      access_requested_at: "2026-09-13T00:00:00Z",
+      access_request_note: "A BPASS grid at higher resolution.",
+    };
+    const { body } = await call(
+      "/syndex/review",
+      submissionEnv({
+        rows: { viewer: { ...USER, role: "admin" }, people: [person] },
+      }),
+      SIGNED_IN,
+    );
+
+    // The row carries who and when; a Respond button opens the rest.
+    assert.match(body, /popovertarget="request-9"/);
+    assert.match(body, /popover="auto"/);
+    // The overlay has to centre, which Tailwind's reset breaks without m-auto.
+    assert.match(body, /popover="auto" class="card m-auto/);
+    // What they wrote is what the decision turns on, so it sits next to the
+    // control that decides rather than in the row.
+    assert.match(body, /A BPASS grid at higher resolution/);
+    assert.match(body, /name="from" value="review"/);
+  },
+
+  async "the account list stops at ten and continues on its own page"() {
+    const many = Array.from({ length: 12 }, (_, index) => ({
+      user_id: index + 10,
+      login: `person-${index}`,
+      name: null,
+      role: "contributor",
+      created_at: "2026-09-01T00:00:00Z",
+      last_seen_at: "2026-09-01T00:00:00Z",
+      access_requested_at: null,
+      access_request_note: null,
+    }));
+    const { body } = await call(
+      "/syndex/review",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "admin" },
+          people: many,
+          accountCount: 12,
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /person-9/);
+    // Eleven rows are fetched so that "is there more" is answerable; ten show.
+    assert.doesNotMatch(body, /person-10/);
+    assert.match(body, /All 12 accounts/);
+  },
+
+  async "the account list is not a thing any signed-in user can read"() {
+    const contributor = await call(
+      "/syndex/accounts",
+      submissionEnv({ rows: { viewer: USER } }),
+      SIGNED_IN,
+    );
+    assert.equal(contributor.status, 403);
+
+    const reviewer = await call(
+      "/syndex/accounts",
+      submissionEnv({
+        rows: { viewer: { ...USER, role: "reviewer" }, people: [] },
+      }),
+      SIGNED_IN,
+    );
+    assert.equal(reviewer.status, 200);
+  },
+
+  async "an admin is offered the accounts page without being prompted"() {
+    const header = (role) =>
+      call(
+        "/syndex/review",
+        submissionEnv({ rows: { viewer: { ...USER, role } } }),
+        SIGNED_IN,
+      ).then(({ body }) => body);
+
+    // Granting a role is something an admin does unprompted, so it cannot
+    // depend on somebody having filed a request first.
+    assert.match(await header("admin"), /href="\/syndex\/accounts"[^>]*>Admin/);
+    // A reviewer reaches the same page from the queue rather than the header.
+    assert.doesNotMatch(await header("reviewer"), />Admin</);
+    assert.doesNotMatch(await header("contributor"), /href="\/syndex\/accounts"/);
+  },
+
+  async "the accounts page leads with who has no role yet"() {
+    const { body } = await call(
+      "/syndex/accounts",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "admin" },
+          people: [
+            {
+              user_id: 9,
+              login: "just-signed-in",
+              name: null,
+              role: "pending",
+              created_at: "2026-09-14T00:00:00Z",
+              last_seen_at: "2026-09-14T00:00:00Z",
+              access_requested_at: null,
+              access_request_note: null,
+            },
+            {
+              user_id: 10,
+              login: "a-contributor",
+              name: null,
+              role: "contributor",
+              created_at: "2026-09-01T00:00:00Z",
+              last_seen_at: "2026-09-10T00:00:00Z",
+              access_requested_at: null,
+              access_request_note: null,
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    // Somebody who signed in and asked for nothing appears nowhere else in
+    // the portal, and is exactly who this page exists to find.
+    assert.match(body, /just-signed-in/);
+    assert.ok(body.indexOf("just-signed-in") < body.indexOf("a-contributor"));
+    assert.match(body, /2 accounts/);
+    assert.match(body, /1 pending/);
+    assert.match(body, /1 contributor/);
+  },
+
+  async "only an admin may grant the roles that publish"() {
+    const asReviewer = (rows, role) =>
+      call(
+        "/syndex/review/users/9",
+        submissionEnv({
+          rows: { viewer: { ...USER, role: "reviewer" }, ...rows },
+        }),
+        signedInPost({ role }),
+      );
+
+    // The role being granted has to be within the reviewer's gift.
+    const tooHigh = await asReviewer(
+      { target: { user_id: 9, login: "someone", role: "contributor" } },
+      "admin",
+    );
+    assert.match(tooHigh.body, /cannot grant the admin role/);
+
+    // And so does the role the account already holds -- otherwise a reviewer
+    // could set an admin to contributor and strip authority they could not
+    // themselves confer.
+    const tooSenior = await asReviewer(
+      { target: { user_id: 9, login: "someone", role: "admin" } },
+      "contributor",
+    );
+    assert.match(tooSenior.body, /Only an admin can change a admin/);
+
+    const granted = await asReviewer(
+      { target: { user_id: 9, login: "someone", role: "pending" } },
+      "contributor",
+    );
+    assert.match(granted.body, /someone is now a contributor/);
+  },
+
+  async "revoking ends every session as well as the role"() {
+    const issued = [];
+    const { body } = await call(
+      "/syndex/review/users/9/revoke",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "admin" },
+          target: { user_id: 9, login: "someone", role: "reviewer" },
+        },
+        issued,
+      }),
+      signedInPost({ from: "accounts" }),
+    );
+
+    assert.match(body, /someone has been signed out and left with no role/);
+    // Either half alone leaves something behind: a role with no session is an
+    // account that signs straight back in with what it had, and a session
+    // with no role is a key to a door that has been locked.
+    assert.match(statement(issued, "UPDATE users").sql, /role = 'pending'/);
+    assert.deepEqual(statement(issued, "DELETE FROM sessions").params, [9]);
+  },
+
+  async "revoking obeys the same limits as granting"() {
+    // A reviewer may not strip an admin, for the same reason they may not
+    // make one.
+    const tooSenior = await call(
+      "/syndex/review/users/9/revoke",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          target: { user_id: 9, login: "someone", role: "admin" },
+        },
+      }),
+      signedInPost({ from: "accounts" }),
+    );
+    assert.match(tooSenior.body, /Only an admin can change a admin/);
+
+    const self = await call(
+      `/syndex/review/users/${USER.user_id}/revoke`,
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "admin" },
+          target: { user_id: USER.user_id, login: USER.login, role: "admin" },
+        },
+      }),
+      signedInPost({ from: "accounts" }),
+    );
+    assert.match(self.body, /cannot change your own role/);
+  },
+
+  async "nobody may change their own role"() {
+    const { body } = await call(
+      `/syndex/review/users/${USER.user_id}`,
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "admin" },
+          target: { user_id: USER.user_id, login: USER.login, role: "admin" },
+        },
+      }),
+      signedInPost({ role: "pending" }),
+    );
+    assert.match(body, /cannot change your own role/);
+  },
+
+  async "an anonymous part upload is refused, not an error"() {
+    // The token addresses a submission and does not authorise one, so a part
+    // posted with no session has to be refused rather than reaching code that
+    // assumes somebody is signed in.
+    const { status } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/part/1`,
+      submissionEnv(),
+      { method: "POST", body: "x" },
+    );
+
+    assert.equal(status, 401);
+  },
+
+  async "starting a transfer again abandons what was half sent"() {
+    // Choosing a different file after a failed attempt would otherwise leave
+    // the first file's higher-numbered parts in place, and assemble the two
+    // into an object that is neither.
+    const env = contributorEnv({
+      rows: { submission: { ...SUBMISSION, upload_id: "upload-0" } },
+    });
+    await call(`/syndex/submit/${SUBMISSION.upload_token}/part/1`, env, {
+      method: "POST",
+      body: "x",
+      headers: { cookie: SESSION_COOKIE },
+    });
+
+    assert.equal(env.uploaded.aborted, true);
+    // And the part still lands, in a fresh upload.
+    assert.equal(env.uploaded.created, 1);
+    assert.deepEqual(env.uploaded.parts, [{ partNumber: 1, size: 1 }]);
+  },
+
+  async "a later part joins the upload already in progress"() {
+    const env = contributorEnv({
+      rows: { submission: { ...SUBMISSION, upload_id: "upload-0" } },
+    });
+    await call(`/syndex/submit/${SUBMISSION.upload_token}/part/2`, env, {
+      method: "POST",
+      body: "xy",
+      headers: { cookie: SESSION_COOKIE },
+    });
+
+    assert.equal(env.uploaded.aborted, false);
+    assert.equal(env.uploaded.created, 0);
+  },
+
+  async "a table that cannot wrap scrolls instead of widening the page"() {
+    // Both tables on a dataset page have cells that do not wrap, so either
+    // one without a scroller sets the width of the page and pushes everything
+    // else off the side of a phone.
+    const { body } = await call(
+      "/syndex/datasets/bpass",
+      {
+        DB: stubDb({
+          rows: {
+            datasets: [
+              {
+                ...GRID_ROW,
+                dataset_id: 1,
+                description: "A grid.",
+                metadata_json: "{}",
+                provenance_json: "{}",
+              },
+            ],
+            releases: [
+              {
+                release_id: 2,
+                published_at: "2026-09-04T16:47:01Z",
+                size_bytes: 203126664,
+                filename: "bpass.hdf5",
+                known_bug: 0,
+              },
+            ],
+          },
+        }),
+      },
+    );
+
+    assert.equal(body.match(/<div class="overflow-x-auto"><table/g)?.length, 1);
+    assert.match(body, /class="results overflow-x-auto"><table/);
+  },
+
+  async "the upload page has every element its script looks for"() {
+    // A mismatch here is silent and total: the script bails, the controls
+    // stay hidden, and the page offers no way to send a file at all. It has
+    // happened once, when the markup was renamed and the script was not.
+    const { readFileSync } = await import("node:fs");
+    const script = readFileSync("src/portal/upload.js", "utf8");
+    const { body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}`,
+      contributorEnv({ rows: { submission: SUBMISSION } }),
+      SIGNED_IN,
+    );
+
+    const bindings = [
+      ...script.matchAll(/const (\w+) = document\.getElementById\("([^"]+)"\)/g),
+    ].map((match) => ({ variable: match[1], id: match[2] }));
+    assert.ok(bindings.length > 0, "the script looks something up");
+
+    for (const { id } of bindings) {
+      assert.match(body, new RegExp(`id="${id}"`), `the page has #${id}`);
+    }
+
+    // And anything the page renders hidden has to be unhidden somewhere, or
+    // the control simply never appears. That has happened twice: once when
+    // the markup was renamed and the script was not, and once when the line
+    // that revealed the upload button was removed and its replacement was
+    // not applied.
+    for (const { variable, id } of bindings) {
+      if (!new RegExp(`id="${id}"[^>]*hidden`).test(body)) {
+        continue;
+      }
+      assert.match(
+        script,
+        new RegExp(`${variable}\\.hidden\\s*=`),
+        `${variable} (#${id}) is rendered hidden and must be revealed`,
+      );
+    }
+  },
+
+  async "a long display name does not set the width of the page"() {
+    // Some display names are the raw filename: 113 characters joined by
+    // underscores, which offer no break opportunity, so without a wrapping
+    // rule one dataset makes a phone zoom out to see any of the page.
+    const { body } = await call("/syndex/datasets/x", {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              display_name: "a_b".repeat(40),
+              description: "A grid.",
+              metadata_json: "{}",
+              provenance_json: "{}",
+            },
+          ],
+        },
+      }),
+    });
+
+    assert.match(body, /<h1 class="[^"]*break-words[^"]*">/);
   },
 
   async "an unexpected binding failure becomes a page, not a stack trace"() {

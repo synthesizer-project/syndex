@@ -291,67 +291,192 @@ rings on every control, the filter rail reachable and operable by keyboard,
 filters collapsing into a labelled sheet on narrow screens, every table
 scrolling within its own container, and identity never carried by colour alone.
 
+## Accounts
+
+Identity comes from GitHub through the ordinary OAuth web flow. No password
+reaches this service, so there is none to store, hash, reset or leak, and the
+audience already has a GitHub account because Synthesizer is developed there.
+
+Reading the catalogue stays anonymous. An account is needed only to contribute
+and to review.
+
+Four roles, ordered, each able to do everything the one before it can:
+
+| Role | May |
+| --- | --- |
+| `pending` | browse, and ask for submit access |
+| `contributor` | submit datasets |
+| `reviewer` | read the queue, decide submissions, promote a pending account |
+| `admin` | also grant the reviewer and admin roles |
+
+The split between the last two is deliberate: letting somebody submit is a
+small decision a reviewer should not have to escalate, and letting somebody
+publish into the catalogue is not.
+
+A new account is `pending`, because one that could submit on creation would
+leave the queue as open to being filled as it was when there were no accounts
+at all. A pending account is sent to `/syndex/access` to say what it wants to
+contribute, which is what a reviewer reads before granting anything.
+
+### Sessions
+
+A session is a row in D1 holding the SHA-256 digest of a random token; the
+token itself only ever lives in the browser's cookie, so a copy of the table
+is not enough to sign in as anybody in it. The role is read from `users` on
+every request rather than carried in the cookie, which is what makes a
+promotion take effect on the next page and a demotion take effect at all.
+
+Signed-in pages are sent `private, no-store`. The anonymous rendering of the
+same page is still cacheable, which is what keeps the catalogue cheap to serve
+to the people who only read it.
+
+### Configuration
+
+Sign-in is unavailable, rather than broken, until all of this exists:
+
+- A GitHub OAuth App whose callback is
+  `https://synthesizer-project.org/syndex/auth/callback`.
+- `GITHUB_CLIENT_ID` in `vars` — it is not a secret.
+- `GITHUB_CLIENT_SECRET` through `wrangler secret put`.
+- `SYNDEX_ADMIN_LOGINS`, a comma-separated list of GitHub logins that hold
+  `admin` whatever the table says. This is how the first administrator exists,
+  and the way back in if the last one's role is removed by accident.
+
+Notification issues need `GITHUB_ISSUE_REPO` (`owner/name`) in `vars` and
+`GITHUB_ISSUE_TOKEN` as a secret, with permission to open issues there. They
+are advisory: a failure is logged and the request it was about still succeeds.
+Nothing written into an issue includes an email address, since an issue is
+visible to everyone who can see the repository.
+
+`SYNDEX_REVIEW_USER` and `SYNDEX_REVIEW_PASSWORD` are gone. The review page was
+guarded by one shared password, which said that somebody with the credential
+was reviewing and never which somebody.
+
 ## Submissions
 
-A contributor submits metadata, and the file then goes straight to a separate
-submissions bucket. Registering a submission mints an unguessable upload token
-naming one writable prefix; the bytes go up through a presigned PUT from the
-browser under 1 GB, or with an S3 client driven by prefix-scoped temporary
-credentials above it. The bytes never pass through the Worker, and what
-actually arrived is discovered by listing that prefix rather than by believing
-a report of success.
+A contributor describes the dataset, then sends the file in pieces. Each piece
+is an ordinary request the Worker writes straight into a multipart upload on a
+separate submissions bucket; the credential is the contributor's session, so
+there is nothing minted that outlives the request and signing out ends the
+ability to write.
 
-The hard part this works around: **grids run to 30 GiB.** A browser form cannot
-be the transfer mechanism for those, which is why anything large is handed to a
-real S3 client that already resumes.
+The hard part this works around: **grids run to 30 GiB.** Pieces of 90 MiB
+mean a dropped connection costs one piece rather than the transfer, and the
+same endpoint serves a browser and `syndex submit`, so there is one upload
+path rather than one per audience.
 
-The review queue has its own table, and it is the one part of the portal that
-writes. Submitters need no account, since every submission is reviewed by a
-human before anything is published; the review page itself is protected.
+### What replaced the presigned path
 
-### Why it is shut
+The form used to be shut, and deliberately so: the write path existed but was
+unbounded storage anyone could fill. Most of that was not fixed so much as
+removed.
 
-`POST /syndex/submit` returns 503 and the form renders closed. The transfer
-path is built, but as built it is unbounded storage that anyone can fill, and
-R2 Standard bills every month until someone deletes what they left:
+The bytes used to go browser-to-R2 through a presigned PUT, on a path the
+Worker could not see, so every limit had to be something signed into a URL and
+hoped for:
 
-- `presignUpload` signs a method, a key and an expiry, and no
-  `content-length`. `BROWSER_UPLOAD_LIMIT` reaches the browser as page copy
-  and a `data-limit` attribute, so the advertised limit is advisory and the
-  real ceiling is R2's 5 GiB single-part maximum.
-- `POST /submit/:token/upload-url` takes the filename from the request, so
-  each call signs a different key. One token can therefore write any number
-  of objects, and `uploadedFile` only reports the extras after they are
-  already stored.
-- `GET /submit/:token` mints twelve hours of prefix-scoped
-  `object-read-write` merely by being viewed, with no size or object-count
-  ceiling, and the token that authorises it is in the URL.
-- Nothing expires the submissions bucket.
-- Turnstile stops a script, not a person with a solver: there is no per-IP,
-  per-address or queue-depth limit on how many tokens can exist.
+- `presignUpload` signed a method, a key and an expiry, and no
+  `content-length`, so the advertised size limit was advertising and the real
+  ceiling was R2's 5 GiB single-part maximum.
+- `POST /submit/:token/upload-url` took the filename from the request, so each
+  call signed a different key and one token could write any number of objects.
+- `GET /submit/:token` minted twelve hours of prefix-scoped
+  `object-read-write` merely by being viewed.
 
-What has to land before it opens, cheapest first:
+None of those exist now. The Worker chooses the key at registration from the
+catalogue name, so one submission is one object whatever a later request says
+the file is called. The ceiling is a part count it enforces, and since the
+platform refuses a request body over its own limit before any Worker code
+runs, a client cannot exceed the per-part size however it lies. There are no
+temporary credentials to leak because none are minted, and `aws4fetch`, the
+two R2 signing keys and the credential-minting API token all went with them.
 
-1. Sign `content-length` into the presigned PUT and refuse to sign anything
-   over the limit, so the cap is enforced rather than advertised.
-2. Record the key when it is first signed and refuse a second filename, so a
-   submission is one object rather than as many as someone asks for.
-3. Drop the temporary-credential path, or mint it only on a reviewer's
-   action. The ten datasets over 1 GB can have credentials handed out by
-   hand; that is rarer than the abuse it otherwise invites.
-4. An R2 lifecycle rule deleting `submissions/` after fourteen days. A bucket
-   setting rather than a code change, and the one control that bounds
-   accumulation absolutely.
-5. Caps in D1: at most a couple of pending submissions per address, and a
-   ceiling on queue depth.
+Moving the bytes through a Worker is only viable because the runtime streams a
+request body into R2 without it passing through any JavaScript: waiting on I/O
+is not CPU time. That is worth measuring rather than assuming — push a file
+through and read the CPU time off `wrangler tail`. If it ever stops holding,
+the fallback is presigned URLs per part, which keeps the same endpoint and the
+same client.
 
-With those, the worst case is bounded — a limited number of submissions, one
-object each, under the size limit, deleted automatically. Until then the door
-stays shut and the page says where to knock. The form's own validation was
-written and then removed with the handler; the rules it enforced were a
-lowercase-hyphen catalogue name, a display name, a listed data type, a
-contact name, an email address, and no collision with an existing dataset or
-another pending submission.
+### What bounds it
+
+- **Accounts.** Only a contributor may submit, and only an admin or reviewer
+  grants that. Turnstile is gone: it told a script from a person on an
+  anonymous form, and there is no anonymous form.
+- **Ownership.** The token addresses a submission; the session authorises it.
+  Before accounts the token was both, so anyone who came by one could write to
+  somebody else's submission.
+- **Caps.** Three pending submissions per account, fifty across everybody.
+  The first stops a contributor submitting a directory one file at a time; the
+  second is the only limit that holds if an account is ever granted to the
+  wrong person.
+- **Part count.** 400 parts of 90 MiB, a little over 35 GB.
+- **An R2 lifecycle rule** deleting `submissions/` after fourteen days. A
+  bucket setting rather than a code change, and the one control that bounds
+  accumulation absolutely. **Outstanding.**
+
+The review queue has its own table and is the one part of the portal that
+writes. Approving records a decision; it does not publish. Publication stays
+with the tooling that opens the HDF5, verifies the digest, and registers R2
+and D1 in one transaction.
+
+## Validation
+
+Every uploaded file is read by `syndex check` before a reviewer opens it. The
+checker is Python and needs h5py, so it cannot run in the Worker that took the
+file: the Worker fires a `repository_dispatch` when an upload completes, and a
+GitHub Actions runner installs the package, fetches the object and posts the
+verdict back.
+
+A runner rather than a Cloudflare container because a container needs a paid
+Workers plan and this does not. Runner disk is 14 GB, larger than any
+container tier offered, which matters for a catalogue whose grids reach 30 GB.
+
+The rules live in one place. A contributor is told to run `syndex-check` before
+submitting, the runner runs the same command, and a reviewer runs it again on
+the file they downloaded, so "it passed for me" and "it passed for the
+reviewer" cannot mean different things.
+
+### What the runner is given
+
+A signed link to one object, good for six hours, and nowhere else to send the
+answer. It has no account on the portal and is given no credentials: the link
+says "this object, until this time", where a token would say rather more and
+last rather longer. The report comes back to an endpoint authenticated by a
+shared secret, compared in constant time.
+
+What arrives is confirmed rather than trusted -- the runner installs a version
+of the checker the Worker did not -- and a state the Worker does not recognise
+is read as `failed`, which asks a person to look rather than letting something
+through.
+
+### The digest
+
+The runner reads every byte anyway, so it hashes the file while it is there.
+That is what `files.sha256` needs at publication, and it answers "have we
+already got exactly these bytes" against the catalogue and against the rest of
+the queue, which is the one question that can end a review before it starts.
+
+The submission form used to ask a contributor for the digest. It was optional,
+unchecked, and asked somebody to hash 30 GB by hand to catch a truncated
+transfer -- which the sizes now catch on their own, since the browser knows
+what it set out to send and R2 knows what it holds.
+
+### Configuration
+
+Validation is skipped, silently and without failing anything, unless all of
+this exists:
+
+- `GITHUB_ISSUE_REPO` in `vars` (already set; the same repository).
+- `GITHUB_DISPATCH_TOKEN` as a secret: a fine-grained token with **Contents:
+  read and write** on that repository, which is what `repository_dispatch`
+  requires.
+- `SYNDEX_REPORT_SECRET` as a secret, and the same value as a GitHub Actions
+  secret of that name.
+
+A submission whose validation never runs is not blocked. It sits with no
+verdict, the review page says so, and a reviewer can fetch the file and run
+the checker themselves.
 
 ## Prerequisites
 

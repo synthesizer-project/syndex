@@ -1,118 +1,80 @@
 /**
- * Accepting a contributed file without letting it near the catalogue.
+ * Taking a contributed file without letting it near the catalogue.
  *
- * The bytes never pass through the Worker. Registering a submission mints an
- * unguessable upload token, which names one prefix of a separate submissions
- * bucket, and the file goes straight to R2 from wherever it already is:
- * under 1 GB through a presigned PUT from the browser, above that with an
- * ordinary S3 client driven by prefix-scoped temporary credentials, so
- * multipart and resumption come from tooling that already does them
- * properly rather than from code written here.
+ * The file arrives in parts, each an ordinary request the Worker writes
+ * straight into a multipart upload on the submissions bucket. The credential
+ * is the contributor's session: there is nothing else to hold, nothing minted
+ * that outlives the request, and signing out ends the ability to write.
  *
- * 233 of the catalogue's 244 datasets are under 1 GB. The eleven that are
- * not are grids on an HPC filesystem, where rclone is already installed and
- * a browser is the wrong tool anyway.
+ * This replaced a presigned PUT and a set of temporary R2 credentials, and
+ * the reason is worth keeping. Those put the bytes on a path the Worker could
+ * not see, which meant every limit had to be expressed as something signed
+ * into a URL and hoped for: a content-length that was never signed, so the
+ * size cap was advice; a key derived from whatever filename was submitted, so
+ * one token could write unlimited objects; and twelve hours of prefix-scoped
+ * write access handed out for viewing a page. Moving the bytes through here
+ * does not fix those. It removes them. The Worker chooses the key, counts the
+ * parts, and stops.
  *
- * Nothing in this module writes to the catalogue's own bucket, and the
- * credentials it holds are scoped so that they could not.
+ * What it costs is that the bytes pass through a Worker, which is only viable
+ * because the runtime streams a request body into R2 without the bytes
+ * passing through any JavaScript here -- waiting on I/O is not CPU time. The
+ * ceiling is therefore a part count rather than a byte count, which needs no
+ * measuring and cannot be lied about: a part larger than the platform's
+ * request body limit is refused before this code runs at all.
+ *
+ * Nothing in this module writes to the catalogue's own bucket.
  */
-
-import { AwsClient } from "aws4fetch";
 
 /**
- * Largest file the browser is asked to send.
+ * How much of the file each request carries.
  *
- * A presigned PUT is one request and cannot resume, so this is a limit on
- * what will plausibly finish rather than the 5 GiB R2 allows.
- *
- * Counted in decimal, like every other size the portal shows: as 1024**3 it
- * rendered through the same formatter as "1.1 GB", which reads like a
- * mistake. It is advertised rather than enforced -- see "Why it is shut" in
- * docs/website.md.
+ * Under the 100 MB request body limit of the smallest Cloudflare plan, with
+ * room to spare, and above R2's 5 MiB minimum part size. R2 requires every
+ * part but the last to be the same size, so this is a contract with the
+ * client rather than a suggestion.
  */
-export const BROWSER_UPLOAD_LIMIT = 1000 ** 3;
+export const PART_SIZE = 90 * 1024 * 1024;
 
-/** How long a presigned upload URL stays valid. */
-const UPLOAD_URL_TTL = 60 * 60;
+/**
+ * The largest file a submission may be.
+ *
+ * Expressed as a part count because that is what is actually enforced: the
+ * platform refuses a request body over its own limit before any of this runs,
+ * so a client cannot exceed `PART_SIZE` per part however it lies, and the
+ * total is therefore bounded by how many parts are accepted.
+ *
+ * 400 parts is a little over 35 GB, which covers the largest grids in the
+ * catalogue with margin. R2 itself allows 10,000.
+ */
+export const MAX_PARTS = 400;
 
-/** How long temporary credentials for a large upload stay valid. */
-const CREDENTIAL_TTL = 12 * 60 * 60;
+/** The resulting ceiling, for the page that has to tell somebody what it is. */
+export const MAX_UPLOAD_BYTES = PART_SIZE * MAX_PARTS;
 
-/** Cloudflare's Turnstile verification endpoint. */
-const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+/** How many submissions one account may have waiting at once. */
+export const MAX_PENDING_PER_USER = 10;
+
+/** How many submissions may be waiting in total, across everybody. */
+export const MAX_PENDING_TOTAL = 50;
 
 /**
  * Whether submissions can be accepted at all.
  *
- * Everything needed to take a file is configuration, and none of it has a
- * sensible default, so the form says it is closed rather than half working.
+ * Only the bucket now. The account id, the two R2 signing keys and the API
+ * token that minted temporary credentials are all gone along with the code
+ * that used them, which is the clearest measure of what moving the bytes
+ * through the Worker bought.
  *
  * @param {object} env Worker bindings and secrets.
- * @returns {boolean} Whether the upload path is fully configured.
+ * @returns {boolean} Whether the upload path is configured.
  */
 export function submissionsOpen(env) {
-  return Boolean(
-    env.SUBMISSIONS &&
-      env.SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID &&
-      env.SYNTHESIZER_SUBMISSIONS_BUCKET &&
-      env.SYNTHESIZER_SUBMISSIONS_ACCESS_KEY_ID &&
-      env.SYNTHESIZER_SUBMISSIONS_SECRET_ACCESS_KEY &&
-      env.TURNSTILE_SITEKEY &&
-      env.TURNSTILE_SECRET,
-  );
+  return Boolean(env.SUBMISSIONS);
 }
 
 /**
- * Check a Turnstile token.
- *
- * The form is anonymous, so this is what stops a script filling the queue.
- * It fails closed: an unconfigured or unreachable Turnstile means no
- * submission, not an unprotected one.
- *
- * @param {object} env Worker bindings and secrets.
- * @param {string} token The `cf-turnstile-response` field.
- * @param {string | null} ip The visitor's address, when the edge gave one.
- * @returns {Promise<boolean>} Whether the challenge was passed.
- */
-export async function verifyChallenge(env, token, ip) {
-  if (!env.TURNSTILE_SECRET || !token) {
-    return false;
-  }
-
-  const response = await fetch(SITEVERIFY, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      secret: env.TURNSTILE_SECRET,
-      response: token,
-      ...(ip === null ? {} : { remoteip: ip }),
-    }),
-  });
-
-  if (!response.ok) {
-    console.error(
-      JSON.stringify({
-        message: "Turnstile verification was unreachable",
-        status: response.status,
-      }),
-    );
-    return false;
-  }
-
-  const result = await response.json();
-  if (result.success !== true) {
-    console.error(
-      JSON.stringify({
-        message: "Turnstile rejected a submission",
-        errors: result["error-codes"] ?? [],
-      }),
-    );
-  }
-  return result.success === true;
-}
-
-/**
- * The prefix one submission is allowed to write to.
+ * The prefix one submission is allowed to occupy.
  *
  * @param {string} token The submission's upload token.
  * @returns {string} An R2 key prefix, with its trailing slash.
@@ -122,143 +84,244 @@ export function uploadPrefix(token) {
 }
 
 /**
- * Reduce a submitted filename to something safe to use as an R2 key.
+ * The one key a submission may write.
  *
- * The name arrives from a browser and becomes part of a key that credentials
- * are then scoped to, so anything that could climb out of the prefix or make
- * the key ambiguous is removed rather than rejected: the file is the point,
- * its name is not.
+ * Fixed when the submission is registered and never derived from a later
+ * request, which is what makes one submission one object. The old presigned
+ * path took the filename from whichever request asked for a URL, so every
+ * call signed a different key and a single token could write as many objects
+ * as somebody cared to name.
  *
- * @param {string} filename The name the browser reported.
- * @returns {string} A safe basename.
+ * Deliberately carries no extension. The key is chosen before the file is,
+ * so any extension here would be a guess -- and the guess would be wrong for
+ * the quarter of the catalogue that is not HDF5. Nothing needs it: R2 does
+ * not care, and `syndex check` reads the format out of the bytes.
+ *
+ * @param {object} submission The submission row.
+ * @returns {string} The R2 key its bytes belong at.
  */
-export function safeFilename(filename) {
-  const basename = String(filename).split(/[\\/]/).pop() ?? "";
-  const cleaned = basename.replace(/[^A-Za-z0-9._+,-]/g, "_").slice(0, 200);
-  // A name of only dots would resolve to a directory rather than a file.
-  return /[A-Za-z0-9]/.test(cleaned) ? cleaned : "submission.bin";
+export function uploadKey(submission) {
+  return `${uploadPrefix(submission.upload_token)}${submission.filename}`;
 }
 
 /**
- * Build a client for the submissions bucket over the S3 API.
+ * Begin, or pick up, the multipart upload a submission's file arrives through.
+ *
+ * Resuming rather than restarting is what lets a transfer survive a dropped
+ * connection, a closed laptop, or a client that sends its parts over an hour.
  *
  * @param {object} env Worker bindings and secrets.
- * @returns {AwsClient} A signer for that bucket's endpoint.
+ * @param {object} submission The submission row.
+ * @returns {Promise<{upload: R2MultipartUpload, uploadId: string}>} The
+ *     upload to write parts into, and its id.
  */
-function signer(env) {
-  return new AwsClient({
-    accessKeyId: env.SYNTHESIZER_SUBMISSIONS_ACCESS_KEY_ID,
-    secretAccessKey: env.SYNTHESIZER_SUBMISSIONS_SECRET_ACCESS_KEY,
-    service: "s3",
-  });
+export async function openUpload(env, submission) {
+  const key = uploadKey(submission);
+
+  if (submission.upload_id) {
+    return {
+      upload: env.SUBMISSIONS.resumeMultipartUpload(key, submission.upload_id),
+      uploadId: submission.upload_id,
+    };
+  }
+
+  const upload = await env.SUBMISSIONS.createMultipartUpload(key);
+
+  // Claim it, but only if nothing else already has. A client is free to send
+  // parts concurrently, and two of them arriving at once on a submission that
+  // has not started would otherwise each create an upload and each believe
+  // theirs was the one -- leaving the parts split across two uploads, neither
+  // of which can be completed.
+  const claimed = await env.DB.prepare(
+    `UPDATE submissions SET upload_id = ?
+     WHERE submission_id = ? AND upload_id IS NULL
+     RETURNING upload_id`,
+  )
+    .bind(upload.uploadId, submission.submission_id)
+    .first();
+
+  if (claimed === null) {
+    // Somebody else got there first. Abandon the one just created rather than
+    // leaving it to accumulate parts nobody will complete, and use theirs.
+    const winner = await env.DB.prepare(
+      "SELECT upload_id FROM submissions WHERE submission_id = ?",
+    )
+      .bind(submission.submission_id)
+      .first();
+    await upload.abort().catch(() => {});
+    return {
+      upload: env.SUBMISSIONS.resumeMultipartUpload(key, winner.upload_id),
+      uploadId: winner.upload_id,
+    };
+  }
+
+  return { upload, uploadId: upload.uploadId };
 }
 
 /**
- * Mint a presigned PUT for one file of one submission.
+ * Write one part, and remember that it landed.
  *
- * The URL authorises exactly one key for one hour. It is the only write the
- * browser is ever given, and it points at the submissions bucket's S3
- * endpoint rather than at this Worker.
+ * The body is handed to R2 as the stream it arrived as. Nothing here reads
+ * it, which is what keeps a ninety megabyte request within a ten millisecond
+ * CPU budget: waiting on I/O is not CPU time, but copying bytes in JavaScript
+ * would be.
+ *
+ * Re-sending a part replaces its record rather than adding a second one, so a
+ * client that retries after a timeout ends up with the file it meant to send.
  *
  * @param {object} env Worker bindings and secrets.
- * @param {string} token The submission's upload token.
- * @param {string} filename The name the browser reported.
- * @returns {Promise<{url: string, key: string}>} Where to PUT, and the key.
+ * @param {object} submission The submission row.
+ * @param {number} partNumber Which part this is, counting from one.
+ * @param {ReadableStream} body The part's bytes.
+ * @returns {Promise<void>} Resolves once the part is stored and recorded.
  */
-export async function presignUpload(env, token, filename) {
-  const key = `${uploadPrefix(token)}${safeFilename(filename)}`;
-  const endpoint =
-    `https://${env.SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com` +
-    `/${env.SYNTHESIZER_SUBMISSIONS_BUCKET}/${key}`;
+export async function writePart(env, submission, partNumber, body) {
+  // Part one is the beginning of a transfer, so anything already half sent is
+  // abandoned rather than merged with it. Without this, choosing a different
+  // file after a failed attempt leaves the earlier file's higher-numbered
+  // parts in place and assembles the two into an object that is neither --
+  // caught later by the digest and by `syndex check`, but only after 30 GB
+  // has been sent for nothing.
+  //
+  // A client resuming an interrupted transfer continues from where it
+  // stopped and so never re-sends part one; one starting afresh always does.
+  if (partNumber === 1 && submission.upload_id) {
+    await abandonUpload(env, submission);
+    submission = { ...submission, upload_id: null };
+  }
 
-  const signed = await signer(env).sign(
-    new Request(`${endpoint}?X-Amz-Expires=${UPLOAD_URL_TTL}`, {
-      method: "PUT",
-    }),
-    { aws: { signQuery: true } },
-  );
+  const { upload } = await openUpload(env, submission);
+  const part = await upload.uploadPart(partNumber, body);
 
-  return { url: signed.url.toString(), key };
+  await env.DB.prepare(
+    `INSERT INTO submission_parts (submission_id, part_number, etag)
+     VALUES (?, ?, ?)
+     ON CONFLICT (submission_id, part_number) DO UPDATE SET etag = excluded.etag`,
+  )
+    .bind(submission.submission_id, partNumber, part.etag)
+    .run();
 }
 
 /**
- * Mint temporary credentials for a large upload.
+ * Finish the upload, and find out what actually arrived.
  *
- * Scoped to one prefix of one bucket, with write access and nothing else, so
- * the worst a leaked set can do is add or replace files inside a submission
- * that is already waiting to be read by a human.
+ * The size is read back from R2 rather than taken from whoever said the
+ * transfer finished, which is what makes a client's report of success
+ * advisory. A file assembled from the wrong number of parts is a file that is
+ * the wrong size, and the reviewer sees the size.
  *
  * @param {object} env Worker bindings and secrets.
- * @param {string} token The submission's upload token.
- * @returns {Promise<object | null>} Credentials and where to use them, or
- *     null when minting failed.
+ * @param {object} submission The submission row.
+ * @returns {Promise<{key: string, size: number} | null>} What is there, or
+ *     null when the parts do not assemble into an object.
  */
-export async function temporaryCredentials(env, token) {
-  const account = env.SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID;
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/r2/temp-access-credentials`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${env.SYNTHESIZER_SUBMISSIONS_API_TOKEN}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        bucket: env.SYNTHESIZER_SUBMISSIONS_BUCKET,
-        parentAccessKeyId: env.SYNTHESIZER_SUBMISSIONS_ACCESS_KEY_ID,
-        permission: "object-read-write",
-        ttlSeconds: CREDENTIAL_TTL,
-        prefixes: [uploadPrefix(token)],
-      }),
-    },
-  );
+export async function finishUpload(env, submission) {
+  const { results } = await env.DB.prepare(
+    `SELECT part_number, etag FROM submission_parts
+     WHERE submission_id = ? ORDER BY part_number`,
+  )
+    .bind(submission.submission_id)
+    .all();
 
-  const body = await response.json().catch(() => null);
-  if (!response.ok || body?.success !== true) {
+  if (results.length === 0) {
+    return null;
+  }
+
+  const { upload } = await openUpload(env, submission);
+  try {
+    await upload.complete(
+      results.map((part) => ({
+        partNumber: part.part_number,
+        etag: part.etag,
+      })),
+    );
+  } catch (error) {
+    // R2 refuses a completion whose parts do not line up -- a missing part in
+    // the middle, or parts of unequal size. That is a client that stopped
+    // part way, not a server fault, so it is reported rather than thrown.
     console.error(
       JSON.stringify({
-        message: "Could not mint upload credentials",
-        status: response.status,
-        errors: body?.errors ?? [],
+        message: "A multipart upload would not complete",
+        submission: submission.submission_id,
+        parts: results.length,
+        error: error instanceof Error ? error.message : String(error),
       }),
     );
     return null;
   }
 
-  return {
-    ...body.result,
-    endpoint: `https://${account}.r2.cloudflarestorage.com`,
-    bucket: env.SYNTHESIZER_SUBMISSIONS_BUCKET,
-    prefix: uploadPrefix(token),
-    hours: CREDENTIAL_TTL / 3600,
-  };
+  const key = uploadKey(submission);
+  const object = await env.SUBMISSIONS.head(key);
+  return object === null ? null : { key, size: object.size };
 }
 
 /**
- * Find out what actually arrived for one submission.
+ * Abandon a transfer, releasing whatever R2 is holding for it.
  *
- * Asked of R2 through the binding rather than taken from whoever says the
- * upload finished, which is what makes the browser's report of success
- * advisory rather than authoritative. One file per submission: anything
- * beyond the first is ignored, and the reviewer sees the count.
+ * Parts of an incomplete multipart upload are billed like any other stored
+ * object, so a submission that is replaced or withdrawn part way through has
+ * to let go of them rather than leave them for the lifecycle rule.
  *
  * @param {object} env Worker bindings and secrets.
- * @param {string} token The submission's upload token.
- * @returns {Promise<{key: string, filename: string, size: number,
- *     extras: number} | null>} What is there, or null when nothing is.
+ * @param {object} submission The submission row.
+ * @returns {Promise<void>} Resolves once it is abandoned.
  */
-export async function uploadedFile(env, token) {
-  const prefix = uploadPrefix(token);
-  const listed = await env.SUBMISSIONS.list({ prefix, limit: 10 });
-  const [object] = listed.objects;
-  if (object === undefined) {
-    return null;
+export async function abandonUpload(env, submission) {
+  if (submission.upload_id) {
+    await env.SUBMISSIONS.resumeMultipartUpload(
+      uploadKey(submission),
+      submission.upload_id,
+    )
+      .abort()
+      // An upload that is already gone is the state being asked for.
+      .catch(() => {});
   }
 
-  return {
-    key: object.key,
-    filename: object.key.slice(prefix.length),
-    size: object.size,
-    extras: listed.objects.length - 1,
-  };
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM submission_parts WHERE submission_id = ?").bind(
+      submission.submission_id,
+    ),
+    env.DB.prepare(
+      "UPDATE submissions SET upload_id = NULL WHERE submission_id = ?",
+    ).bind(submission.submission_id),
+  ]);
+}
+
+/**
+ * Whether this account may open another submission.
+ *
+ * Two limits, because they stop different things. The per-account one stops a
+ * contributor filling the queue by accident, by submitting a directory one
+ * file at a time; the total one stops everybody doing it at once, which is
+ * the only limit that holds if an account is ever granted to the wrong
+ * person.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {number} userId The account asking.
+ * @returns {Promise<string | null>} Why not, or null when they may.
+ */
+export async function submissionRefusal(env, userId) {
+  const counts = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM submissions
+        WHERE state = 'pending' AND user_id = ?) AS mine,
+       (SELECT COUNT(*) FROM submissions WHERE state = 'pending') AS everyone`,
+  )
+    .bind(userId)
+    .first();
+
+  if (counts.mine >= MAX_PENDING_PER_USER) {
+    return (
+      `You already have ${counts.mine} submissions waiting to be reviewed, ` +
+      "which is the most one account may have at a time. They will free up " +
+      "as they are reviewed."
+    );
+  }
+  if (counts.everyone >= MAX_PENDING_TOTAL) {
+    return (
+      "The review queue is full. This is a deliberate ceiling rather than a " +
+      "fault; please try again once some of it has been read."
+    );
+  }
+  return null;
 }

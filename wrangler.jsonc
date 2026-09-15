@@ -68,10 +68,18 @@
     }
   ],
   "vars": {
-    // Not secrets: an account id and a bucket name. The R2 key, its secret,
-    // the API token that mints temporary credentials, the Turnstile secret
-    // and the review password are all `wrangler secret put`.
+    // Not secrets: an account id, a bucket name, an OAuth client id, the
+    // repository notifications are opened on, and the logins that hold the
+    // admin role. `GITHUB_CLIENT_SECRET` and `GITHUB_ISSUE_TOKEN` are the
+    // only secrets the portal has, and both are `wrangler secret put`.
+    //
+    // The R2 signing keys and the API token that minted temporary upload
+    // credentials are gone: the Worker writes submitted bytes to R2 through
+    // the binding, so there is nothing left to sign with.
     "SYNTHESIZER_CLOUDFLARE_ACCOUNT_ID": "e86ac0bb0bee64457c144e84d67966ef",
-    "SYNTHESIZER_SUBMISSIONS_BUCKET": "synthesizer-submissions"
+    "SYNTHESIZER_SUBMISSIONS_BUCKET": "synthesizer-submissions",
+    "GITHUB_CLIENT_ID": "Ov23liGN3tfhkew9i4Il",
+    "GITHUB_ISSUE_REPO": "synthesizer-project/syndex",
+    "SYNDEX_ADMIN_LOGINS": "willjroper"
   }
 }

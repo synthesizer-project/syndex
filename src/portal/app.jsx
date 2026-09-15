@@ -13,10 +13,22 @@
  */
 
 import { Hono } from "hono";
-import { basicAuth } from "hono/basic-auth";
 import { HTTPException } from "hono/http-exception";
 import { trimTrailingSlash } from "hono/trailing-slash";
 
+import {
+  atLeast,
+  authConfigured,
+  beginSignIn,
+  consumeState,
+  currentUser,
+  endSession,
+  endSessions,
+  profileForCode,
+  recordSignIn,
+  safeReturn,
+  startSession,
+} from "./auth.js";
 import {
   TABS,
   dataset as fetchDataset,
@@ -25,24 +37,43 @@ import {
   search,
   tabCounts,
 } from "./catalogue.js";
+import { notifyAccessRequest, notifySubmission } from "./notify.js";
 import {
+  ACCOUNTS_SHOWN,
+  Accounts,
   Browse,
   Dataset,
-  DATA_TYPES,
   Landing,
   NotFound,
   NothingArrived,
+  PreviousSubmissions,
+  RequestAccess,
   Review,
+  SUBMISSION_TYPES,
+  SignInRequired,
+  SubmissionReview,
   Submit,
+  Truncated,
   Upload,
 } from "./pages.jsx";
 import {
-  presignUpload,
+  duplicatesOf,
+  fetchAuthorised,
+  fetchUrl,
+  readReport,
+  reportAuthorised,
+  requestValidation,
+} from "./validation.js";
+import {
+  MAX_PARTS,
+  MAX_UPLOAD_BYTES,
+  PART_SIZE,
+  finishUpload,
+  submissionRefusal,
   submissionsOpen,
-  temporaryCredentials,
-  uploadedFile,
+  writePart,
 } from "./submissions.js";
-import { BASE, Panel } from "./views.jsx";
+import { BASE, Panel, ViewerContext } from "./views.jsx";
 
 /** What a tab's rows are called in a count. */
 const NOUNS = {
@@ -58,6 +89,43 @@ const app = new Hono().basePath(BASE);
 // be the URL anybody shares or cites.
 app.use(trimTrailingSlash());
 
+// Who is reading, established once per request. The role is read from the
+// database rather than from the cookie, so a promotion or a demotion takes
+// effect on the next page load.
+app.use("*", async (c, next) => {
+  c.set("viewer", { user: await currentUser(c) });
+  await next();
+});
+
+/**
+ * How much is waiting for a reviewer's attention.
+ *
+ * Counted when the page is rendered rather than when the request arrives.
+ * Deciding a submission is a POST that renders the queue back, and a count
+ * taken before the handler ran would still include the thing just decided --
+ * so the badge kept its number until the page was reloaded by hand.
+ *
+ * Both halves are counted: a person waiting for access is as much a thing to
+ * attend to as a file waiting to be read. Only a reviewer is shown it and
+ * only a reviewer can act on it, so nobody else pays for the query.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object | null} user Who is reading.
+ * @returns {Promise<number>} What is waiting, or zero.
+ */
+async function waitingCount(c, user) {
+  if (!atLeast(user?.role, "reviewer")) {
+    return 0;
+  }
+  const row = await c.env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM submissions
+             WHERE state = 'pending' AND uploaded_at IS NOT NULL)
+          + (SELECT COUNT(*) FROM users WHERE access_requested_at IS NOT NULL)
+            AS waiting`,
+  ).first();
+  return row?.waiting ?? 0;
+}
+
 /**
  * Send one rendered page.
  *
@@ -69,10 +137,19 @@ app.use(trimTrailingSlash());
  * @param {object} options Status code and cache policy.
  * @returns {Response} An HTML response.
  */
-function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
-  return c.html(`<!doctype html>\n${node.toString()}`, status, {
-    "cache-control": cache,
-    vary: "HX-Request, HX-History-Restore-Request",
+async function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
+  const { user } = c.get("viewer") ?? { user: null };
+  const viewer = { user, waiting: await waitingCount(c, user) };
+  const tree = (
+    <ViewerContext.Provider value={viewer}>{node}</ViewerContext.Provider>
+  );
+
+  return c.html(`<!doctype html>\n${tree.toString()}`, status, {
+    // A signed-in page says who is signed in, so it belongs to one person and
+    // to no shared cache. The anonymous rendering is still cacheable, which is
+    // what keeps the catalogue cheap to serve to the people who only read it.
+    "cache-control": viewer.user === null ? cache : "private, no-store",
+    vary: "Cookie, HX-Request, HX-History-Restore-Request",
   });
 }
 
@@ -203,78 +280,509 @@ app.get("/datasets/:name", async (c) => {
   return page(c, <Dataset dataset={record} counts={counts} returnTo={returnTo} />);
 });
 
-app.get("/submit", async (c) =>
+/**
+ * Refuse a page to someone who is not allowed it, in the way that helps most.
+ *
+ * A visitor who is not signed in is offered the sign-in, since that is what
+ * they are missing. Someone signed in but without the role is told what they
+ * would need, which for a pending account is the access request rather than a
+ * dead end. Neither is a 404: pretending the page does not exist would be a
+ * worse answer to a person who is one step away from being allowed it.
+ *
+ * @param {string} required The role the route needs.
+ * @returns {Function} Middleware enforcing it.
+ */
+function requireRole(required) {
+  return async (c, next) => {
+    const { user } = c.get("viewer");
+
+    if (user === null) {
+      return page(
+        c,
+        <SignInRequired
+          counts={await tabCounts(c.env.DB)}
+          configured={authConfigured(c.env)}
+          returnTo={new URL(c.req.url).pathname}
+        />,
+        { status: 401, cache: "no-store" },
+      );
+    }
+
+    if (!atLeast(user.role, required)) {
+      // A pending account is not being refused so much as told where the
+      // queue starts, so send it there rather than explaining twice.
+      if (required === "contributor" && user.role === "pending") {
+        return c.redirect(`${BASE}/access`, 303);
+      }
+      return page(
+        c,
+        <NotFound
+          counts={await tabCounts(c.env.DB)}
+          message={
+            `This page is for ${required}s, and your account is a ` +
+            `${user.role}.`
+          }
+        />,
+        { status: 403, cache: "no-store" },
+      );
+    }
+
+    return next();
+  };
+}
+
+app.get("/login", (c) => {
+  if (!authConfigured(c.env)) {
+    return c.text("Signing in is not configured.", 503, {
+      "cache-control": "no-store",
+    });
+  }
+  return c.redirect(beginSignIn(c, c.req.query("return")), 302);
+});
+
+app.get("/auth/callback", async (c) => {
+  const counts = await tabCounts(c.env.DB);
+
+  // The state cookie is consumed whatever happens next, so a failed or
+  // replayed callback cannot be retried with the same nonce.
+  const returnTo = consumeState(c, c.req.query("state"));
+  const code = c.req.query("code");
+
+  if (returnTo === null || !code) {
+    return page(
+      c,
+      <NotFound
+        counts={counts}
+        message={
+          "That sign-in could not be completed. It may have been left too " +
+          "long, or started in a different browser. Try signing in again."
+        }
+      />,
+      { status: 400, cache: "no-store" },
+    );
+  }
+
+  const profile = await profileForCode(
+    c.env,
+    code,
+    // Must be character-for-character what the flow began with, which is why
+    // it is derived the same way rather than written out twice.
+    new URL(`${BASE}/auth/callback`, c.req.url).toString(),
+  );
+  if (profile === null) {
+    return page(
+      c,
+      <NotFound
+        counts={counts}
+        message="GitHub could not confirm that sign-in. Please try again."
+      />,
+      { status: 502, cache: "no-store" },
+    );
+  }
+
+  const user = await recordSignIn(c.env, profile);
+  await startSession(c, user.user_id);
+  return c.redirect(returnTo, 303);
+});
+
+app.post("/logout", async (c) => {
+  await endSession(c);
+  return c.redirect(BASE, 303);
+});
+
+// Asking for submit access. Open to anyone signed in, including accounts that
+// already have it: an account that has been granted access sees what it can
+// do rather than a form it does not need.
+app.get("/access", requireRole("pending"), async (c) =>
   page(
     c,
-    <Submit
-      counts={await tabCounts(c.env.DB)}
-      open={false}
-      sitekey={c.env.TURNSTILE_SITEKEY}
-    />,
+    <RequestAccess counts={await tabCounts(c.env.DB)} user={c.get("viewer").user} />,
     { cache: "no-store" },
   ),
 );
 
-// Deliberately shut, and not merely unconfigured. The write path is built but
-// not yet safe to expose: the presigned PUT signs no content-length, so the
-// advertised size limit is advisory only; `upload-url` signs a new key for
-// every filename it is handed, so one token can write any number of objects;
-// and `/submit/:token` mints twelve hours of prefix-scoped credentials just by
-// being viewed. With no lifecycle rule on the submissions bucket, each of
-// those is unbounded storage that bills monthly. See "Submissions" in
-// docs/website.md for what has to land before this returns anything but 503.
-app.post("/submit", async (c) =>
-  page(
+app.post("/access", requireRole("pending"), async (c) => {
+  const { user } = c.get("viewer");
+  const note = String((await c.req.parseBody()).note ?? "")
+    .trim()
+    .slice(0, 2000);
+
+  if (note === "") {
+    return page(
+      c,
+      <RequestAccess
+        counts={await tabCounts(c.env.DB)}
+        user={user}
+        error="Please say what you would like to contribute."
+      />,
+      { status: 400, cache: "no-store" },
+    );
+  }
+
+  // Recorded only while the account is still pending. Re-requesting refreshes
+  // the note rather than queueing a second request, and an account that has
+  // since been granted access does not reappear in the queue by asking again.
+  const updated = await c.env.DB.prepare(
+    `UPDATE users
+     SET access_requested_at = ?, access_request_note = ?
+     WHERE user_id = ? AND role = 'pending'
+     RETURNING user_id`,
+  )
+    .bind(new Date().toISOString(), note, user.user_id)
+    .first();
+
+  // Advisory, and deliberately not awaited: whether a maintainer's issue
+  // tracker is reachable is not this person's problem.
+  if (updated !== null) {
+    c.executionCtx.waitUntil(
+      notifyAccessRequest(c.env, new URL(c.req.url).origin, user, note),
+    );
+  }
+
+  return page(
     c,
-    <Submit
+    <RequestAccess
       counts={await tabCounts(c.env.DB)}
-      open={false}
-      sitekey={c.env.TURNSTILE_SITEKEY}
+      user={{ ...user, access_requested_at: new Date().toISOString() }}
+      sent
     />,
-    { status: 503, cache: "no-store" },
-  ),
-);
+    { cache: "no-store" },
+  );
+});
 
 /**
- * Find a submission by the token that authorises its upload.
+ * What the form asks for, checked before anything is stored.
  *
- * @param {D1Database} db Catalogue database.
- * @param {string} token The upload token from the path.
- * @returns {Promise<object | null>} The submission, or null.
+ * Written as one pass over the fields rather than as validation scattered
+ * through the handler, so that a submission comes back with everything that
+ * is wrong with it at once instead of one problem per attempt.
+ *
+ * @param {object} form The parsed form body.
+ * @returns {{values: object, errors: string[]}} What was submitted, and what
+ *     is wrong with it.
  */
-function bySubmissionToken(db, token) {
-  return db
-    .prepare("SELECT * FROM submissions WHERE upload_token = ?")
-    .bind(token)
-    .first();
+function readSubmission(form) {
+  const values = Object.fromEntries(
+    ["name", "display_name", "data_type", "description", "notes"].map(
+      (field) => [field, String(form[field] ?? "").trim()],
+    ),
+  );
+  const errors = [];
+
+  // Citations and the licence are behind questions, and a hidden field still
+  // submits: somebody who fills them in and then unticks the question has
+  // changed their mind, and the answer to honour is the tick.
+  //
+  // The rows arrive as repeated fields, which `parseBody({ all: true })`
+  // collects into an array -- except when there is exactly one, which stays a
+  // string. Both are the same thing with a different number of rows filled in.
+  const rows = form.has_citations
+    ? [form.citation ?? []]
+        .flat()
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    : [];
+  values.citations = rows.join("\n");
+  values.licence = form.has_licence ? String(form.licence ?? "").trim() : "";
+  // Kept so that unticking a question does not silently discard what was
+  // typed: the form comes back with the boxes still open and still filled.
+  values.has_citations = Boolean(form.has_citations);
+  values.has_licence = Boolean(form.has_licence);
+  values.citation_rows = rows;
+
+  // The catalogue name is what people download by, so it has to survive being
+  // typed into a shell and a URL without quoting.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(values.name)) {
+    errors.push(
+      "The catalogue name must be lowercase letters, digits and hyphens, " +
+        "starting with a letter or digit.",
+    );
+  }
+  if (values.name.length > 128) {
+    errors.push("The catalogue name is too long.");
+  }
+  if (values.display_name === "") {
+    errors.push("A display name is needed.");
+  }
+  if (!SUBMISSION_TYPES.includes(values.data_type)) {
+    errors.push("Choose one of the listed data types.");
+  }
+
+  // Citations are ADS bibcodes, which are a fixed nineteen characters: four
+  // of year, five of journal, then volume, qualifier, page and the first
+  // letter of the author's surname. Checked here because a typo found now is
+  // a correction, and one found at publication is an archaeology exercise.
+  const malformed = rows.filter(
+    (bibcode) => !/^[0-9]{4}[A-Za-z.&+]{5}[0-9A-Za-z.&+]{9}[A-Z.]$/.test(bibcode),
+  );
+  if (malformed.length > 0) {
+    errors.push(
+      `Not an ADS bibcode: ${malformed.join(", ")}. A bibcode looks like ` +
+        "2017PASA...34...58E.",
+    );
+  }
+  // Answering "yes, this should be cited" and then giving nothing is a
+  // question left half answered rather than a decision.
+  if (values.has_citations && rows.length === 0) {
+    errors.push("Add at least one bibcode, or say this data needs no citation.");
+  }
+
+  return { values, errors };
 }
 
-app.get("/submit/:token", async (c) => {
-  const submission = await bySubmissionToken(c.env.DB, c.req.param("token"));
-  const counts = await tabCounts(c.env.DB);
+/**
+ * Render the submission form, however it is being reached.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object} options What to show and why.
+ * @returns {Promise<Response>} The rendered form.
+ */
+async function submitPage(c, { values = {}, errors = [], status = 200 } = {}) {
+  const { user } = c.get("viewer");
 
+  // Starting from one already sent. A rejected submission is usually one
+  // detail away from being right, and retyping six fields to change one of
+  // them is how a contributor is put off trying again.
+  //
+  // Their own only: the token addresses a submission and does not authorise
+  // reading it, here as everywhere else.
+  const like = c.req.query("like");
+  if (like && Object.keys(values).length === 0) {
+    const previous = await c.env.DB.prepare(
+      `SELECT name, display_name, description, data_type, licence, citations,
+              notes
+       FROM submissions WHERE upload_token = ? AND user_id = ?`,
+    )
+      .bind(like, user.user_id)
+      .first();
+
+    if (previous !== null) {
+      const rows = String(previous.citations ?? "")
+        .split(/\s+/)
+        .filter(Boolean);
+      values = {
+        ...previous,
+        citation_rows: rows,
+        // The questions answer themselves from what was answered last time.
+        has_citations: rows.length > 0,
+        has_licence: Boolean(previous.licence),
+      };
+    }
+  }
+
+  const [counts, mine] = await Promise.all([
+    tabCounts(c.env.DB),
+    // Somebody's own submissions, because otherwise there is no way back to
+    // one. The upload page is addressed by a token that exists only in the
+    // URL, so closing the tab used to lose a half-finished transfer for good.
+    c.env.DB.prepare(
+      `SELECT submission_id, name, display_name, state, submitted_at,
+              uploaded_at, upload_token, validation_state
+       FROM submissions WHERE user_id = ?
+       ORDER BY submitted_at DESC LIMIT 50`,
+    )
+      .bind(user.user_id)
+      .all(),
+  ]);
+
+  return page(
+    c,
+    <Submit
+      counts={counts}
+      open={submissionsOpen(c.env)}
+      user={user}
+      mine={mine.results}
+      values={values}
+      errors={errors}
+      limit={MAX_UPLOAD_BYTES}
+    />,
+    { status, cache: "no-store" },
+  );
+}
+
+app.get("/submit", requireRole("contributor"), (c) => submitPage(c));
+
+app.post("/submit", requireRole("contributor"), async (c) => {
+  const { user } = c.get("viewer");
+
+  if (!submissionsOpen(c.env)) {
+    return submitPage(c, { status: 503 });
+  }
+
+  // `all` so that repeated citation rows arrive as an array rather than as
+  // whichever one happened to be last.
+  const { values, errors } = readSubmission(
+    await c.req.parseBody({ all: true }),
+  );
+
+  // The queue's ceilings, checked before the name collision so that a full
+  // queue is reported as a full queue rather than as whatever else is also
+  // true about the submission.
+  const refusal = await submissionRefusal(c.env, user.user_id);
+  if (refusal !== null) {
+    errors.push(refusal);
+  }
+
+  // A name already in the catalogue, or already waiting under somebody else,
+  // is a collision somebody would otherwise have to untangle by hand after
+  // both files had been uploaded.
+  //
+  // One waiting under *this* account is not a collision. It is the same
+  // person submitting the same dataset again, which is what the resubmit
+  // route exists for -- and refusing it leaves them blocked by a row they
+  // created a minute earlier and cannot see a way past.
+  let mine = null;
+  if (errors.length === 0) {
+    const [published, waiting] = await Promise.all([
+      c.env.DB.prepare("SELECT 1 FROM datasets WHERE name = ?")
+        .bind(values.name)
+        .first(),
+      c.env.DB.prepare(
+        `SELECT submission_id, upload_token, user_id FROM submissions
+         WHERE name = ? AND state = 'pending'`,
+      )
+        .bind(values.name)
+        .first(),
+    ]);
+
+    if (published !== null) {
+      errors.push(
+        `${values.name} is already in the catalogue. A new release of an ` +
+          "existing dataset is published directly rather than submitted.",
+      );
+    } else if (waiting !== null && waiting.user_id !== user.user_id) {
+      errors.push(`Somebody else is already submitting ${values.name}.`);
+    } else {
+      mine = waiting;
+    }
+  }
+
+  if (errors.length > 0) {
+    return submitPage(c, { values, errors, status: 400 });
+  }
+
+  // Their own submission of this name, brought up to date rather than
+  // duplicated. The row keeps its token and whatever file it already has, so
+  // a transfer part way through is not thrown away by an edit to the
+  // description.
+  if (mine !== null) {
+    await c.env.DB.prepare(
+      `UPDATE submissions
+       SET display_name = ?, description = ?, data_type = ?, licence = ?,
+           citations = ?, notes = ?, submitted_at = ?
+       WHERE submission_id = ?`,
+    )
+      .bind(
+        values.display_name,
+        values.description || null,
+        values.data_type,
+        values.licence || null,
+        values.citations || null,
+        values.notes || null,
+        new Date().toISOString(),
+        mine.submission_id,
+      )
+      .run();
+    return c.redirect(`${BASE}/submit/${mine.upload_token}`, 303);
+  }
+
+  // The token names the prefix this submission may write, and is unguessable
+  // so that knowing a submission exists is not the same as being able to
+  // interfere with it. Ownership is still checked separately: the token is
+  // how the file is addressed, not how it is authorised.
+  const token = [...crypto.getRandomValues(new Uint8Array(24))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+  const submission = await c.env.DB.prepare(
+    `INSERT INTO submissions (submitted_at, name, display_name, description,
+                              data_type, licence, citations, upload_token,
+                              filename, submitter_name, submitter_email,
+                              notes, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING upload_token`,
+  )
+    .bind(
+      new Date().toISOString(),
+      values.name,
+      values.display_name,
+      values.description || null,
+      values.data_type,
+      values.licence || null,
+      values.citations || null,
+      token,
+      // The key is fixed now, from the catalogue name rather than from
+      // whatever the file happens to be called. One submission, one object,
+      // decided before a single byte is accepted -- and with no extension,
+      // since the file has not been chosen yet and guessing one would be
+      // wrong for everything that is not a grid.
+      values.name,
+      user.name ?? user.login,
+      user.email ?? "",
+      values.notes || null,
+      user.user_id,
+    )
+    .first();
+
+  return c.redirect(`${BASE}/submit/${submission.upload_token}`, 303);
+});
+
+/**
+ * Find a submission, and check it belongs to whoever is asking.
+ *
+ * The token addresses the submission; the session authorises it. Before
+ * accounts the token was both, which meant anybody who came by one could
+ * write to somebody else's submission.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @returns {Promise<object | null>} The submission, or null when there is
+ *     none or it is not theirs.
+ */
+async function ownSubmission(c) {
+  const { user } = c.get("viewer");
+  const submission = await c.env.DB.prepare(
+    "SELECT * FROM submissions WHERE upload_token = ?",
+  )
+    .bind(c.req.param("token"))
+    .first();
+
+  if (submission === null) {
+    return null;
+  }
+  // A reviewer may open anybody's, since reading them is the job.
+  if (atLeast(user.role, "reviewer") || submission.user_id === user.user_id) {
+    return submission;
+  }
+  return null;
+}
+
+app.get("/submit/:token", requireRole("contributor"), async (c) => {
+  const submission = await ownSubmission(c);
   if (submission === null) {
     return page(
       c,
-      <NotFound counts={counts} message="That submission does not exist." />,
+      <NotFound
+        counts={await tabCounts(c.env.DB)}
+        message="That submission does not exist."
+      />,
       { status: 404, cache: "no-store" },
     );
   }
 
-  // Credentials are minted per view and expire on their own, so a stale
-  // page is useless rather than dangerous.
-  const credentials =
-    submission.uploaded_at === null && c.env.SYNTHESIZER_SUBMISSIONS_API_TOKEN
-      ? await temporaryCredentials(c.env, submission.upload_token)
-      : null;
-
-  return page(c, <Upload counts={counts} submission={submission} credentials={credentials} />, {
-    cache: "no-store",
-  });
+  return page(
+    c,
+    <Upload
+      counts={await tabCounts(c.env.DB)}
+      submission={submission}
+      partSize={PART_SIZE}
+      maxParts={MAX_PARTS}
+    />,
+    { cache: "no-store" },
+  );
 });
 
-app.post("/submit/:token/upload-url", async (c) => {
-  const submission = await bySubmissionToken(c.env.DB, c.req.param("token"));
+app.post("/submit/:token/part/:number{[0-9]+}", requireRole("contributor"), async (c) => {
+  const submission = await ownSubmission(c);
   if (submission === null) {
     return c.json({ error: "No such submission" }, 404);
   }
@@ -285,18 +793,32 @@ app.post("/submit/:token/upload-url", async (c) => {
     return c.json({ error: "Submissions are not open" }, 503);
   }
 
-  const body = await c.req.json().catch(() => ({}));
-  const { url, key } = await presignUpload(
-    c.env,
-    submission.upload_token,
-    String(body.filename ?? "submission.bin"),
-  );
+  // The ceiling. A part larger than the platform's request body limit never
+  // reaches this code, so bounding the count bounds the total -- and unlike a
+  // declared size, it is not something a client can misreport.
+  const partNumber = Number(c.req.param("number"));
+  if (partNumber > MAX_PARTS) {
+    return c.json(
+      {
+        error:
+          `A submission may be at most ${MAX_PARTS} parts of ` +
+          `${PART_SIZE} bytes. This file is larger than the catalogue ` +
+          "accepts through the portal.",
+      },
+      413,
+    );
+  }
 
-  return c.json({ url, key }, 200, { "cache-control": "no-store" });
+  if (c.req.raw.body === null) {
+    return c.json({ error: "That part carried no data" }, 400);
+  }
+
+  await writePart(c.env, submission, partNumber, c.req.raw.body);
+  return c.json({ part: partNumber }, 200, { "cache-control": "no-store" });
 });
 
-app.post("/submit/:token/complete", async (c) => {
-  const submission = await bySubmissionToken(c.env.DB, c.req.param("token"));
+app.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
+  const submission = await ownSubmission(c);
   const counts = await tabCounts(c.env.DB);
 
   if (submission === null) {
@@ -307,10 +829,9 @@ app.post("/submit/:token/complete", async (c) => {
     );
   }
 
-  // What is in the bucket is the only account of the upload that cannot be
-  // wrong, so it is read from R2 rather than taken from the form that says
-  // the transfer finished.
-  const file = await uploadedFile(c.env, submission.upload_token);
+  // Assembling the parts is what turns them into an object, and the size
+  // comes back from R2 rather than from the form that says it finished.
+  const file = await finishUpload(c.env, submission);
   if (file === null) {
     return page(c, <NothingArrived counts={counts} submission={submission} />, {
       status: 404,
@@ -318,72 +839,474 @@ app.post("/submit/:token/complete", async (c) => {
     });
   }
 
-  const digest = String((await c.req.parseBody())["declared_sha256"] ?? "")
-    .trim()
-    .toLowerCase();
+  // What the sender says it sent, against what the bucket says it holds. A
+  // transfer that stopped part way is the failure this has to catch, and a
+  // size that does not match catches it without asking anybody to run
+  // shasum -- which was the old answer, and one most people skipped.
+  const expected = Number((await c.req.parseBody()).expected_size ?? 0);
+  if (expected > 0 && expected !== file.size) {
+    return page(
+      c,
+      <Truncated counts={counts} submission={submission} arrived={file.size} expected={expected} />,
+      { status: 409, cache: "no-store" },
+    );
+  }
 
-  await c.env.DB.prepare(
+  const complete = await c.env.DB.prepare(
     `UPDATE submissions
-     SET uploaded_at = ?, uploaded_size_bytes = ?, filename = ?, r2_key = ?,
-         declared_sha256 = COALESCE(?, declared_sha256)
-     WHERE upload_token = ?`,
+     SET uploaded_at = ?, uploaded_size_bytes = ?, r2_key = ?, upload_id = NULL
+     WHERE upload_token = ?
+     RETURNING *`,
   )
     .bind(
       new Date().toISOString(),
       file.size,
-      file.filename,
       file.key,
-      /^[0-9a-f]{64}$/.test(digest) ? digest : null,
       submission.upload_token,
     )
-    .run();
+    .first();
+
+  const origin = new URL(c.req.url).origin;
+  // Both advisory, and neither awaited: a contributor's upload does not
+  // become slower, or fail, because GitHub is having an afternoon.
+  c.executionCtx.waitUntil(notifySubmission(c.env, origin, complete));
+  c.executionCtx.waitUntil(
+    requestValidation(c.env, origin, complete).then(async (asked) => {
+      if (asked) {
+        await c.env.DB.prepare(
+          "UPDATE submissions SET validation_state = 'running' WHERE submission_id = ?",
+        )
+          .bind(complete.submission_id)
+          .run();
+      }
+    }),
+  );
 
   return c.redirect(`${BASE}/submit/${submission.upload_token}`, 303);
 });
 
 /**
- * Guard the one page that writes.
+ * Hand the runner the object to check.
  *
- * Submitters need no account, since a human reads every submission before
- * anything is published, but the page doing that reading is a write
- * endpoint. With no credentials configured it refuses to serve rather than
- * standing open.
+ * Signed rather than session-guarded: a GitHub runner has no account here and
+ * should not be given one. The link says "this object, until this time" and
+ * nothing else, which is the whole of what a validation run needs.
+ */
+app.get("/validate/:id{[0-9]+}/file", async (c) => {
+  const id = Number(c.req.param("id"));
+  const allowed = await fetchAuthorised(
+    c.env,
+    id,
+    c.req.query("expires"),
+    c.req.query("signature"),
+  );
+  if (!allowed) {
+    return c.text("That link is not valid.", 403, { "cache-control": "no-store" });
+  }
+
+  const submission = await c.env.DB.prepare(
+    "SELECT r2_key FROM submissions WHERE submission_id = ?",
+  )
+    .bind(id)
+    .first();
+  const object =
+    submission?.r2_key == null
+      ? null
+      : await c.env.SUBMISSIONS.get(submission.r2_key);
+
+  if (object === null) {
+    return c.text("There is no file for that submission.", 404, {
+      "cache-control": "no-store",
+    });
+  }
+
+  // Streamed straight out of R2, the same way parts are streamed in: the
+  // bytes never pass through any JavaScript here.
+  return new Response(object.body, {
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-length": String(object.size),
+      "cache-control": "no-store",
+    },
+  });
+});
+
+/**
+ * Take the runner's verdict.
+ *
+ * Authenticated by a shared secret rather than a session, for the same reason
+ * as the fetch above. What arrives is confirmed rather than trusted: it comes
+ * from a version of the checker this Worker did not install.
+ */
+app.post("/validate/:id{[0-9]+}", async (c) => {
+  if (!reportAuthorised(c.env, c.req.header("authorization")?.slice(7))) {
+    return c.json({ error: "Not authorised" }, 403);
+  }
+
+  const id = Number(c.req.param("id"));
+  const report = await c.req.json().catch(() => null);
+  if (report === null) {
+    return c.json({ error: "That is not a report" }, 400);
+  }
+
+  const { state, dataType, sha256 } = readReport(report);
+  const updated = await c.env.DB.prepare(
+    `UPDATE submissions
+     SET validation_state = ?, validation_report_json = ?,
+         detected_data_type = ?, sha256 = ?, validated_at = ?
+     WHERE submission_id = ?
+     RETURNING submission_id`,
+  )
+    .bind(
+      state,
+      JSON.stringify(report).slice(0, 100_000),
+      dataType,
+      sha256,
+      new Date().toISOString(),
+      id,
+    )
+    .first();
+
+  if (updated === null) {
+    return c.json({ error: "No such submission" }, 404);
+  }
+  return c.json({ recorded: state }, 200, { "cache-control": "no-store" });
+});
+
+// The review queue was guarded by one shared username and password, which
+// said that somebody with the credential was reviewing and never which
+// somebody. Roles replace it: a decision is now attributable, and granting or
+// withdrawing the ability to make one does not mean telling everybody a new
+// password.
+app.use("/review", requireRole("reviewer"));
+app.use("/review/*", requireRole("reviewer"));
+
+/**
+ * Everything the review queue shows, gathered the same way however it is
+ * reached.
+ *
+ * A decision re-renders the queue, so both routes need the identical set; a
+ * helper is what stops them drifting apart when one gains a column.
+ *
+ * Only what is waiting is fetched in full. Settled submissions are counted
+ * and the last few named, because the queue is a way in to the things that
+ * need deciding and the rest is a page of its own.
  *
  * @param {import("hono").Context} c Request context.
- * @param {Function} next The next handler.
- * @returns {Promise<Response | void>} A refusal, or the guarded handler.
+ * @returns {Promise<object>} Counts, what is waiting, and who is waiting.
  */
-const requireReviewer = (c, next) => {
-  const username = c.env.SYNDEX_REVIEW_USER;
-  const password = c.env.SYNDEX_REVIEW_PASSWORD;
-  if (!username || !password) {
-    return c.text("The review queue is not configured.", 503);
-  }
-  return basicAuth({ username, password })(c, next);
-};
+async function reviewState(c) {
+  const [counts, submissions, decided, people, accounts] = await Promise.all([
+    tabCounts(c.env.DB),
+    // Only those with a file. A submission registered and then abandoned is
+    // not something a reviewer can do anything about, and a queue that fills
+    // with them is one nobody trusts to be a list of work. The contributor
+    // still sees theirs, marked as having sent nothing.
+    c.env.DB.prepare(
+      `SELECT * FROM submissions
+       WHERE state = 'pending' AND uploaded_at IS NOT NULL
+       ORDER BY submitted_at LIMIT 100`,
+    ).all(),
+    c.env.DB.prepare(
+      `SELECT submission_id, name, state, reviewed_at FROM submissions
+       WHERE state != 'pending' ORDER BY reviewed_at DESC LIMIT 5`,
+    ).all(),
+    // Everyone waiting, and the first page of everyone who holds a role. The
+    // queue is the point of this page, so the account list is cut short here
+    // and continues on one of its own rather than pushing the queue down.
+    c.env.DB.prepare(
+      `SELECT user_id, login, name, role, created_at, access_requested_at,
+              access_request_note
+       FROM users
+       WHERE access_requested_at IS NOT NULL OR role != 'pending'
+       ORDER BY access_requested_at IS NULL, access_requested_at, login
+       LIMIT ?`,
+    )
+      .bind(ACCOUNTS_SHOWN + 1)
+      .all(),
+    // Split by outcome rather than totalled. "Nine decided" says how busy the
+    // queue has been; "seven approved, two rejected" says what happens to a
+    // submission, which is the thing anybody looking at this wants to know.
+    c.env.DB.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM users WHERE role != 'pending') AS accounts,
+         (SELECT COUNT(*) FROM submissions WHERE state = 'approved')
+           AS approved,
+         (SELECT COUNT(*) FROM submissions WHERE state = 'rejected')
+           AS rejected`,
+    ).first(),
+  ]);
 
-app.use("/review", requireReviewer);
-app.use("/review/*", requireReviewer);
+  return {
+    counts,
+    submissions: submissions.results,
+    recent: decided.results,
+    people: people.results,
+    accountCount: accounts.accounts,
+    approvedCount: accounts.approved,
+    rejectedCount: accounts.rejected,
+  };
+}
 
-app.get("/review", async (c) => {
+/**
+ * Everyone who has ever signed in.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @returns {Promise<object[]>} The accounts, those with a role first.
+ */
+function allAccounts(c) {
+  return c.env.DB.prepare(
+    `SELECT user_id, login, name, role, created_at, last_seen_at,
+            access_requested_at, access_request_note
+     FROM users
+     -- Accounts with no role first. Somebody who has signed in and not asked
+     -- for anything is invisible everywhere else in the portal, and is
+     -- exactly who this page exists to find: a request through the form is
+     -- not the only way somebody says they would like to contribute.
+     ORDER BY role = 'pending' DESC, last_seen_at DESC
+     LIMIT 500`,
+  ).all();
+}
+
+app.get("/review", async (c) =>
+  page(
+    c,
+    <Review {...(await reviewState(c))} viewer={c.get("viewer").user} />,
+    { cache: "no-store" },
+  ),
+);
+
+app.get("/review/previous", async (c) => {
   const [counts, { results }] = await Promise.all([
     tabCounts(c.env.DB),
     c.env.DB.prepare(
-      `SELECT * FROM submissions
-       ORDER BY state = 'pending' DESC, submitted_at DESC
-       LIMIT 200`,
+      `SELECT * FROM submissions WHERE state != 'pending'
+       ORDER BY reviewed_at DESC LIMIT 200`,
     ).all(),
   ]);
 
   return page(
     c,
-    <Review
+    <PreviousSubmissions
       counts={counts}
       submissions={results}
       bucket={c.env.SYNTHESIZER_SUBMISSIONS_BUCKET}
     />,
     { cache: "no-store" },
   );
+});
+
+app.get("/review/:id{[0-9]+}", async (c) => {
+  const [counts, submission] = await Promise.all([
+    tabCounts(c.env.DB),
+    c.env.DB.prepare("SELECT * FROM submissions WHERE submission_id = ?")
+      .bind(Number(c.req.param("id")))
+      .first(),
+  ]);
+
+  if (submission === null) {
+    return page(
+      c,
+      <NotFound counts={counts} message="There is no such submission." />,
+      { status: 404, cache: "no-store" },
+    );
+  }
+
+  // Whether these exact bytes are already somewhere. Asked here rather than
+  // stored, so it stays true as the catalogue and the queue change.
+  const twin = await duplicatesOf(c.env, submission.submission_id, submission.sha256);
+  const duplicate =
+    twin.published !== null
+      ? { name: twin.published, published: true }
+      : twin.pending !== null
+        ? { name: twin.pending, published: false }
+        : null;
+
+  return page(
+    c,
+    <SubmissionReview
+      counts={counts}
+      submission={submission}
+      bucket={c.env.SYNTHESIZER_SUBMISSIONS_BUCKET}
+      duplicate={duplicate}
+    />,
+    { cache: "no-store" },
+  );
+});
+
+/**
+ * Which roles this account may grant.
+ *
+ * A reviewer may let somebody submit, which is a small decision that should
+ * not need escalating. Only an admin may grant the ability to publish into
+ * the catalogue, or the ability to grant it.
+ *
+ * @param {object} viewer The account making the change.
+ * @returns {string[]} The roles it may set.
+ */
+function grantableRoles(viewer) {
+  return viewer.role === "admin"
+    ? ["pending", "contributor", "reviewer", "admin"]
+    : ["pending", "contributor"];
+}
+
+app.get("/accounts", requireRole("reviewer"), async (c) =>
+  page(
+    c,
+    <Accounts
+      counts={await tabCounts(c.env.DB)}
+      people={(await allAccounts(c)).results}
+      viewer={c.get("viewer").user}
+    />,
+    { cache: "no-store" },
+  ),
+);
+
+/**
+ * Answer with whichever list the action was taken from.
+ *
+ * An overlay opened on the accounts page that answered by rendering the
+ * review queue would read as having lost the page rather than as having saved
+ * the change.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object} viewer The account that acted.
+ * @param {unknown} from Which page the overlay was opened on.
+ * @param {string} note What happened.
+ * @returns {Promise<Response>} The rendered page.
+ */
+async function accountsOrQueue(c, viewer, from, note) {
+  if (from === "accounts") {
+    return page(
+      c,
+      <Accounts
+        counts={await tabCounts(c.env.DB)}
+        people={(await allAccounts(c)).results}
+        viewer={viewer}
+        note={note}
+      />,
+      { cache: "no-store" },
+    );
+  }
+
+  return page(
+    c,
+    <Review {...(await reviewState(c))} viewer={viewer} note={note} />,
+    { cache: "no-store" },
+  );
+}
+
+/**
+ * Whether this account may act on that one, and why not when it may not.
+ *
+ * The same answer governs granting a role and revoking access, so it is asked
+ * once: two copies of this would be two things to keep in step, and the one
+ * that fell behind would be a way to do by one route what the other refuses.
+ *
+ * @param {object} viewer The account acting.
+ * @param {object | null} target The account being acted on.
+ * @returns {string | null} Why not, or null when they may.
+ */
+function refusalFor(viewer, target) {
+  if (target === null) {
+    return "There is no such account.";
+  }
+  if (!grantableRoles(viewer).includes(target.role)) {
+    // What the account already holds has to be within the actor's gift, not
+    // only what they are trying to give it -- otherwise a reviewer could
+    // strip an admin of authority they could not themselves confer.
+    return `Only an admin can change a ${target.role}.`;
+  }
+  if (target.user_id === viewer.user_id) {
+    // Otherwise the last admin can remove their own authority and leave
+    // nobody able to restore it -- recoverable only through the configured
+    // administrator list, which is a worse way to find out about this.
+    return "You cannot change your own role.";
+  }
+  return null;
+}
+
+/**
+ * Find the account an action names.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @returns {Promise<object | null>} The account, or null.
+ */
+function targetAccount(c) {
+  return c.env.DB.prepare(
+    "SELECT user_id, login, role FROM users WHERE user_id = ?",
+  )
+    .bind(Number(c.req.param("id")))
+    .first();
+}
+
+app.post("/review/users/:id{[0-9]+}/revoke", async (c) => {
+  const viewer = c.get("viewer").user;
+  const form = await c.req.parseBody();
+  const target = await targetAccount(c);
+
+  let note = refusalFor(viewer, target);
+  if (note === null) {
+    // Both halves, because either alone leaves something behind: a role with
+    // no session is an account that can sign straight back in with what it
+    // had, and a session with no role is somebody still holding a key to a
+    // door that has been locked.
+    await c.env.DB.prepare(
+      `UPDATE users
+       SET role = 'pending', access_requested_at = NULL,
+           access_request_note = NULL
+       WHERE user_id = ?`,
+    )
+      .bind(target.user_id)
+      .run();
+    await endSessions(c.env, target.user_id);
+    note = `${target.login} has been signed out and left with no role.`;
+  }
+
+  return accountsOrQueue(c, viewer, form.from, note);
+});
+
+app.post("/review/users/:id{[0-9]+}", async (c) => {
+  const viewer = c.get("viewer").user;
+  const form = await c.req.parseBody();
+  const role = String(form.role ?? "");
+  const subject = Number(c.req.param("id"));
+
+  const grantable = grantableRoles(viewer);
+  const target = await targetAccount(c);
+
+  let note;
+  if (target === null) {
+    note = "There is no such account.";
+  } else if (!grantable.includes(role)) {
+    note = `You cannot grant the ${role || "requested"} role.`;
+  } else if (!grantable.includes(target.role)) {
+    // The role being granted is not the only thing that needs checking. A
+    // reviewer may grant `contributor`, and without this could set an admin
+    // to `contributor` and strip the authority they could not confer -- so
+    // what the account already holds has to be within their gift too.
+    note = `Only an admin can change a ${target.role}.`;
+  } else if (subject === viewer.user_id) {
+    // Otherwise the last admin can remove their own authority and leave
+    // nobody able to restore it -- recoverable only through the configured
+    // administrator list, which is a worse way to find out about this.
+    note = "You cannot change your own role.";
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE users
+       SET role = ?,
+           -- Granting or refusing answers the request either way, so it
+           -- stops being something waiting to be attended to.
+           access_requested_at = NULL,
+           access_request_note = NULL
+       WHERE user_id = ?`,
+    )
+      .bind(role, subject)
+      .run();
+    note = `${target.login} is now a ${role}.`;
+  }
+
+  return accountsOrQueue(c, viewer, form.from, note);
 });
 
 app.post("/review/:id{[0-9]+}", async (c) => {
@@ -404,21 +1327,11 @@ app.post("/review/:id{[0-9]+}", async (c) => {
     )
     .first();
 
-  const [counts, { results }] = await Promise.all([
-    tabCounts(c.env.DB),
-    c.env.DB.prepare(
-      `SELECT * FROM submissions
-       ORDER BY state = 'pending' DESC, submitted_at DESC
-       LIMIT 200`,
-    ).all(),
-  ]);
-
   return page(
     c,
     <Review
-      counts={counts}
-      submissions={results}
-      bucket={c.env.SYNTHESIZER_SUBMISSIONS_BUCKET}
+      {...(await reviewState(c))}
+      viewer={c.get("viewer").user}
       note={
         submission === null
           ? "That submission has already been reviewed."

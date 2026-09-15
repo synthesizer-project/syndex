@@ -129,9 +129,16 @@
   z-index: 0;
 }
 
+/*
+ * The landing page's account controls sit above the content rather than over
+ * it. They were absolutely positioned back when the bar held one button and
+ * could not collide with anything; it now holds up to three, and on a narrow
+ * screen those landed on top of the logo. In flow they push the content down
+ * instead, and `main` is already flex-1 and centred, so the page still sits
+ * in the middle of whatever room is left.
+ */
 body > .landing-links {
-  position: absolute;
-  inset: 0 0 auto;
+  position: static;
 }
 
 /* The org site's card: same radius, same translucent surface, same border. */
@@ -410,4 +417,52 @@ dialog[open] {
 
 .preview-overlay .preview-close:hover {
   color: var(--color-text);
+}
+
+/*
+ * The submission form answers itself one question at a time.
+ *
+ * Nothing below the data type means anything until one is chosen -- a name, a
+ * description and a licence all read differently for a grid than for a cache
+ * of simulation output -- so nothing below it is shown until one is.
+ *
+ * Done with :has() rather than script, so the form behaves the same with
+ * JavaScript off as on. The worked examples that go with each type are
+ * placeholder text, which is an attribute and so the one part of this that
+ * has to be script; see submit.js.
+ */
+#submit-form:has(#data_type option[value=""]:checked) .needs-type {
+  display: none;
+}
+
+
+/*
+ * Turning while an upload request is in flight.
+ *
+ * A progress bar that only advances as each ninety megabyte piece lands looks
+ * stopped, and the bar now moves byte by byte -- but a transfer can still sit
+ * on one piece for a minute on a slow connection, and something turning is
+ * what says the page has not given up.
+ */
+@keyframes syndex-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid var(--color-line);
+  border-top-color: var(--color-accent-light);
+  border-radius: 50%;
+  animation: syndex-spin 0.8s linear infinite;
+}
+
+/* Something that never stops moving is exactly what this setting is for. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
 }

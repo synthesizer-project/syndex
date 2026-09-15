@@ -10,6 +10,8 @@
  * results table. Nothing here runs in the browser.
  */
 
+import { createContext, useContext } from "hono/jsx";
+
 import {
   AXIS_UNITS,
   MODEL_LABELS,
@@ -21,6 +23,22 @@ import {
 
 /** Where the portal lives, and where its stylesheet and htmx are served. */
 export const BASE = "/syndex";
+
+/**
+ * Who is reading the page, and what is waiting for them.
+ *
+ * A context rather than a prop because only the header uses it, and every one
+ * of the portal's dozen pages sits between the route and the header. Threading
+ * `user` through all of them would add a parameter to every page component to
+ * satisfy one bar at the top; `page()` provides it once instead.
+ *
+ * The default is the signed-out state, so a component rendered outside a
+ * provider -- an htmx fragment, an error page -- renders correctly rather than
+ * throwing.
+ *
+ * @type {import("hono/jsx").Context<{user: object | null, waiting: number}>}
+ */
+export const ViewerContext = createContext({ user: null, waiting: 0 });
 
 /**
  * The API's own host.
@@ -283,6 +301,81 @@ const Background = () => (
  * The tab bar is suppressed on the landing page, which signposts the same
  * four places at full size and does not need to do it twice.
  */
+/**
+ * The account controls, which are the same on every page that has a header.
+ *
+ * What is offered depends on who is reading: everyone is offered the
+ * catalogue's submission route, but a visitor who is not signed in is sent to
+ * sign in first, and someone who has not been granted access is sent to ask
+ * for it. Making the button say the same thing for everybody and refusing at
+ * the end of the form would waste the time of the people most likely to be
+ * new here.
+ *
+ * @param {object} props Component props.
+ * @param {boolean} props.showSubmit Whether this page offers the submit route.
+ * @returns {unknown} The rendered controls.
+ */
+const AccountLinks = ({ showSubmit = true }) => {
+  const { user, waiting } = useContext(ViewerContext);
+  const role = user?.role ?? null;
+
+  // Its own full-width row on a phone, where three buttons beside four tab
+  // links wrap into an unreadable tangle; beside them from `sm` up.
+  return (
+    <nav
+      aria-label="Account"
+      class="flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto"
+    >
+      {showSubmit && (
+        <a href={`${BASE}/submit`} class="btn text-xs no-underline">
+          Submit a dataset
+        </a>
+      )}
+      {(role === "reviewer" || role === "admin") && (
+        <a href={`${BASE}/review`} class="btn text-xs no-underline">
+          Review
+          {waiting > 0 && (
+            <span class="ml-1.5 rounded-full bg-accent-light px-1.5 py-0.5 text-[0.65rem] leading-none text-bg tabular-nums">
+              {waiting}
+            </span>
+          )}
+        </a>
+      )}
+      {/* Reviewers reach the same page from the queue. It is in the header
+          for admins because granting a role is a thing they do without
+          anything having prompted it -- somebody signs in and says, in
+          person, that they would like to contribute, and waiting for them to
+          file a request through the portal helps nobody. */}
+      {role === "admin" && (
+        <a href={`${BASE}/accounts`} class="btn-quiet text-xs no-underline">
+          Admin
+        </a>
+      )}
+      {user === null ? (
+        <a
+          href={`${BASE}/login`}
+          class="btn-quiet text-xs no-underline"
+          data-sign-in
+        >
+          Sign in
+        </a>
+      ) : (
+        // A form, because signing out changes something. A link would let any
+        // page anywhere sign a reader out by embedding it.
+        <form method="post" action={`${BASE}/logout`} class="contents">
+          <button
+            type="submit"
+            class="btn-quiet cursor-pointer text-xs"
+            title={`Signed in as ${user.login}`}
+          >
+            Sign out
+          </button>
+        </form>
+      )}
+    </nav>
+  );
+};
+
 export const Layout = ({
   title,
   description = null,
@@ -336,10 +429,7 @@ export const Layout = ({
           would only say them twice. */}
       {!bare && (
         <header class="relative border-b border-line">
-          <div
-            class={`flex w-full flex-wrap items-center gap-x-8 gap-y-3 px-6 py-5 ${showSubmit ? "pr-48" : ""
-              }`}
-          >
+          <div class="flex w-full flex-wrap items-center gap-x-8 gap-y-3 px-4 py-4 sm:px-6 sm:py-5">
             <a
               href={BASE}
               class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
@@ -380,26 +470,14 @@ export const Layout = ({
                 ))}
               </nav>
             )}
-            {showSubmit && (
-              <a
-                href={`${BASE}/submit`}
-                class="btn absolute top-4 right-6 text-xs no-underline"
-              >
-                Submit a dataset
-              </a>
-            )}
+            <AccountLinks showSubmit={showSubmit} />
           </div>
         </header>
       )}
       {bare && (
-        <nav
-          aria-label="Syndex links"
-          class="landing-links flex w-full flex-wrap justify-end gap-2 px-6 pt-6"
-        >
-          <a href={`${BASE}/submit`} class="btn text-xs no-underline">
-            Submit a dataset
-          </a>
-        </nav>
+        <div class="landing-links flex w-full px-6 pt-6">
+          <AccountLinks />
+        </div>
       )}
       {/* On the landing page the content is centred in whatever room the
           viewport has, which is what stops a tall screen ending in a field

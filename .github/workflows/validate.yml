@@ -1,0 +1,86 @@
+# Read a submitted file, and tell the portal what it is.
+#
+# `syndex check` is Python and needs h5py, so it cannot run in the Worker that
+# took the file. It runs here instead: the Worker fires a repository_dispatch
+# when an upload finishes, this fetches the object through a signed link it
+# was handed, runs the same checker a contributor is told to run, and posts
+# the verdict back.
+#
+# A runner rather than a container because a container needs a paid Workers
+# plan and this does not. Runner disk is 14 GB, larger than any container tier
+# offered, which matters for a catalogue whose grids reach 30 GB.
+#
+# Nothing here decides anything. The rules live in `syndex.check`, a reviewer
+# reads every submission regardless, and a run that fails to report leaves the
+# submission exactly as it was.
+name: Validate a submission
+
+on:
+  repository_dispatch:
+    types: [validate-submission]
+
+# One at a time per submission, and never cancel one in flight: a report that
+# arrives is worth more than a run that was tidier about being replaced.
+concurrency:
+  group: validate-${{ github.event.client_payload.submission_id }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    # Generous: the fetch is most of it, and a 30 GB grid on a runner's
+    # connection is not quick. Well under the six hours the link is good for.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # From the checkout rather than from PyPI, so a submission is checked by
+      # the code that is on main rather than by whatever was last released.
+      - name: Install the checker
+        run: pip install .
+
+      - name: Fetch the submitted file
+        env:
+          FETCH_URL: ${{ github.event.client_payload.fetch_url }}
+        run: |
+          curl --fail --silent --show-error --location \
+            --max-time 5400 --output submitted.bin "$FETCH_URL"
+          ls -l submitted.bin
+
+      # The digest costs nothing here: every byte is read to check the file
+      # anyway. It is what `files.sha256` needs at publication, and it answers
+      # "have we already got exactly these bytes" before a reviewer spends any
+      # time on the submission.
+      - name: Check it
+        run: |
+          sha256=$(sha256sum submitted.bin | cut -d' ' -f1)
+
+          # A non-zero exit is a verdict -- the file cannot be published as it
+          # stands -- rather than a failure of this job, and the JSON is
+          # printed either way.
+          syndex-check submitted.bin --json > report.json || true
+
+          # Unless the checker died outright, in which case say so rather than
+          # posting nothing and leaving the submission looking unexamined.
+          if [ ! -s report.json ]; then
+            printf '%s' '{"state":"failed","errors":["The checker could not run."]}' \
+              > report.json
+          fi
+
+          jq --arg sha "$sha256" '. + {sha256: $sha}' report.json > reported.json
+
+      - name: Report back
+        env:
+          REPORT_URL: ${{ github.event.client_payload.report_url }}
+          SECRET: ${{ secrets.SYNDEX_REPORT_SECRET }}
+        run: |
+          curl --fail --silent --show-error \
+            --request POST "$REPORT_URL" \
+            --header "authorization: Bearer $SECRET" \
+            --header "content-type: application/json" \
+            --data @reported.json

@@ -1072,7 +1072,6 @@ wheels = [
 
 [[package]]
 name = "synthesizer-syndex"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },
@@ -1099,13 +1098,14 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'publish'", specifier = ">=1.34" },
+    { name = "boto3", marker = "extra == 'test'", specifier = ">=1.34" },
     { name = "h5py", specifier = ">=3.10" },
     { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.8" },
+    { name = "matplotlib", marker = "extra == 'test'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
-    { name = "synthesizer-syndex", extras = ["publish", "plots"], marker = "extra == 'test'" },
 ]
-provides-extras = ["publish", "plots", "test"]
+provides-extras = ["plots", "publish", "test"]
 
 [[package]]
 name = "tomli"

@@ -44,13 +44,34 @@ export const PART_SIZE = 90 * 1024 * 1024;
  * so a client cannot exceed `PART_SIZE` per part however it lies, and the
  * total is therefore bounded by how many parts are accepted.
  *
- * 400 parts is a little over 35 GB, which covers the largest grids in the
- * catalogue with margin. R2 itself allows 10,000.
+ * 2000 parts is a little over 175 GB. The largest grids in the catalogue are
+ * around 30 GB, so this is room for that to grow several times over rather
+ * than a ceiling anybody is expected to meet; R2 itself allows 10,000 parts.
  */
-export const MAX_PARTS = 400;
+export const MAX_PARTS = 2000;
 
-/** The resulting ceiling, for the page that has to tell somebody what it is. */
+/**
+ * How much of that a browser is asked to attempt.
+ *
+ * A different question from what the service will store. An interrupted
+ * browser upload starts again from the first piece -- the page cannot pick up
+ * where a closed tab left off, because it no longer has the file -- so beyond
+ * a certain size the browser is simply the wrong tool, and saying so is
+ * better than letting somebody discover it four hours in.
+ *
+ * 106 parts is a shade over 10 GB. 233 of the catalogue's 244 datasets are
+ * under 1 GB, so this is generous for everything the browser is actually for;
+ * the eleven that are larger are grids on an HPC filesystem, where a browser
+ * was never going to be the way to send them.
+ *
+ * `syndex-submit` has no such problem: it holds the file, so it resumes. That
+ * is what the larger ceiling above is for.
+ */
+export const BROWSER_MAX_PARTS = 106;
+
+/** The ceilings, for the pages that have to tell somebody what they are. */
 export const MAX_UPLOAD_BYTES = PART_SIZE * MAX_PARTS;
+export const BROWSER_UPLOAD_BYTES = PART_SIZE * BROWSER_MAX_PARTS;
 
 /** How many submissions one account may have waiting at once. */
 export const MAX_PENDING_PER_USER = 10;

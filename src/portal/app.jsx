@@ -27,6 +27,7 @@ import {
   profileForCode,
   recordSignIn,
   safeReturn,
+  sessionForGithubToken,
   startSession,
 } from "./auth.js";
 import {
@@ -69,6 +70,8 @@ import {
   requestValidation,
 } from "./validation.js";
 import {
+  BROWSER_MAX_PARTS,
+  BROWSER_UPLOAD_BYTES,
   MAX_PARTS,
   MAX_UPLOAD_BYTES,
   PART_SIZE,
@@ -387,6 +390,55 @@ app.get("/auth/callback", async (c) => {
   const user = await recordSignIn(c.env, profile);
   await startSession(c, user.user_id);
   return c.redirect(returnTo, 303);
+});
+
+/**
+ * What a command-line client needs to begin signing in.
+ *
+ * The client id rather than a hard-coded copy of it, so a client built
+ * against one deployment works against another without being rebuilt.
+ */
+app.get("/auth/cli", (c) =>
+  c.json(
+    { client_id: c.env.GITHUB_CLIENT_ID ?? null },
+    authConfigured(c.env) ? 200 : 503,
+    { "cache-control": "no-store" },
+  ),
+);
+
+/**
+ * Turn a token from GitHub's device flow into a session here.
+ *
+ * The client proves who it is to GitHub, which is the only thing it can
+ * prove; this asks GitHub who that was and issues an ordinary session for
+ * them. No password, no key, nothing to store on the machine but a session
+ * that expires and can be revoked from the account page.
+ */
+app.post("/auth/cli", async (c) => {
+  if (!authConfigured(c.env)) {
+    return c.json({ error: "Signing in is not configured" }, 503);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const githubToken = String(body.github_token ?? "");
+  if (githubToken === "") {
+    return c.json({ error: "No token" }, 400);
+  }
+
+  const session = await sessionForGithubToken(c.env, githubToken);
+  if (session === null) {
+    return c.json({ error: "GitHub did not recognise that token" }, 401);
+  }
+
+  return c.json(
+    {
+      token: session.token,
+      login: session.user.login,
+      role: session.user.role,
+    },
+    200,
+    { "cache-control": "no-store" },
+  );
 });
 
 app.post("/logout", async (c) => {
@@ -897,7 +949,9 @@ app.get("/submit/:token", requireRole("contributor"), async (c) => {
       counts={await tabCounts(c.env.DB)}
       submission={submission}
       partSize={PART_SIZE}
-      maxParts={MAX_PARTS}
+      browserParts={BROWSER_MAX_PARTS}
+      browserLimit={BROWSER_UPLOAD_BYTES}
+      limit={MAX_UPLOAD_BYTES}
       duplicate={await duplicateOf(c, submission)}
     />,
     { cache: "no-store" },

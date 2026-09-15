@@ -1876,20 +1876,22 @@ export const Upload = ({
   counts,
   submission,
   partSize,
-  maxParts,
+  browserParts,
+  browserLimit,
+  limit,
   duplicate = null,
 }) => {
   const uploaded = submission.uploaded_at !== null;
 
   return (
     <Layout
-      title={uploaded ? "Submission complete" : "Send the file"}
+      title={uploaded ? "Submission complete" : "Upload dataset"}
       counts={counts}
       active={null}
       showSubmit={false}
     >
       <h1 class="text-3xl sm:text-4xl">
-        {uploaded ? "Submission complete" : "Send the file"}
+        {uploaded ? "Submission complete" : "Upload dataset"}
       </h1>
       <p class="mt-3 mb-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
         <span class="font-mono break-all text-text">{submission.name}</span>
@@ -1950,7 +1952,7 @@ export const Upload = ({
             <div class="mt-3">
               <Command>syndex-check YOUR-FILE</Command>
             </div>
-            <p class="mt-3 text-xs text-muted">
+            <p class="mt-3 text-right text-xs">
               <a
                 href="https://github.com/synthesizer-project/syndex#readme"
                 target="_blank"
@@ -1963,8 +1965,8 @@ export const Upload = ({
 
           <Section title="From this browser">
             <p class="mb-4 text-sm text-muted">
-              Up to {size(partSize * maxParts)} maximum. If your file exceeds
-              this, use the command line option below.
+              Up to {size(browserLimit)} maximum. If your file exceeds this,
+              use the command line option below.
             </p>
             {/* Revealed by upload.js, which is also what sends the file: a
                 browser running none is never shown a picker that could not
@@ -1988,7 +1990,7 @@ export const Upload = ({
                 disabled
                 data-part-url={`${BASE}/submit/${submission.upload_token}/part`}
                 data-part-size={String(partSize)}
-                data-max-parts={String(maxParts)}
+                data-max-parts={String(browserParts)}
                 class="btn w-36 text-center"
               >
                 Upload
@@ -2029,19 +2031,33 @@ export const Upload = ({
           </Section>
 
           <Section title="From a machine that already has the file">
-            <p class="text-sm text-muted">
-              Work in progress. Use the browser for now.
+            <p class="text-sm leading-relaxed text-muted">
+              This uses the same endpoint as above, but directly from the
+              command line, enabling uploads from remote machines. This also
+              allows for resumption of terminated uploads, so it handles files
+              up to {size(limit)} rather than {size(browserLimit)}. Note that
+              the token below is what links this file to your upload, so copy
+              it exactly.
             </p>
-            <p class="mt-3 text-xs text-muted">
-              When it exists it will take this submission's token, so the file
-              is attached to what you have already described rather than
-              arriving as something separate:
-            </p>
-            <div class="mt-2">
+            <div class="mt-3">
               <Command>
-                syndex submit {submission.upload_token} YOUR-FILE
+                syndex-submit {submission.upload_token} YOUR-FILE
               </Command>
             </div>
+            <p class="mt-3 text-xs leading-relaxed text-muted">
+              It will ask you to sign in the first time, by opening a code on
+              github.com. Nothing is stored but a token for this site, in{" "}
+              <code>~/.config/syndex/</code>.
+            </p>
+            <p class="mt-3 text-right text-xs">
+              <a
+                href="https://github.com/synthesizer-project/syndex#readme"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Installation instructions
+              </a>
+            </p>
           </Section>
 
           {/* Submitted by upload.js when the last piece lands. No button:

@@ -394,6 +394,70 @@ export async function endSession(c) {
 }
 
 /**
+ * Give a command-line client a session, on the strength of a GitHub token.
+ *
+ * The client gets that token through GitHub's device flow, which is what the
+ * OAuth app has device flow enabled for: it prints a code, somebody types it
+ * into github.com, and no browser has to exist on the machine holding the
+ * file. What it hands over here is only good for asking GitHub who it
+ * belongs to.
+ *
+ * The session that comes back is an ordinary one -- the same row a browser
+ * gets, the same expiry, revoked by the same "sign out everywhere". A client
+ * is the same person, so it is the same session.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {string} githubToken A token from the device flow.
+ * @returns {Promise<{token: string, user: object} | null>} The session, or
+ *     null when GitHub does not recognise the token.
+ */
+export async function sessionForGithubToken(env, githubToken) {
+  const headers = {
+    accept: "application/vnd.github+json",
+    authorization: `Bearer ${githubToken}`,
+    "user-agent": USER_AGENT,
+  };
+
+  const response = await fetch(`${API}/user`, { headers });
+  if (!response.ok) {
+    return null;
+  }
+  const profile = await response.json();
+
+  let email = profile.email ?? null;
+  if (email === null) {
+    const addresses = await fetch(`${API}/user/emails`, { headers })
+      .then((result) => (result.ok ? result.json() : []))
+      .catch(() => []);
+    email =
+      addresses.find((entry) => entry.primary && entry.verified)?.email ?? null;
+  }
+
+  const user = await recordSignIn(env, {
+    githubId: profile.id,
+    login: profile.login,
+    name: profile.name ?? null,
+    email,
+  });
+
+  const token = mintToken();
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO sessions (token_digest, user_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?)`,
+  )
+    .bind(
+      await digest(token),
+      user.user_id,
+      new Date(now).toISOString(),
+      new Date(now + SESSION_DAYS * 86400_000).toISOString(),
+    )
+    .run();
+
+  return { token, user };
+}
+
+/**
  * End every session one account holds.
  *
  * Removing a role takes effect on that account's next request already, since
@@ -423,7 +487,12 @@ export async function endSessions(env, userId) {
  * @returns {Promise<object | null>} The signed-in user, or null.
  */
 export async function currentUser(c) {
-  const token = getCookie(c, SESSION_COOKIE);
+  // A cookie from a browser, or a bearer token from a terminal. Both name the
+  // same kind of session row -- a command-line client is the same person with
+  // the same role, and giving it a second kind of credential would mean a
+  // second set of rules about what that credential may do.
+  const bearer = c.req.header("authorization")?.match(/^Bearer (\S+)$/)?.[1];
+  const token = bearer ?? getCookie(c, SESSION_COOKIE);
   if (!token) {
     return null;
   }
@@ -438,8 +507,9 @@ export async function currentUser(c) {
 
   // An expired or revoked session leaves a cookie that will be sent on every
   // request until it expires on its own. Clearing it here stops that, and
-  // stops the header flickering between states.
-  if (user === null) {
+  // stops the header flickering between states. Nothing to clear for a
+  // bearer: the client holds it and is told to sign in again.
+  if (user === null && bearer === undefined) {
     deleteCookie(c, SESSION_COOKIE, { path: BASE });
   }
   return user;

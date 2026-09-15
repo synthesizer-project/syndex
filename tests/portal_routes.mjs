@@ -1563,10 +1563,12 @@ const tests = {
     // this is the one case where the page cannot do what was asked of it.
     assert.match(body, /id="too-large"[^>]*role="alert"/);
     assert.match(body, /Too large to upload via the browser/);
-    // The terminal client is not written, and the page says so rather than
-    // printing a command that would fail for whoever typed it.
     assert.match(body, /From a machine that already has the file/);
-    assert.match(body, /Work in progress/);
+    // The token is what attaches the file to this submission.
+    assert.match(
+      body,
+      new RegExp(`syndex-submit ${SUBMISSION.upload_token}`),
+    );
     // Nothing is minted by looking at the page.
     assert.doesNotMatch(body, /AWS_ACCESS_KEY_ID/);
     // The digest asked a contributor to do by hand what the sizes answer.
@@ -1593,15 +1595,17 @@ const tests = {
   },
 
   async "the ceiling is a part count, which a client cannot misreport"() {
+    // The service's ceiling, not the browser's. A terminal client resumes, so
+    // it is allowed files a tab would be the wrong tool for.
     const env = contributorEnv({ rows: { submission: SUBMISSION } });
     const { status, body } = await call(
-      `/syndex/submit/${SUBMISSION.upload_token}/part/401`,
+      `/syndex/submit/${SUBMISSION.upload_token}/part/2001`,
       env,
       { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } },
     );
 
     assert.equal(status, 413);
-    assert.match(body, /at most 400 parts/);
+    assert.match(body, /at most 2000 parts/);
     assert.deepEqual(env.uploaded.parts, []);
   },
 

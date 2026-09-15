@@ -1,11 +1,16 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
 
 [project]
 name = "synthesizer-syndex"
-version = "0.1.0"
+# From the git tag, so a release needs no source edit and the tag can never
+# disagree with the published metadata.
+dynamic = ["version"]
 description = "Catalogue and publication tooling for Synthesizer data"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 # Reading a file is all `syndex-check` does, and a contributor should not have
 # to install an S3 client and a plotting stack to check one before submitting.
@@ -25,9 +30,21 @@ test = ["synthesizer-syndex[publish,plots]", "pytest>=8"]
 
 [project.scripts]
 syndex-check = "syndex.check:main"
+syndex-submit = "syndex.submit:main"
 syndex-upload = "syndex.upload:main"
 syndex-plots = "syndex.plots:main"
 syndex-previews = "syndex.previews:main"
+
+[tool.hatch.version]
+source = "vcs"
+
+# Written at build time, not tracked. Mirrors Synthesizer's setuptools_scm
+# version_file so the installed package can report what it is.
+[tool.hatch.build.hooks.vcs]
+version-file = "src/syndex/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/syndex"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

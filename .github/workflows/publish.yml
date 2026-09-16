@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi-deployment
-      url: https://pypi.org/p/synthesizer-syndex
+      url: https://pypi.org/p/cosmos-syndex
     permissions:
       id-token: write
 

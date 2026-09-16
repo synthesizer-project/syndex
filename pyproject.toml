@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
-name = "synthesizer-syndex"
+name = "cosmos-syndex"
 # From the git tag, so a release needs no source edit and the tag can never
 # disagree with the published metadata.
 dynamic = ["version"]
@@ -26,7 +26,7 @@ plots = ["matplotlib>=3.8"]
 # Everything, so the tests cover the publishing and plotting paths too. Named
 # through the other extras rather than repeated, which is what stops a
 # dependency added to one of them going missing from CI.
-test = ["synthesizer-syndex[publish,plots]", "pytest>=8"]
+test = ["cosmos-syndex[publish,plots]", "pytest>=8"]
 
 [project.scripts]
 syndex-check = "syndex.check:main"

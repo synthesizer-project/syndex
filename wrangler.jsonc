@@ -33,12 +33,14 @@
     }
   ],
   // The portal's stylesheet and its vendored copy of htmx, built by
-  // `npm run build`. Assets are matched before the Worker runs, and nothing
+  // `npm run build`. Deliberately not `dist/`, which is where Python builds
+  // its wheel: one directory holding both meant `twine upload dist/*` would
+  // try to publish the site's stylesheet to PyPI. Assets are matched before the Worker runs, and nothing
   // in here sits at a /v1 path, so the API cannot be shadowed by one; with
   // no matching asset the request falls through to the Worker, which is
   // every page the portal serves.
   "assets": {
-    "directory": "dist/assets"
+    "directory": "public"
   },
   "observability": {
     "enabled": true,

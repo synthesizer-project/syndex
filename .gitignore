@@ -4,6 +4,7 @@
 .wrangler/
 __pycache__/
 dist/
+public/
 node_modules/
 *.egg-info/
 build/

@@ -35,7 +35,16 @@ from pathlib import Path
 from typing import Any
 
 import h5py
-import matplotlib
+
+try:
+    import matplotlib
+except ModuleNotFoundError as error:  # pragma: no cover - depends on the install
+    # A console script that answers a missing optional dependency with a
+    # traceback is one nobody can act on. Plotting is an extra because a
+    # contributor checking one file should not have to install it.
+    raise SystemExit(
+        "This command needs the plotting extra:\n    pip install 'cosmos-syndex[plots]'"
+    ) from error
 
 matplotlib.use("Agg")
 

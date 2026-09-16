@@ -35,7 +35,7 @@ You do not need this package for that. Browse the [catalogue](https://synthesize
 synthesizer-download --dataset bpass-2p2p1-bin-chabrier03-0p1-300p0
 ```
 
-Everything the portal shows is also available as JSON from `https://data.synthesizer-project.org`, described in [`docs/api.md`](docs/api.md).
+Everything the portal shows is also available as JSON from `https://data.synthesizer-project.org`, described in [`docs/api.md`](https://github.com/synthesizer-project/syndex/blob/main/docs/api.md).
 
 ## Contributing data
 
@@ -63,7 +63,7 @@ It signs in through GitHub's device flow the first time, sends the file in piece
 
 ## Development
 
-See [`docs/development.md`](docs/development.md) for running the service locally, the test suites, and how the pieces fit together.
+See [`docs/development.md`](https://github.com/synthesizer-project/syndex/blob/main/docs/development.md) for running the service locally, the test suites, and how the pieces fit together.
 
 ## Licence
 

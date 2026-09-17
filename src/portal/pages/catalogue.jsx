@@ -397,6 +397,26 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
       title={dataset.name}
       counts={counts}
       active={tab.id === "search" ? null : tab.id}
+      description={
+        description === ""
+          ? `${dataset.display_name}: a ${dataset.data_type.replace("_", " ")} ` +
+            `in the Synthesizer data catalogue.`
+          : description.slice(0, 300)
+      }
+      // Pasted into Slack, a grid is worth more as its own spectra than as a
+      // logo. The plot is already public, already content addressed and
+      // already the right shape for a wide card.
+      image={
+        hasPreview
+          ? {
+              src: previewUrl,
+              width: 890,
+              height: 601,
+              alt: previewAlt(dataset),
+              wide: true,
+            }
+          : null
+      }
     >
       <div class="mx-auto max-w-5xl">
         <div class="flex items-center justify-between gap-4">

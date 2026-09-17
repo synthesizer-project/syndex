@@ -31,7 +31,15 @@ import { size } from "./format.jsx";
  *
  * @type {import("hono/jsx").Context<{user: object | null, waiting: number}>}
  */
-export const ViewerContext = createContext({ user: null, waiting: 0 });
+export const ViewerContext = createContext({
+  user: null,
+  waiting: 0,
+  // Where this page lives, for the absolute URLs a link preview needs.
+  // Defaulted to production so a page rendered outside a provider still
+  // points somewhere real rather than at a relative path nothing can fetch.
+  url: "https://synthesizer-project.org/syndex",
+  origin: "https://synthesizer-project.org",
+});
 
 /*
  * One family, one request. The name matters: the org site asks for
@@ -264,6 +272,7 @@ const HeaderMenu = ({ counts, filters, active, nav, showSubmit }) => {
 export const Layout = ({
   title,
   description = null,
+  image = null,
   counts = null,
   active = null,
   filters = null,
@@ -272,20 +281,57 @@ export const Layout = ({
   footer = null,
   showSubmit = true,
   children,
-}) => (
+}) => {
+  const { url, origin } = useContext(ViewerContext);
+
+  // Pasting a link into Slack, Mastodon or anywhere else fetches the page and
+  // reads these. Without them the unfurl has nothing to show and renders a
+  // broken thumbnail, which is what happened.
+  //
+  // A dataset with a preview plot offers it: seeing the spectra is a better
+  // answer to "what is this link" than a logo. Everything else falls back to
+  // the logo, and the card shape follows -- a wide card for a plot, a square
+  // one for a logo that would be pillarboxed in a wide frame.
+  const card = image ?? {
+    src: `${origin}${BASE}/static/syndex_logo_2.png`,
+    width: 824,
+    height: 862,
+    alt: "The Syndex logo",
+    wide: false,
+  };
+  const summary =
+    description ??
+    "A searchable index of stellar population synthesis and AGN grids, " +
+    "dust models and instruments for the Synthesizer project.";
+
+  return (
   <html lang="en">
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>{title} · Syndex</title>
       {/* A catalogue exists to be found, so every page says what it is. */}
+      <meta name="description" content={summary} />
+
+      {/* The tab icon, and what a bookmark or a chat client shows beside a
+          link. Absent entirely until now, which is half of why an unfurl had
+          nothing to draw. */}
+      <link rel="icon" href={`${BASE}/static/syndex_logo_2.png`} />
+      <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_2.png`} />
+
+      <meta property="og:type" content="website" />
+      <meta property="og:site_name" content="Syndex" />
+      <meta property="og:title" content={`${title} · Syndex`} />
+      <meta property="og:description" content={summary} />
+      <meta property="og:url" content={url} />
+      {/* Absolute, always: a relative og:image is not fetched by anything. */}
+      <meta property="og:image" content={card.src} />
+      <meta property="og:image:width" content={String(card.width)} />
+      <meta property="og:image:height" content={String(card.height)} />
+      <meta property="og:image:alt" content={card.alt} />
       <meta
-        name="description"
-        content={
-          description ??
-          "A searchable index of stellar population synthesis and AGN grids, " +
-          "dust models and instruments for the Synthesizer project."
-        }
+        name="twitter:card"
+        content={card.wide ? "summary_large_image" : "summary"}
       />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
@@ -475,7 +521,8 @@ export const Layout = ({
       </dialog>
     </body>
   </html>
-);
+  );
+};
 
 /** A command someone is meant to copy. */
 export const Command = ({ children }) => (

@@ -60,7 +60,16 @@ async function waitingCount(c, user) {
  */
 export async function page(c, node, { status = 200, cache = "public, max-age=300" } = {}) {
   const { user } = c.get("viewer") ?? { user: null };
-  const viewer = { user, waiting: await waitingCount(c, user) };
+  const requested = new URL(c.req.url);
+  const viewer = {
+    user,
+    waiting: await waitingCount(c, user),
+    // What a link preview should call this page, and what it should resolve
+    // its image against. Taken from the request rather than written down, so
+    // a local run and the deployment each describe themselves correctly.
+    url: `${requested.origin}${requested.pathname}`,
+    origin: requested.origin,
+  };
   const tree = (
     <ViewerContext.Provider value={viewer}>{node}</ViewerContext.Provider>
   );

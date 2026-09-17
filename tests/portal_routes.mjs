@@ -2869,6 +2869,53 @@ const tests = {
     assert.equal(status, 500);
     assert.doesNotMatch(body, /D1 exploded/);
   },
+  async "a pasted link unfurls with the dataset's own plot"() {
+    // Slack, Mastodon and the rest fetch the page and read these. Without
+    // them there is nothing to show, which is a broken thumbnail.
+    const { body } = await call("/syndex/datasets/bpass-2-2-1-cloudy-sps-test", {
+      DB: stubDb({
+        rows: {
+          dataset: {
+            ...GRID_ROW,
+            preview_path: "preview/abc/grid.png",
+            preview_kind: "spectra",
+          },
+        },
+      }),
+    });
+
+    // Absolute, or nothing fetches it.
+    assert.match(
+      body,
+      /<meta property="og:image" content="https:\/\/[^"]+preview\.png/,
+    );
+    assert.match(body, /<meta property="og:image:width" content="890"/);
+    assert.match(
+      body,
+      /<meta name="twitter:card" content="summary_large_image"/,
+    );
+    // The page's own address, not the catalogue's front door.
+    assert.match(
+      body,
+      /<meta property="og:url" content="[^"]*\/syndex\/datasets\//,
+    );
+    assert.match(body, /<meta property="og:title" content="[^"]*bpass/);
+  },
+
+  async "a page with no plot of its own still has a picture to show"() {
+    const { body } = await call("/syndex", { DB: stubDb() });
+
+    // The logo, absolute, and a square card because a logo in a wide frame is
+    // a logo with bars down both sides.
+    assert.match(
+      body,
+      /<meta property="og:image" content="https:\/\/[^"]+syndex_logo_2\.png"/,
+    );
+    assert.match(body, /<meta name="twitter:card" content="summary"/);
+    // And a favicon, which the site had none of at all.
+    assert.match(body, /<link rel="icon" href="[^"]*syndex_logo_2\.png"/);
+  },
+
   async "a dataset page shows its preview as a clickable thumbnail"() {
     const env = {
       DB: stubDb({

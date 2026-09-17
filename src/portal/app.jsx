@@ -27,6 +27,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { trimTrailingSlash } from "hono/trailing-slash";
 
+import { describeFailure, failureHeaders } from "../failure.js";
 import { BASE } from "./base.js";
 import { currentUser } from "./data/auth.js";
 import { tabCounts } from "./data/catalogue.js";
@@ -88,23 +89,36 @@ app.onError((error, c) => {
       error: error instanceof Error ? error.message : String(error),
     }),
   );
+  const failure = describeFailure(error);
+
   // Deliberately not a JSX page: whatever just failed may be the renderer
   // itself, so this is a complete document with no dependencies but the
   // stylesheet, and it still offers a way out.
+  //
+  // A transient failure offers the same page again, since reloading is what
+  // somebody will try anyway and it will eventually work. A fault offers the
+  // catalogue and somewhere to report it, because reloading will not help.
+  const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const way_out = failure.transient
+    ? `<p class="mt-4"><a href="${escape(c.req.url)}">Try this page again</a>` +
+      ` &middot; <a href="${BASE}">the catalogue</a></p>`
+    : `<p class="mt-4"><a href="${BASE}">Back to the catalogue</a>` +
+      ` &middot; <a href="https://github.com/synthesizer-project/syndex/issues"` +
+      ` rel="noopener">report it</a></p>`;
+
   return c.html(
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
       `<meta name="viewport" content="width=device-width, initial-scale=1">` +
-      `<title>Something went wrong \u00b7 Syndex</title>` +
+      `<title>${escape(failure.title)} \u00b7 Syndex</title>` +
       `<link rel="stylesheet" href="${BASE}/static/app.css"></head>` +
       `<body class="bg-bg text-text">` +
       `<main class="mx-auto max-w-2xl px-6 py-12">` +
-      `<h1 class="text-3xl">Something went wrong</h1>` +
-      `<p class="mt-3 text-muted">This page could not be rendered. The ` +
-      `failure has been logged.</p>` +
-      `<p class="mt-4"><a href="${BASE}">Back to the catalogue</a></p>` +
+      `<h1 class="text-3xl">${escape(failure.title)}</h1>` +
+      `<p class="mt-3 text-muted">${escape(failure.detail)}</p>` +
+      way_out +
       `</main></body></html>`,
-    500,
-    { "cache-control": "no-store" },
+    failure.status,
+    failureHeaders(failure),
   );
 });
 

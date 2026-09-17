@@ -58,7 +58,7 @@ async function waitingCount(c, user) {
  * @param {object} options Status code and cache policy.
  * @returns {Response} An HTML response.
  */
-export async function page(c, node, { status = 200, cache = "public, max-age=60" } = {}) {
+export async function page(c, node, { status = 200, cache = "public, max-age=300" } = {}) {
   const { user } = c.get("viewer") ?? { user: null };
   const viewer = { user, waiting: await waitingCount(c, user) };
   const tree = (

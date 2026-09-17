@@ -5,11 +5,13 @@
  * This Worker never parses HDF5 and never writes to either service.
  */
 
+import { describeFailure, failureHeaders } from "../failure.js";
+
 /** What every JSON answer carries, whatever it is answering. */
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
-  "cache-control": "public, max-age=60",
+  "cache-control": "public, max-age=300",
 };
 
 /** Columns stored as serialised JSON, parsed before being returned. */
@@ -64,10 +66,14 @@ function decodeRow(row, booleans = []) {
  *
  * @param {unknown} body Response body.
  * @param {number} status HTTP status code.
+ * @param {object} extra Headers to add or override, such as `retry-after`.
  * @returns {Response} JSON response with CORS and cache headers.
  */
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+function json(body, status = 200, extra = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...JSON_HEADERS, ...extra },
+  });
 }
 
 /**
@@ -107,7 +113,7 @@ function contentDisposition(name) {
  * @returns {Response} JSON error response.
  */
 function error(status, message) {
-  return json({ error: message }, status);
+  return json({ error: message }, status, { "cache-control": "no-store" });
 }
 
 /**
@@ -823,7 +829,21 @@ export default {
           error: exc instanceof Error ? exc.message : String(exc),
         }),
       );
-      return error(500, "Internal error");
+      // The same judgement the portal makes, so a client and a reader are
+      // told the same thing about the same outage. `retry_after_seconds` is
+      // in the body as well as the header because that is where a script
+      // looks.
+      const failure = describeFailure(exc);
+      return json(
+        {
+          error: failure.detail,
+          ...(failure.retryAfter === null
+            ? {}
+            : { retry_after_seconds: failure.retryAfter }),
+        },
+        failure.status,
+        failureHeaders(failure),
+      );
     }
   },
 };

@@ -87,9 +87,11 @@ routes.get("/search", async (c) => {
     <Browse tab={tab} counts={counts} filters={filters}>
       {panel}
     </Browse>,
-    // A filtered view is cheap to recompute and awkward to cache: the URL
-    // carries the filters, so a cached copy would be one arbitrary search.
-    { cache: isFiltered(filters) ? "no-store" : "public, max-age=60" },
+    // Keyed on the whole URL, filters included, so each search caches as
+    // itself. Briefly, because a filtered view is one of many and there is no
+    // sense holding thousands of them; the unfiltered page is the one worth
+    // keeping, and it is also the one everybody lands on.
+    { cache: isFiltered(filters) ? "public, max-age=60" : "public, max-age=300" },
   );
 });
 

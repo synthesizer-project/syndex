@@ -567,12 +567,48 @@ const FLAG_FACETS = {
 };
 
 /**
+ * How long the tab counts are reused before being asked for again.
+ *
+ * Six hours, because publication is a deliberate batch run of `syndex-upload`
+ * and these four numbers change on that timescale, not on the timescale of a
+ * page view. An isolate rarely lives that long anyway, so the practical bound
+ * is how often Cloudflare starts a new one; `forgetCounts` is there for when
+ * something has just been published and the header should say so at once.
+ */
+const COUNTS_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** The last counts read, and when they stop being good enough. */
+let cachedCounts = null;
+
+/**
+ * Drop the remembered counts, so the next reader asks the database again.
+ *
+ * For a test that changes what the stub returns, and for anything that
+ * publishes and would rather the header caught up at once.
+ */
+export function forgetCounts() {
+  cachedCounts = null;
+}
+
+/**
  * Count the datasets each tab holds.
  *
  * @param {D1Database} db Catalogue database.
  * @returns {Promise<Record<string, number>>} Counts keyed by tab id.
  */
 export async function tabCounts(db) {
+  // Four numbers that change only when something is published, and the most
+  // expensive thing the portal did: 483 rows a call, on every page render,
+  // every htmx swap and every 404 -- five and a half million rows in a day,
+  // which is the whole of D1's free daily allowance.
+  //
+  // Held per isolate rather than in KV: an isolate serves many requests, the
+  // numbers are a header ornament, and a count that lags a publication by an
+  // hour is not a wrong answer to any question anybody is asking.
+  if (cachedCounts !== null && Date.now() < cachedCounts.until) {
+    return cachedCounts.counts;
+  }
+
   const { results } = await db
     .prepare(
       `SELECT d.data_type, COUNT(*) AS n
@@ -590,6 +626,7 @@ export async function tabCounts(db) {
       counts[tab.id] += row.n;
     }
   }
+  cachedCounts = { counts, until: Date.now() + COUNTS_TTL_MS };
   return counts;
 }
 

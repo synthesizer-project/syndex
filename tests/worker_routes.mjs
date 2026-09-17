@@ -584,11 +584,15 @@ const tests = {
         },
       },
     };
-    const { status, body } = await call("/v1/datasets", env);
+    const { status, body, headers } = await call("/v1/datasets", env);
 
     assert.equal(status, 500);
+    // A fault, so no `retry-after`: asking again will fail the same way.
+    assert.equal(headers.get("retry-after"), null);
+    assert.equal(headers.get("cache-control"), "no-store");
     // The cause is logged, never returned to the caller.
-    assert.equal(body.error, "Internal error");
+    assert.match(body.error, /could not be completed/);
+    assert.doesNotMatch(JSON.stringify(body), /D1 exploded/);
   },
   async "citations are returned as a pasteable bibtex file"() {
     const bibtex = "@ARTICLE{2003MNRAS.344.1000B,\n  title = {Stellar population synthesis}\n}";

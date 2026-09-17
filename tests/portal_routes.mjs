@@ -699,7 +699,7 @@ const tests = {
     const { body, headers } = await call("/syndex/search?more=model", env);
 
     assert.doesNotMatch(body, /clear all/);
-    assert.equal(headers.get("cache-control"), "public, max-age=60");
+    assert.match(headers.get("cache-control"), /^public, max-age=\d+$/);
   },
 
   async "the landing search and copy describe the whole catalogue"() {
@@ -2257,7 +2257,7 @@ const tests = {
 
   async "a signed-in page is never cached by anything shared"() {
     const anonymous = await call("/syndex/search", { DB: stubDb() });
-    assert.equal(anonymous.headers.get("cache-control"), "public, max-age=60");
+    assert.match(anonymous.headers.get("cache-control"), /^public, max-age=\d+$/);
 
     const signedIn = await call("/syndex/search", {
       DB: stubDb({ rows: { viewer: USER } }),

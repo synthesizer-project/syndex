@@ -198,3 +198,8 @@ The two FSPS 4.0 variable-IMF grids were never on Box; they were published
 from a local copy. Their `_data_ids.yml` entries carry a `dataset` key with no
 `direct_link`, and R2 is the only copy in existence, which is worth knowing
 before anyone treats R2 as a cache rather than a store.
+
+## What is left
+
+Retire the Box collection, once the transition period has run. R2 is then the
+only copy of everything above.

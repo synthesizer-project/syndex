@@ -1,9 +1,7 @@
 # Development
 
-Everything needed to run the service locally and understand how the pieces fit
-together. For what Syndex is and how to use it, see the
-[README](../README.md); for the decisions behind the portal, see
-[`website.md`](website.md).
+Running the service locally, and how the pieces fit together. For what Syndex
+is and how to use it, see the [README](../README.md).
 
 ## Architecture
 
@@ -213,19 +211,26 @@ wrangler.jsonc           Worker entrypoint, static assets and resource bindings
 
 ## Repository boundaries
 
-- [Syncretize](https://github.com/synthesizer-project/syncretize) creates grid
-  files and defines their HDF5 conventions.
-- [Synthesizer](https://github.com/synthesizer-project/synthesizer) resolves
-  and installs published files through `synthesizer-download`.
-- Syndex stores, describes, serves and presents those files.
+- **Syndex** owns the Cloudflare deployment, the migrations, the API, the
+  portal, the catalogue metadata, and the inspection and upload tooling.
+- **[Syncretize](https://github.com/synthesizer-project/syncretize)** creates
+  grid files and defines the HDF5 conventions this reads.
+- **[Synthesizer](https://github.com/synthesizer-project/synthesizer)** owns
+  `synthesizer-download`: aliases, groups, destinations, API resolution,
+  digest verification and atomic installation.
+
+R2 is authoritative for bytes and D1 for catalogue metadata. Bytes are written
+and verified first, so D1 can never point at an object that is not there.
+Publication is a batch operation run from a laptop or an HPC login node, never
+an always-on service, and there are no queues, no separate search
+infrastructure and no scheduled jobs until something measured needs them.
 
 ## Further reading
 
-- [`plan.md`](plan.md): decisions, phases, and delivery order.
-- [`api.md`](api.md): endpoints, response shapes, and caching.
-- [`schema.md`](schema.md): R2 layout and D1 data model.
-- [`website.md`](website.md): the portal, accounts, submissions and validation.
-- [`publishing.md`](publishing.md): dry runs, metadata, credentials, upload
-  safety, and Box migration.
-- [`migration-notes.md`](migration-notes.md): broken source files, upstream
-  issues, and naming decisions found during the Box migration.
+- [`schema.md`](schema.md): every table, column and index, and the R2 layout.
+- [`api.md`](api.md): the seven endpoints, their responses and their caching.
+- [`website.md`](website.md): the portal — search, accounts, submissions,
+  validation, and what each needs configured.
+- [`publishing.md`](publishing.md): running `syndex-upload`.
+- [`migration-notes.md`](migration-notes.md): defects found in the source files
+  during the Box migration, and what was done about them.

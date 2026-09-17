@@ -1,9 +1,11 @@
 # Syndex
 
+[![Tests](https://github.com/synthesizer-project/syndex/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/synthesizer-project/syndex/actions/workflows/tests.yml)
+[![PyPI version](https://img.shields.io/pypi/v/cosmos-syndex.svg)](https://pypi.org/project/cosmos-syndex/)
+[![Python versions](https://img.shields.io/pypi/pyversions/cosmos-syndex.svg)](https://pypi.org/project/cosmos-syndex/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![PyPI version](https://img.shields.io/pypi/v/cosmos-syndex.svg)](https://pypi.org/project/cosmos-syndex/)
-[![Downloads](https://img.shields.io/pypi/dm/cosmos-syndex.svg)](https://pypi.org/project/cosmos-syndex/)
+[![Catalogue](https://img.shields.io/badge/catalogue-synthesizer--project.org-4a9acc)](https://synthesizer-project.org/syndex)
 
 <img alt="syndex_logo" src="https://synthesizer-project.org/syndex/static/syndex_logo_2.png" align="right" width="140px"/>
 

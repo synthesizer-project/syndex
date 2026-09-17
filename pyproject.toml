@@ -12,6 +12,21 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
+# Read by PyPI for its sidebar and by shields.io for the Python badge, which
+# reads these rather than `requires-python` and said "missing" without them.
+# No License classifier: `license` above is already an SPDX expression, and
+# PyPI rejects a release that states it twice.
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
 # Reading a file is all `syndex-check` does, and a contributor should not have
 # to install an S3 client and a plotting stack to check one before submitting.
 # Publishing and plotting pull their own dependencies through extras.
@@ -34,6 +49,16 @@ syndex-submit = "syndex.submit:main"
 syndex-upload = "syndex.publish.cli:main"
 syndex-plots = "syndex.plots.cli:main"
 syndex-previews = "syndex.previews.cli:main"
+
+# Without these the PyPI page links nowhere: no repository, no catalogue, no
+# way back. Metadata belongs to a release and cannot be edited afterwards, so
+# these appear on the next one.
+[project.urls]
+Homepage = "https://synthesizer-project.org/syndex"
+Documentation = "https://github.com/synthesizer-project/syndex/tree/main/docs"
+Repository = "https://github.com/synthesizer-project/syndex"
+Issues = "https://github.com/synthesizer-project/syndex/issues"
+Changelog = "https://github.com/synthesizer-project/syndex/releases"
 
 [tool.hatch.version]
 source = "vcs"

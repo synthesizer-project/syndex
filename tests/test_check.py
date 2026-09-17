@@ -10,8 +10,8 @@ import json
 
 import h5py
 import numpy as np
+from samples import make_dust_extinction_grid, make_grid, make_photometric_imager
 from test_classify import make_photoionised_grid
-from test_upload import make_dust_extinction_grid, make_grid, make_photometric_imager
 
 from syndex import check as check_module
 from syndex.check import check, check_file

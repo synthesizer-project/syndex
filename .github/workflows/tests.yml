@@ -1,0 +1,91 @@
+# Run everything on a pull request, and on main.
+#
+# The deploy workflow also runs the tests, but only after a merge has already
+# happened -- which makes it a way of finding out that main is broken rather
+# than a way of keeping it working. This is the one that gates a change.
+name: Tests
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+# A new push to a branch makes the run in flight irrelevant, so stop paying
+# for it. Not on main, where every commit's result is worth having.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every version the package claims to support. `requires-python` is a
+      # promise, and this is what keeps it one.
+      max-parallel: 2
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # hatch-vcs reads the version from the tag, and a shallow clone has
+          # none, which fails the build rather than the tests.
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package and its tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '.[test]'
+      - name: Test with pytest
+        run: pytest
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - name: Check Python formatting and linting
+        run: |
+          uvx ruff format --check --diff .
+          uvx ruff check .
+
+  portal:
+    name: Worker and portal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # These transform JSX through module.registerHooks and stub every
+      # binding, so they need no network and no Cloudflare account.
+      - name: Worker and portal tests
+        run: npm test
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # A migration that does not apply from scratch is one nobody finds
+      # until they set up a new database, which is the worst moment for it.
+      - name: Apply every migration to an empty database
+        run: |
+          python - <<'PY'
+          import pathlib, sqlite3
+          database = sqlite3.connect(":memory:")
+          for migration in sorted(pathlib.Path("migrations").glob("*.sql")):
+              database.executescript(migration.read_text())
+          print(f"applied {len(list(pathlib.Path('migrations').glob('*.sql')))} migrations")
+          PY

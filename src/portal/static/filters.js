@@ -47,10 +47,14 @@ document.addEventListener(
   true,
 );
 
+// What the reader has ticked, kept here rather than read back out of the DOM
+// on every change: the rows are replaced wholesale by htmx, so a checkbox that
+// was ticked before a swap no longer exists afterwards, and a selection that
+// lived in the markup would be lost every time the filters changed.
 const selectedDatasets = new Set();
 const selectedSizes = new Map();
 /**
- * The browser's copy of `size()` from views.jsx, which is server-only.
+ * The browser's copy of `size()` from views/format.jsx, which is server-only.
  * Keep the two in step: both count in decimal and both drop a bare ".0".
  *
  * @param {number} bytes Size in bytes.
@@ -71,6 +75,13 @@ function formatBytes(bytes) {
   return `${shown} ${units[unit]}`;
 }
 
+/**
+ * Ask before a click becomes a multi-gigabyte download.
+ *
+ * @param {string} filename What is about to be fetched.
+ * @param {string} amount Its size, already formatted.
+ * @param {string} href Where the download goes.
+ */
 function showDownloadNotice(filename, amount, href) {
   const notice = document.querySelector("#download-notice");
   if (notice === null) return;
@@ -84,6 +95,13 @@ function showDownloadNotice(filename, amount, href) {
   notice.showModal();
 }
 
+/**
+ * Recount what is ticked, and show or hide the command button to match.
+ *
+ * Called on every change rather than tracking a running total, because the
+ * table is replaced wholesale by htmx and a total kept alongside it would
+ * survive a swap that its checkboxes did not.
+ */
 function updateBulkSelection() {
   const boxes = [...document.querySelectorAll("[data-dataset-select]")];
   for (const box of boxes) {

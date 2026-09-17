@@ -18,7 +18,7 @@
 
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
-import { BASE } from "./views.jsx";
+import { BASE } from "../base.js";
 
 /** Where GitHub sends someone to approve the sign-in. */
 const AUTHORIZE = "https://github.com/login/oauth/authorize";
@@ -77,7 +77,7 @@ function secureCookies(c) {
  * never "may edit submissions but not users". A permission table would be
  * more expressive and would express nothing that is currently true.
  */
-export const ROLES = ["pending", "contributor", "reviewer", "admin"];
+const ROLES = ["pending", "contributor", "reviewer", "admin"];
 
 /**
  * Whether a role carries at least the authority of another.
@@ -167,7 +167,7 @@ function mintToken() {
  * @param {string | null | undefined} path The requested destination.
  * @returns {string} A path within the portal.
  */
-export function safeReturn(path) {
+function safeReturn(path) {
   const requested = String(path ?? "");
   // Must start with the portal's own prefix, and must not begin "//" or
   // "/\", which browsers read as a scheme-relative URL to another host.

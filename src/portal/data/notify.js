@@ -18,6 +18,7 @@
  * well enough for a maintainer to find them in the portal.
  */
 
+/** Where the issues these notices become are filed. */
 const API = "https://api.github.com";
 
 /**
@@ -50,7 +51,7 @@ const USER_AGENT = "syndex-portal";
  * @param {object} env Worker bindings and secrets.
  * @returns {boolean} Whether the repository and token are configured.
  */
-export function notificationsConfigured(env) {
+function notificationsConfigured(env) {
   return Boolean(env.GITHUB_ISSUE_REPO && env.GITHUB_ISSUE_TOKEN);
 }
 
@@ -63,7 +64,7 @@ export function notificationsConfigured(env) {
  * @param {string[]} labels Labels to apply, if they exist on the repository.
  * @returns {Promise<void>} Resolves whether or not the issue was created.
  */
-export async function openIssue(env, title, body, labels = []) {
+async function openIssue(env, title, body, labels = []) {
   if (!notificationsConfigured(env)) {
     return;
   }

@@ -19,6 +19,8 @@ export const TABS = [
   { id: "instruments", label: "Instruments", types: ["instrument"] },
 ];
 
+// Powers of ten, not of two: a size is shown beside a download, and the
+// number a download manager reports is the decimal one.
 const MB = 1000 ** 2;
 const GB = 1000 ** 3;
 

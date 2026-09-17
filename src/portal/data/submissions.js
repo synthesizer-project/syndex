@@ -74,10 +74,10 @@ export const MAX_UPLOAD_BYTES = PART_SIZE * MAX_PARTS;
 export const BROWSER_UPLOAD_BYTES = PART_SIZE * BROWSER_MAX_PARTS;
 
 /** How many submissions one account may have waiting at once. */
-export const MAX_PENDING_PER_USER = 10;
+const MAX_PENDING_PER_USER = 10;
 
 /** How many submissions may be waiting in total, across everybody. */
-export const MAX_PENDING_TOTAL = 50;
+const MAX_PENDING_TOTAL = 50;
 
 /**
  * Whether submissions can be accepted at all.
@@ -100,7 +100,7 @@ export function submissionsOpen(env) {
  * @param {string} token The submission's upload token.
  * @returns {string} An R2 key prefix, with its trailing slash.
  */
-export function uploadPrefix(token) {
+function uploadPrefix(token) {
   return `submissions/${token}/`;
 }
 
@@ -121,7 +121,7 @@ export function uploadPrefix(token) {
  * @param {object} submission The submission row.
  * @returns {string} The R2 key its bytes belong at.
  */
-export function uploadKey(submission) {
+function uploadKey(submission) {
   return `${uploadPrefix(submission.upload_token)}${submission.filename}`;
 }
 
@@ -136,7 +136,7 @@ export function uploadKey(submission) {
  * @returns {Promise<{upload: R2MultipartUpload, uploadId: string}>} The
  *     upload to write parts into, and its id.
  */
-export async function openUpload(env, submission) {
+async function openUpload(env, submission) {
   const key = uploadKey(submission);
 
   if (submission.upload_id) {
@@ -287,7 +287,7 @@ export async function finishUpload(env, submission) {
  * @param {object} submission The submission row.
  * @returns {Promise<void>} Resolves once it is abandoned.
  */
-export async function abandonUpload(env, submission) {
+async function abandonUpload(env, submission) {
   if (submission.upload_id) {
     await env.SUBMISSIONS.resumeMultipartUpload(
       uploadKey(submission),

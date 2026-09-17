@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from syndex.classify import Classification, classify
-from syndex.upload import check_axis_conventions, check_photoionisation_version
+from syndex.inspection import check_axis_conventions, check_photoionisation_version
 
 # The instrument types the schema's CHECK constraint allows. Extraction can
 # only produce these, but the submission path accepts a report from a version

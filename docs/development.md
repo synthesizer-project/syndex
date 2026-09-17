@@ -176,15 +176,35 @@ means the next number, not a retry.
 ```text
 docs/                    architecture, schema, API, publishing and portal notes
 migrations/              ordered D1 schema migrations
-src/syndex/check.py      whether a file can be published, and why not
-src/syndex/classify.py   what a file is
-src/syndex/submit.py     sending a file to a submission from a terminal
-src/syndex/upload.py     inspection and publication CLI
-src/syndex/plots.py      diagnostic plots of the published catalogue
-src/syndex/previews.py   per-file preview plots, stored in R2 and D1
+
+src/syndex/              the Python tools, one concern per module
+  classify.py            what a file is
+  check.py               whether it can be published, and why not
+  inspection.py          opening a file and reading what it says
+  cloudflare.py          the account and bucket the tools default to
+  errors.py              the exception the tools raise on purpose
+  submit.py              sending a file to a submission from a terminal
+  plotting.py            importing matplotlib, once, for both plot commands
+  publish/               publishing a file: sources, citations, plan,
+                         storage, registry, serialise, and the
+                         syndex-upload command
+  plots/                 diagnostic plots of the catalogue: api, palette,
+                         layout, catalogue, coverage, instruments
+  previews/              per-file preview plots, stored in R2 and D1: r2,
+                         figure, kinds, store
+
 src/worker/entry.js      splits /v1 from /syndex
 src/worker/index.js      read-only catalogue and download API
-src/portal/              the portal: routes, auth, catalogue queries, views
+
+src/portal/              the portal, layered the same way
+  app.jsx                assembly: middleware, mounts, error pages
+  base.js                where the portal and the API live
+  routes/                one module per group of URLs
+  pages/                 a component per page
+  views/                 the shell, formatting, filter rail, results table
+  data/                  every query and every write, and nothing rendered
+  static/                the only JavaScript that reaches a browser
+
 tests/                   local tests with mocked cloud operations, for the
                          CLI, the API and the portal
 package.json             portal dependencies, build and deploy scripts

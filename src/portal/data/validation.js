@@ -17,6 +17,7 @@
  * endpoint that accepts it is not a place anybody may write a verdict.
  */
 
+/** Where the validation run is dispatched, and where its report comes from. */
 const API = "https://api.github.com";
 
 /** GitHub requires a User-Agent, and rejects requests without one. */
@@ -178,7 +179,7 @@ export function readReport(report) {
  * @returns {Promise<{published: string | null, pending: string | null}>} What
  *     already holds these bytes, if anything.
  */
-export async function duplicatesOf(env, submissionId, sha256) {
+async function duplicatesOf(env, submissionId, sha256) {
   if (sha256 === null) {
     return { published: null, pending: null };
   }
@@ -207,6 +208,27 @@ export async function duplicatesOf(env, submissionId, sha256) {
 }
 
 /**
+ * The same question, answered in the shape a page says it in.
+ *
+ * A page names one twin and says where it is, because "this is already
+ * `bpass-2p2p1`, published" is the whole of what a reader needs; which half
+ * of the catalogue it was found in only changes the wording. Published wins
+ * when both match: a submission can be withdrawn, a publication cannot.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {object} submission The submission to check.
+ * @returns {Promise<{name: string, published: boolean} | null>} The twin, or
+ *     null when these bytes are new.
+ */
+export async function duplicateOf(env, submission) {
+  const twin = await duplicatesOf(env, submission.submission_id, submission.sha256);
+  if (twin.published !== null) {
+    return { name: twin.published, published: true };
+  }
+  return twin.pending === null ? null : { name: twin.pending, published: false };
+}
+
+/**
  * Mint a link the runner can fetch the object with.
  *
  * @param {object} env Worker bindings and secrets.
@@ -214,7 +236,7 @@ export async function duplicatesOf(env, submissionId, sha256) {
  * @param {object} submission The submission whose file to fetch.
  * @returns {Promise<string>} A URL good for one object for a few hours.
  */
-export async function fetchUrl(env, origin, submission) {
+async function fetchUrl(env, origin, submission) {
   const expires = Date.now() + FETCH_TTL_SECONDS * 1000;
   const signature = await sign(env, `${submission.submission_id}:${expires}`);
   return (

@@ -41,7 +41,7 @@ DEVICE_TOKEN = "https://github.com/login/oauth/access_token"
 # who it belongs to, and never stored.
 SCOPES = "read:user user:email"
 
-# Must match PART_SIZE in src/portal/submissions.js. R2 requires every part but
+# Must match PART_SIZE in src/portal/data/submissions.js. R2 requires every part but
 # the last to be the same size, so the two are one number in two places rather
 # than a setting.
 PART_SIZE = 90 * 1024 * 1024
@@ -52,7 +52,7 @@ RETRIES = 3
 
 # What the portal will accept, as a part count. Only used to say so before a
 # transfer starts rather than after the last piece is refused; the portal
-# enforces it either way. Must match MAX_PARTS in src/portal/submissions.js.
+# enforces it either way. Must match MAX_PARTS in src/portal/data/submissions.js.
 MAX_PARTS = 2000
 
 

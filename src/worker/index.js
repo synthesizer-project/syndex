@@ -5,6 +5,7 @@
  * This Worker never parses HDF5 and never writes to either service.
  */
 
+/** What every JSON answer carries, whatever it is answering. */
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",

@@ -7,26 +7,48 @@ shared machine.
 """
 
 import json
+import math
 
 import pytest
 
 from syndex import submit
 
 
-def test_part_size_matches_the_worker():
-    """R2 refuses a multipart upload whose parts are not all one size.
+def _worker_constant(name):
+    """Read one exported constant out of the Worker's submissions module.
 
-    The browser and this client send to the same endpoint, so the number lives
-    in two files and has to be the same in both. A mismatch would not fail
-    until completion, after the whole file had gone up.
+    Args:
+        name (str): The exported name.
+
+    Returns:
+        int: Its value.
     """
-    worker = (
-        (submit.Path(__file__).parents[1] / "src/portal/submissions.js")
-        .read_text()
-        .split("export const PART_SIZE = ")[1]
-        .split(";")[0]
-    )
-    assert eval(worker.replace(" * ", "*")) == submit.PART_SIZE
+    source = (
+        submit.Path(__file__).parents[1] / "src/portal/data/submissions.js"
+    ).read_text()
+    expression = source.split(f"export const {name} = ")[1].split(";")[0]
+
+    # Multiplied literals, which is all these are: "90 * 1024 * 1024", "2000".
+    # Parsed rather than evaluated -- `eval` on a file's contents is a habit
+    # worth not having, and it would accept a great deal more than this needs
+    # to.
+    factors = [part.strip() for part in expression.split("*")]
+    assert all(part.isdigit() for part in factors), expression
+    return math.prod(int(part) for part in factors)
+
+
+@pytest.mark.parametrize("name", ["PART_SIZE", "MAX_PARTS"])
+def test_limits_match_the_worker(name):
+    """The client and the Worker have to agree, and nothing makes them.
+
+    Both numbers live in two files because the browser and this client send to
+    the same endpoint, and neither is a setting anybody can pass. A PART_SIZE
+    mismatch is the worse one -- R2 refuses a multipart upload whose parts are
+    not all one size, and it does not say so until completion, after the whole
+    file has gone up -- but a stale MAX_PARTS means refusing a file the service
+    would have taken, or promising one it will not.
+    """
+    assert _worker_constant(name) == getattr(submit, name)
 
 
 def test_a_refusal_is_reported_not_retried(tmp_path, monkeypatch):
@@ -108,7 +130,7 @@ def test_a_missing_session_is_not_an_error(tmp_path, monkeypatch):
 
 def test_check_stops_a_file_that_would_be_rejected(tmp_path, capsys, monkeypatch):
     """--check is the same checker, run before 30 GB goes anywhere."""
-    from test_upload import make_grid
+    from samples import make_grid
 
     path = tmp_path / "mystery.hdf5"
     make_grid(path)

@@ -31,9 +31,9 @@ test = ["cosmos-syndex[publish,plots]", "pytest>=8"]
 [project.scripts]
 syndex-check = "syndex.check:main"
 syndex-submit = "syndex.submit:main"
-syndex-upload = "syndex.upload:main"
-syndex-plots = "syndex.plots:main"
-syndex-previews = "syndex.previews:main"
+syndex-upload = "syndex.publish.cli:main"
+syndex-plots = "syndex.plots.cli:main"
+syndex-previews = "syndex.previews.cli:main"
 
 [tool.hatch.version]
 source = "vcs"

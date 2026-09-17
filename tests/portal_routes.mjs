@@ -16,9 +16,9 @@ import { load } from "./jsx_hooks.mjs";
 registerHooks({ load });
 const { default: worker } = await import("../src/worker/entry.js");
 const { parseFilters, search, toQuery, TABS } = await import(
-  "../src/portal/catalogue.js"
+  "../src/portal/data/catalogue.js"
 );
-const { range } = await import("../src/portal/views.jsx");
+const { range } = await import("../src/portal/views/format.jsx");
 
 const ORIGIN = "https://synthesizer-project.org";
 
@@ -1941,6 +1941,34 @@ const tests = {
     assert.doesNotMatch(reviewer.body, /Already decided/);
   },
 
+  async "the guard covers every page under /review, not just the queue"() {
+    // The reviewer routes are guarded by two middlewares -- one for /review
+    // and one for /review/* -- registered in their own module and mounted on
+    // the app. Mounting is where a path-scoped middleware would quietly stop
+    // applying, and the one it guards includes changing somebody's role.
+    const issued = [];
+    const decide = await call(
+      "/syndex/review/1",
+      { DB: stubDb({ rows: { viewer: USER }, issued }) },
+      signedInPost({ decision: "approved" }),
+    );
+    assert.equal(decide.status, 403);
+
+    const promote = await call(
+      "/syndex/review/users/2",
+      { DB: stubDb({ rows: { viewer: USER }, issued }) },
+      signedInPost({ role: "admin", from: "review" }),
+    );
+    assert.equal(promote.status, 403);
+
+    // Refused before anything was read or written, not after.
+    assert.equal(
+      issued.filter((record) => /UPDATE users|UPDATE submissions/.test(record.sql))
+        .length,
+      0,
+    );
+  },
+
   async "the queue summarises, and the deciding happens on its own page"() {
     const { body } = await call(
       "/syndex/review",
@@ -2172,7 +2200,7 @@ const tests = {
   async "an issue says where to act and who it will work for"() {
     // The issue is read by everyone who can see the repository, which is a
     // wider group than the people who can act on it.
-    const { notifySubmission } = await import("../src/portal/notify.js");
+    const { notifySubmission } = await import("../src/portal/data/notify.js");
     const sent = [];
     const real = globalThis.fetch;
     globalThis.fetch = async (url, init) => {
@@ -2771,7 +2799,7 @@ const tests = {
     // stay hidden, and the page offers no way to send a file at all. It has
     // happened once, when the markup was renamed and the script was not.
     const { readFileSync } = await import("node:fs");
-    const script = readFileSync("src/portal/upload.js", "utf8");
+    const script = readFileSync("src/portal/static/upload.js", "utf8");
     const { body } = await call(
       `/syndex/submit/${SUBMISSION.upload_token}`,
       contributorEnv({ rows: { submission: SUBMISSION } }),

@@ -13,7 +13,7 @@ confirm or override it, and neither of those wants a verdict attached.
 
 The classification itself is read out of the file rather than inferred from
 its name, with one deliberate exception noted in
-:func:`syndex.upload.extract_hdf5`: a plain `spectra` group cannot distinguish
+:func:`syndex.inspection.extract_hdf5`: a plain `spectra` group cannot distinguish
 an unprocessed SPS grid from a dust emission grid, so a filename containing
 "dust" settles that one case. Everything else comes from what the file says
 about itself.
@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from syndex.upload import detect_format, extract_hdf5, extract_instrument_hdf5
+from syndex.inspection import detect_format, extract_hdf5, extract_instrument_hdf5
 
 # The catalogue types a file can be sorted into: the set the `datasets` table
 # stores. Only the first three can be recognised from a file's contents; the

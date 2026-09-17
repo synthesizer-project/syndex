@@ -11,7 +11,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from test_upload import (
+from samples import (
     make_dust_extinction_grid,
     make_grid,
     make_photometric_imager,

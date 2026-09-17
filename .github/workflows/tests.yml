@@ -58,6 +58,20 @@ jobs:
           uvx ruff format --check --diff .
           uvx ruff check .
 
+      # A .gitignore rule meant for a build directory is a directory glob, and
+      # an unanchored one matches at every depth: `plots/` kept the whole of
+      # src/syndex/plots out of the repository, and the only symptom was an
+      # import error here. Source is never ignored.
+      - name: Check no source file is hidden from git
+        run: |
+          hidden=$(git ls-files --others --ignored --exclude-standard -- src tests migrations \
+            | grep -vE '__pycache__|_version\.py|\.egg-info' || true)
+          if [ -n "$hidden" ]; then
+            echo "These files exist but .gitignore keeps them out of the repository:"
+            echo "$hidden"
+            exit 1
+          fi
+
   portal:
     name: Worker and portal
     runs-on: ubuntu-latest

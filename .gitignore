@@ -3,17 +3,18 @@
 .venv/
 .wrangler/
 __pycache__/
-dist/
-public/
+/dist/
+/public/
 node_modules/
 *.egg-info/
-build/
+/build/
 src/syndex/_version.py
-.staging/
-.catalogue-cache.json
-plots/
+/.staging/
+/.catalogue-cache.json
+/plots/
 .DS_Store
 
 # Kept locally rather than published: a record of defects found in specific
 # source files during the Box migration.
 docs/migration-notes.md
+

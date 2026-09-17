@@ -80,7 +80,7 @@ const SOLAR_MASS_KG = 1.98841586e30;
  * writing a solar mass in kilogrammes), all physically correct, so the
  * numbers themselves differ by that factor between grids. Filtering converts
  * to solar masses, which is also what the range inputs ask for, rather than
- * rewriting anybody's metadata. See docs/migration-notes.md.
+ * rewriting anybody's metadata.
  *
  * Every other axis is consistent across the catalogue, and axis bounds are
  * stored as physical values with `scale` a display hint, so a range compares

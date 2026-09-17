@@ -9,6 +9,7 @@ do not recognise is left alone rather than guessed at.
 from pathlib import Path
 
 import pytest
+
 from samples import (
     make_grid,
     make_ifu_full,
@@ -18,7 +19,6 @@ from samples import (
     make_real_collection,
     make_spectroscopic_full,
 )
-
 from syndex.inspection import (
     check_axis_conventions,
     check_photoionisation_version,

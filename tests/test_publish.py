@@ -14,6 +14,7 @@ import sqlite3
 import h5py
 import numpy as np
 import pytest
+
 from samples import (
     make_agn_grid,
     make_dust_extinction_grid,
@@ -24,7 +25,6 @@ from samples import (
     make_sps_grid,
     migrated_database,
 )
-
 from syndex.errors import UploadError
 from syndex.publish import cli, registry
 from syndex.publish.citations import parse_bibtex_entries

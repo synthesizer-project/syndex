@@ -13,3 +13,7 @@ src/syndex/_version.py
 .catalogue-cache.json
 plots/
 .DS_Store
+
+# Kept locally rather than published: a record of defects found in specific
+# source files during the Box migration.
+docs/migration-notes.md

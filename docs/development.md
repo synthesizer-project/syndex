@@ -232,5 +232,3 @@ infrastructure and no scheduled jobs until something measured needs them.
 - [`website.md`](website.md): the portal — search, accounts, submissions,
   validation, and what each needs configured.
 - [`publishing.md`](publishing.md): running `syndex-upload`.
-- [`migration-notes.md`](migration-notes.md): defects found in the source files
-  during the Box migration, and what was done about them.

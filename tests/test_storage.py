@@ -10,8 +10,8 @@ what this code does about a failure, not that boto3 works.
 from pathlib import Path
 
 import pytest
-from samples import make_grid
 
+from samples import make_grid
 from syndex.publish import storage
 from syndex.publish.plan import build_plan
 from syndex.publish.sources import SourceFile

@@ -189,6 +189,4 @@ Export D1 before bulk or destructive work:
 wrangler d1 export synthesizer-database --remote --output=database.sql
 ```
 
-R2 bytes are immutable; D1 time travel and exports cover the metadata. What the
-Box migration found and corrected in the source files is in
-[`migration-notes.md`](migration-notes.md).
+R2 bytes are immutable; D1 time travel and exports cover the metadata.

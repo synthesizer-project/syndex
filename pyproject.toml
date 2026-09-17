@@ -49,3 +49,13 @@ packages = ["src/syndex"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# Said outright rather than inferred. Which packages count as first-party
+# decides where isort puts a blank line, and left to inference the answer
+# depends on the ruff version: CI downloads the latest, a developer has
+# whatever uvx cached, and the two disagreed.
+[tool.ruff]
+src = ["src", "tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["syndex"]

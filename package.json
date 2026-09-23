@@ -7,7 +7,8 @@
   },
   "description": "Worker serving the Synthesizer data API and the Syndex portal.",
   "scripts": {
-    "build": "mkdir -p public/syndex/static && tailwindcss --input src/portal/app.css --output public/syndex/static/app.css --minify && cp node_modules/htmx.org/dist/htmx.min.js public/syndex/static/htmx.min.js && cp src/portal/static/* public/syndex/static/",
+    "build": "mkdir -p public/syndex/static && tailwindcss --input src/portal/app.css --output public/syndex/static/app.css --minify && cp node_modules/htmx.org/dist/htmx.min.js public/syndex/static/htmx.min.js && cp src/portal/static/* public/syndex/static/ && npm run docs",
+    "docs": "uv run --extra docs sphinx-build -q -d docs/build/doctrees docs/source public/syndex/docs",
     "deploy": "npm run build && wrangler deploy",
     "dev": "npm run build && wrangler d1 migrations apply synthesizer-database --local && wrangler dev",
     "test": "node tests/worker_routes.mjs && node tests/portal_routes.mjs && node tests/edge_cache.mjs"

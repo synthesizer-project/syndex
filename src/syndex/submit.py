@@ -317,14 +317,14 @@ def send(
         )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Send a file for a submission that has already been described.
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser.
 
-    Args:
-        argv (list[str] | None): Arguments, or None to read from sys.argv.
+    Separate from :func:`main` so the documentation can render the same
+    options the command accepts, rather than a copy that drifts.
 
     Returns:
-        int: 0 on success, 1 on anything the person can act on.
+        argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
         prog="syndex-submit",
@@ -346,7 +346,19 @@ def main(argv: list[str] | None = None) -> int:
         help="run the checker on the file before sending it, and stop if it fails",
     )
     parser.add_argument("--quiet", action="store_true", help="no progress output")
-    arguments = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Send a file for a submission that has already been described.
+
+    Args:
+        argv (list[str] | None): Arguments, or None to read from sys.argv.
+
+    Returns:
+        int: 0 on success, 1 on anything the person can act on.
+    """
+    arguments = build_parser().parse_args(argv)
 
     if not arguments.path.is_file():
         print(f"{arguments.path}: no such file", file=sys.stderr)

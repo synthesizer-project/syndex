@@ -203,8 +203,18 @@ const HeaderMenu = ({ counts, filters, active, nav, showSubmit }) => {
           </>
         )}
 
+        {/* On a wide screen the tab bar carries these instead. */}
+        <a
+          href={`${BASE}/docs/`}
+          class={`rounded-lg px-3 py-2 no-underline ${nav ? "sm:hidden" : ""}`}
+        >
+          Documentation
+        </a>
         {showSubmit && (
-          <a href={`${BASE}/submit`} class="rounded-lg px-3 py-2 no-underline">
+          <a
+            href={`${BASE}/submit`}
+            class={`rounded-lg px-3 py-2 no-underline ${nav ? "sm:hidden" : ""}`}
+          >
             Submit a dataset
           </a>
         )}
@@ -382,6 +392,23 @@ export const Layout = ({
                 class="hidden flex-wrap items-center gap-x-6 gap-y-2 text-sm sm:flex"
               >
                 <TabLinks counts={counts} filters={filters} active={active} />
+                <a
+                  href={`${BASE}/docs/`}
+                  class="border-b-2 border-transparent pt-[calc(0.25rem+2px)] pb-1 text-muted no-underline transition-colors hover:text-text"
+                >
+                  Documentation
+                </a>
+                {/* Not a data type, but the one action the portal most wants
+                    taken, so it sits at the end of the tabs where it is seen
+                    rather than behind the menu. */}
+                {showSubmit && (
+                  <a
+                    href={`${BASE}/submit`}
+                    class="border-b-2 border-transparent pt-[calc(0.25rem+2px)] pb-1 text-accent-light no-underline transition-colors hover:text-text"
+                  >
+                    Submit data
+                  </a>
+                )}
               </nav>
             )}
             <HeaderMenu

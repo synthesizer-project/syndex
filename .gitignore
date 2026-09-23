@@ -18,3 +18,4 @@ src/syndex/_version.py
 # source files during the Box migration.
 docs/migration-notes.md
 
+docs/build/

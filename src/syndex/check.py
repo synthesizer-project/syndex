@@ -331,14 +331,14 @@ def _render(report: Report, verdict: bool = True) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Check files named on the command line.
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser.
 
-    Args:
-        argv (list[str] | None): Arguments, or None to read from sys.argv.
+    Separate from :func:`main` so the documentation can render the same
+    options the command accepts, rather than a copy that drifts.
 
     Returns:
-        int: 0 when every file could be published, 1 when any could not.
+        argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
         prog="syndex-check",
@@ -358,7 +358,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Say what each file is, without checking whether it can be published.",
     )
-    arguments = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Check files named on the command line.
+
+    Args:
+        argv (list[str] | None): Arguments, or None to read from sys.argv.
+
+    Returns:
+        int: 0 when every file could be published, 1 when any could not.
+    """
+    arguments = build_parser().parse_args(argv)
 
     reports = []
     for path in arguments.paths:

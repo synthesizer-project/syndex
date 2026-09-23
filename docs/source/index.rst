@@ -18,7 +18,7 @@ Downloading is done by Synthesizer's ``synthesizer-download`` using the dataset'
 
     synthesizer-download --dataset bpass-2p2p1-bin-chabrier03-0p1-300p0
 
-Add ``--release <id>`` to fetch a specific release rather than the current one, so a published result can be reproduced from exactly the file it used. Synthesizer's `downloading guide <https://synthesizer-project.org/synthesizer/getting_started/downloading_grids.html>`_ covers where files are saved and how to load them.
+Add ``--release <id>`` to fetch a specific release rather than the current one, so a published result can be reproduced from exactly the file it used. A dataset's page lists its releases, each with its id and download command. Synthesizer's `downloading guide <https://synthesizer-project.org/synthesizer/getting_started/downloading_grids.html>`_ covers where files are saved and how to load them.
 
 The catalogue can also be read as JSON; see :doc:`api`.
 

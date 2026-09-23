@@ -58,7 +58,26 @@ Listing datasets
 
     curl 'https://data.synthesizer-project.org/v1/datasets?data_type=dust_grid'
 
-The response is ``{"datasets": [...], "cursor": ...}``. ``cursor`` is ``null`` on the last page.
+The response is ``{"datasets": [...], "cursor": ...}``. ``cursor`` is ``null`` on the last page. To read the whole catalogue from Python:
+
+.. code-block:: python
+
+    import json
+    from urllib.parse import urlencode
+    from urllib.request import urlopen
+
+    API = "https://data.synthesizer-project.org/v1/datasets"
+    params = {"data_type": "grid", "has_lines": "true", "limit": 1000}
+    datasets = []
+    while True:
+        with urlopen(f"{API}?{urlencode(params)}") as response:
+            page = json.load(response)
+        datasets += page["datasets"]
+        if page["cursor"] is None:
+            break
+        params["after"] = page["cursor"]
+
+    print([dataset["name"] for dataset in datasets])
 
 One dataset
 ===========
@@ -71,7 +90,7 @@ One dataset
 - ``citations``: in bibliography order, each with its bibcode, DOI and BibTeX.
 - ``known_bug`` and ``known_bug_description``.
 
-``GET /v1/datasets/{name}/releases`` lists every release, including superseded ones, each with ``is_current`` and a ``download_url``. Use it to pin a release deliberately.
+``GET /v1/datasets/{name}/releases`` lists every release, including superseded ones, each with ``is_current`` and a ``download_url``. Use it to pin a release deliberately. ``GET /v1/releases/{id}`` returns one of them in the same form as ``current_release``, plus its ``dataset`` and ``is_current``.
 
 Downloading
 ===========

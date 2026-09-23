@@ -26,7 +26,7 @@ A saved Synthesizer instrument, or a collection of them, ready to produce observ
 What's in the file
 ==================
 
-Whatever Synthesizer wrote when the instrument was saved, with ``InstrumentCollection.write_instruments`` or an instrument's ``to_hdf5``: an ``instrument_type`` attribute, then ``Filters``, ``Wavelength``, ``Resolution``, ``PSFs``, ``Depth``, ``SNRs``, ``NoiseMaps`` and so on, as the instrument has them. A collection has one such group per instrument, plus a ``Header``.
+Whatever Synthesizer wrote when the instrument was saved, with ``InstrumentCollection.write_instruments`` or an instrument's ``to_hdf5``: an ``instrument_type`` attribute, then ``Filters``, ``Wavelength``, ``Resolution``, ``PSFs``, ``Depth``, ``SNRs``, ``NoiseMaps`` and so on, as the instrument has them. A collection has one such group per instrument, plus a ``Header``. Synthesizer's premade instrument files, which have no ``instrument_type``, are also recognised.
 
 What the instrument can do is read from which of these are present, so there is nothing to fill in by hand.
 
@@ -38,4 +38,4 @@ The observatory and instrument, ending ``-instrument``, e.g. ``euclid-nisp-instr
 Submitting one
 ==============
 
-``syndex-check`` refuses an instrument whose ``instrument_type`` is not one of the five above, and a collection holding no instruments. It warns when a photometric instrument has no filter codes, since it then cannot be found by filter.
+``syndex-check`` refuses an instrument whose ``instrument_type`` is not one of the types above, and a collection holding no instruments. It warns when a ``photometric`` or ``photometric_imager`` instrument has no filter codes, since it then cannot be found by filter on the portal.

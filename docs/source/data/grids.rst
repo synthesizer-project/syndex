@@ -22,7 +22,7 @@ An HDF5 file with:
    * - ``axes`` (root attribute)
      - The axis names, in order.
    * - ``axes/<name>``
-     - One dataset per axis, with a ``Units`` attribute.
+     - One dataset per axis, with a ``Units`` attribute, and ``log_on_read`` if it should be read in log space.
    * - ``spectra/``
      - One dataset per spectrum (``incident``, ``nebular``, …) and a ``wavelength`` dataset.
    * - ``lines/``
@@ -41,7 +41,11 @@ A grid needs the axes and at least one of ``spectra``, ``lines`` or ``log10_spec
 Naming
 ======
 
-Follow existing entries: model, version, variant, IMF and mass range, then the photoionisation code and version if photoionised. Use ``p`` for a decimal point, e.g. ``bpass-2p2p1-bin-chabrier03-0p1-300p0``.
+Model, version, variant, IMF and its parameters, with ``p`` for a decimal point:
+
+- ``bpass-2p2p1-bin-chabrier03-0p1-300p0``: incident BPASS 2.2.1 binary models, Chabrier (2003) IMF from 0.1 to 300 solar masses.
+- ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01``: the same models photoionised with Cloudy c23.01. A photoionised grid is named after its incident grid plus the code and version.
+- ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01-resolution0p05``: anything that differs from the default photoionisation setup goes last.
 
 Submitting one
 ==============
@@ -56,5 +60,7 @@ It warns, without refusing, when:
 
 - an axis name is singular. Grid axes are plural: ``ages``, ``metallicities``, ``ionisation_parameters``, ``hydrogen_densities``, …
 - an axis has the wrong units: ``ages`` in a time unit, and ``metallicities``, ``ionisation_parameters``, ``accretion_rates_eddington`` and ``cosine_inclinations`` dimensionless.
-- the filename says ``cloudy-c25.00`` but ``cloudy_version`` in the file says otherwise.
+- the filename names a Cloudy version (e.g. ``cloudy-c25.00``) that ``cloudy_version`` in the file disagrees with.
 - there is no model name, no wavelength, or no ``synthesizer_version``.
+
+Do not put ``dust`` in the filename of a grid that is not a dust grid: a filename containing it is read as a :doc:`dust grid <dust_grids>`, whatever the ``Model`` group says.

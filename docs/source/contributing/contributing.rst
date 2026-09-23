@@ -97,7 +97,7 @@ The file is sent in 90 MiB pieces, and a piece that fails is retried, so a brief
 Once the file arrives:
 
 1. The automatic check runs on the uploaded file, and the result appears on the submission's page. It also reports if identical bytes are already in the catalogue.
-2. A reviewer looks at the submission and approves it or says why not.
+2. Reviewers are notified automatically. One looks at the submission and approves it or says why not.
 3. If it is **approved**, a maintainer publishes it and it appears in the catalogue.
 4. If it is **not accepted**, the reviewer's note says what to fix. Resubmit from `your submissions <https://synthesizer-project.org/syndex/submissions>`_, which fills in the form from the old one.
 

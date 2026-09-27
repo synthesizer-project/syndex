@@ -194,7 +194,7 @@ async function openUpload(env, submission) {
  * @param {object} submission The submission row.
  * @param {number} partNumber Which part this is, counting from one.
  * @param {ReadableStream} body The part's bytes.
- * @returns {Promise<void>} Resolves once the part is stored and recorded.
+ * @returns {Promise<string>} The id of the transfer the part joined.
  */
 export async function writePart(env, submission, partNumber, body) {
   // Part one is the beginning of a transfer, so anything already half sent is
@@ -211,7 +211,7 @@ export async function writePart(env, submission, partNumber, body) {
     submission = { ...submission, upload_id: null };
   }
 
-  const { upload } = await openUpload(env, submission);
+  const { upload, uploadId } = await openUpload(env, submission);
   const part = await upload.uploadPart(partNumber, body);
 
   await env.DB.prepare(
@@ -221,6 +221,37 @@ export async function writePart(env, submission, partNumber, body) {
   )
     .bind(submission.submission_id, partNumber, part.etag)
     .run();
+
+  return uploadId;
+}
+
+/**
+ * Which parts of the current transfer have arrived.
+ *
+ * What lets `syndex-submit` resume: it sends only what is missing. The upload
+ * id comes with the list so a client can tell that this is the transfer it
+ * started, rather than one begun since -- from a browser, say -- whose parts
+ * belong to some other file.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {object} submission The submission row.
+ * @returns {Promise<{upload: string | null, parts: number[]}>} The transfer
+ *     and the part numbers it holds.
+ */
+export async function receivedParts(env, submission) {
+  if (!submission.upload_id) {
+    return { upload: null, parts: [] };
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT part_number FROM submission_parts
+     WHERE submission_id = ? ORDER BY part_number`,
+  )
+    .bind(submission.submission_id)
+    .all();
+  return {
+    upload: submission.upload_id,
+    parts: results.map((row) => row.part_number),
+  };
 }
 
 /**

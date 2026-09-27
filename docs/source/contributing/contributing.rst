@@ -1,29 +1,31 @@
 Contributing data
 *****************
 
-Anyone can read the catalogue. To add to it, you describe a submission on the `portal <https://synthesizer-project.org/syndex/submit>`_, send the file, and a reviewer checks it before a maintainer publishes it.
+Anyone can read the catalogue. To add to it, you check your file, describe it on the `portal <https://synthesizer-project.org/syndex/submit>`_, and upload it from the browser or the command line. A reviewer then looks at it, and a maintainer publishes it.
 
 Before you start
 ================
 
-**Get access.** Sign in to the portal with GitHub and `request access <https://synthesizer-project.org/syndex/access>`_. Say in a sentence or two what the data is, roughly how large it is, and how it was produced. A maintainer will reply through GitHub.
+**Get access.** Sign in to the portal with GitHub and `request access <https://synthesizer-project.org/syndex/access>`_. In a sentence or two, say what the data is, roughly how large it is and how it was produced. A maintainer will reply through GitHub.
 
-**Install the tools** (Python 3.10 or later; only ``h5py`` and ``numpy`` are required):
+**Install the tools.** They need Python 3.10 or later, and nothing beyond ``h5py`` and ``numpy``:
 
 .. code-block:: bash
 
     pip install cosmos-syndex
 
-This provides ``syndex-check``, which checks a file, and ``syndex-submit``, which uploads one from the command line.
+This provides two commands: ``syndex-check``, which checks a file, and ``syndex-submit``, which uploads one from the command line.
 
 1. Check the file
 =================
 
-Every upload goes through the same automatic check. Run it yourself first, so you find a missing attribute in a second rather than after sending 30 GB:
+Every upload is checked automatically, by the same rules ``syndex-check`` applies. Running it yourself first means finding a missing attribute in a second, rather than after uploading 30 GB:
 
 .. code-block:: bash
 
     syndex-check my-grid.hdf5
+
+It reports what the file is, what it read from it, any problems, and a verdict on the last line:
 
 .. code-block:: text
 
@@ -37,86 +39,95 @@ Every upload goes through the same automatic check. Run it yourself first, so yo
       warning: axis 'age' is singular; grid axes use the plural form 'ages'
       ready to submit
 
-- An **ERROR** means the file cannot be published as it stands. Fix it and run the check again.
-- A **warning** is a convention the file breaks. It does not block the submission, but fix it if you can.
-- ``ready to submit; a reviewer will categorise it`` means the file is not a grid, dust grid or instrument. That is expected for other data: there is nothing structural to check, so a reviewer decides what it is.
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
 
-What causes each error and warning is listed under **Submitting one** on each type's page: :doc:`grids <../data/grids>`, :doc:`dust grids <../data/dust_grids>`, :doc:`instruments <../data/instruments>`. ``--json`` prints the report for a script to read, and several files can be checked at once; the exit status is ``0`` only if all of them pass.
+   * - Verdict
+     - Meaning
+   * - ``ready to submit``
+     - Nothing blocks publication. Any warnings above it are conventions the file breaks; fix them if you can.
+   * - ``ready to submit; a reviewer will categorise it``
+     - The file is not a grid, dust grid or instrument, so there is nothing structural to check. This is expected for other data.
+   * - ``not ready``
+     - The lines marked ``ERROR`` must be fixed before the file can be published.
+
+Each data type's page lists what causes its errors and warnings, and how to fix them: :doc:`grids <../data/grids>`, :doc:`dust grids <../data/dust_grids>` and :doc:`instruments <../data/instruments>`.
+
+Several files can be checked at once, and the exit status is ``0`` only if every one passes. ``--json`` prints the report for a script to read.
 
 2. Describe it
 ==============
 
-On the `submit page <https://synthesizer-project.org/syndex/submit>`_ choose:
-
-- **New dataset** for something not yet in the catalogue, or
-- **New release** for a new version of an existing dataset. It keeps that dataset's name and description, and the old release stays downloadable.
+On the `submit page <https://synthesizer-project.org/syndex/submit>`_, choose **New dataset** for something not yet in the catalogue, or **New release** for a new version of an existing dataset. A new release keeps its dataset's name and description, and earlier releases stay downloadable.
 
 The form asks for:
 
-- **Data type**: one of the :doc:`catalogue types <../data/data>`, or *other* if none fits and a reviewer should decide.
-- **Catalogue name**: lowercase letters, digits and hyphens. People download by it, so it cannot change later. See :doc:`../data/data` for the convention.
-- **Display name** and **description**: what it is, and what it is not suitable for.
-- **Citations**: the ADS bibcodes the data should be cited with, e.g. ``2017PASA...34...58E``.
-- **Licence**, if the data has one.
-- **Notes for the reviewer**: anything else they should know.
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
 
-Axes, filters, model and code versions are read from the file, so you do not type them in.
+   * - Field
+     - What to enter
+   * - Data type
+     - One of the :doc:`catalogue's types <../data/data>`, or *other* if none fits and a reviewer should decide.
+   * - Catalogue name
+     - Lowercase letters, digits and hyphens, following the :doc:`naming convention <../data/data>`. People download by it, so it cannot change later.
+   * - Display name
+     - The title shown on the portal.
+   * - Description
+     - What the data is, and what it is not suitable for.
+   * - Citations
+     - The ADS bibcodes it should be cited with, such as ``2017PASA...34...58E``.
+   * - Licence
+     - Its licence, if it has one.
+   * - Notes for the reviewer
+     - Anything else they should know.
+
+Axes, filters, and model and code versions are read from the file, so there is no need to enter them.
 
 3. Upload the file
 ==================
 
-Saving the form opens the submission's page, which offers two ways to send the file. Both use the same upload, so choose by size and by where the file is.
+Saving the form opens the submission's page, which offers two ways to upload the file. Both send it to the same place, so choose by its size and where it is:
 
 .. list-table::
    :header-rows: 1
    :widths: 20 20 60
 
-   * - Method
+   * - From
      - Largest file
-     - Use it when
-   * - Browser
+     - Best for
+   * - The browser
      - 10 GB
-     - The file is on the machine you are browsing from. Pick it on the submission's page. An interrupted browser upload starts again from the beginning.
+     - A file on the machine you are browsing from. Choose it on the submission's page. If the upload is interrupted, it starts again from the beginning.
    * - ``syndex-submit``
      - about 189 GB
-     - The file is larger, or on a remote machine you reach over SSH, such as an HPC system.
+     - Anything larger, or a file on a remote machine you reach over SSH, such as an HPC system. An interrupted upload resumes.
 
-For the command line, copy the upload token from the submission's page:
+To upload from the command line, copy the upload token from the submission's page:
 
 .. code-block:: bash
 
     syndex-submit 6630a2d3da236ed83f246c1040fdcd06 my-grid.hdf5
 
-The first time, it prints a code to enter at `github.com/login/device <https://github.com/login/device>`_ from any device. It then keeps a session token for the portal in ``~/.config/syndex/``, and nothing else; signing out from your account page ends it.
+The first time, it asks you to sign in by entering a code at `github.com/login/device <https://github.com/login/device>`_, from any device. It keeps the resulting session in ``~/.config/syndex/`` and stores nothing else; signing out from your account page ends it.
 
-The file is sent in 90 MiB pieces, and a piece that fails is retried, so a brief network drop does not stop the transfer. Add ``--check`` to run ``syndex-check`` first and stop if the file would be refused. All options are on :doc:`command_line`.
+The file is sent in 90 MiB pieces, and a piece that fails is retried. If the upload stops altogether, run the same command again: it sends only the pieces still missing. It starts from the beginning instead if the file has changed, or if the upload was restarted from the browser in the meantime.
+
+Add ``--check`` to run ``syndex-check`` first and stop if the file would be refused. All options are listed under :doc:`command_line`.
 
 4. Review
 =========
 
-Once the file arrives:
+Once the upload finishes:
 
-1. The automatic check runs on the uploaded file, and the result appears on the submission's page. It also reports if identical bytes are already in the catalogue.
-2. Reviewers are notified automatically. One looks at the submission and approves it or says why not.
-3. If it is **approved**, a maintainer publishes it and it appears in the catalogue.
-4. If it is **not accepted**, the reviewer's note says what to fix. Resubmit from `your submissions <https://synthesizer-project.org/syndex/submissions>`_, which fills in the form from the old one.
+1. The file is checked again automatically. The report appears on the submission's page, and says if the catalogue already holds an identical file.
+2. Reviewers are notified. One of them approves the submission, or explains why not.
+3. An approved submission is published by a maintainer, and appears in the catalogue.
+4. If it is not accepted, fix what the reviewer describes and submit again from `your submissions <https://synthesizer-project.org/syndex/submissions>`_. The form is filled in from the earlier attempt.
 
-Limits
-======
-
-.. list-table::
-   :widths: 60 40
-
-   * - Largest file from a browser
-     - 10 GB
-   * - Largest file from ``syndex-submit``
-     - about 189 GB
-   * - Submissions one account may have waiting for review
-     - 10
-   * - Submissions waiting for review across everyone
-     - 50
-
-The waiting limits clear as submissions are reviewed. For anything that does not fit, `open an issue <https://github.com/synthesizer-project/synthesizer/issues>`_ and a maintainer will arrange another way.
+Each account may have up to 10 submissions waiting for review, and the whole queue holds up to 50. Both limits clear as submissions are reviewed. If your data does not fit the limits here, `open an issue <https://github.com/synthesizer-project/synthesizer/issues>`_ and a maintainer will arrange another way.
 
 .. toctree::
    :maxdepth: 1

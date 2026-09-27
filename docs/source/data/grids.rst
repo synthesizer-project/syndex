@@ -4,14 +4,16 @@ Grids
 What it is
 ==========
 
-A grid holds the emission of a stellar population synthesis (SPS) or AGN model computed over a set of parameters, such as ages and metallicities for SPS models, or black hole masses and accretion rates for AGN.
+A grid holds the emission of a stellar population synthesis (SPS) or AGN model, computed over a set of parameters: ages and metallicities for an SPS model, or black hole masses and accretion rates for an AGN model, for example.
 
-Grids are either **incident** (the model as provided) or **photoionised** (reprocessed through a photoionisation code, usually Cloudy, adding nebular emission and lines). Synthesizer's `grids documentation <https://synthesizer-project.org/synthesizer/emission_grids/grids.html>`_ covers using them; `syncretize <https://github.com/synthesizer-project/syncretize>`_ creates them.
+An **incident** grid is the model as provided. A **photoionised** grid has been reprocessed through a photoionisation code, usually Cloudy, which adds nebular emission and lines.
+
+Grids are made with `syncretize <https://github.com/synthesizer-project/syncretize>`_. Synthesizer's `grids documentation <https://synthesizer-project.org/synthesizer/emission_grids/grids.html>`_ explains how to use them.
 
 What's in the file
 ==================
 
-An HDF5 file with:
+A grid is an HDF5 file laid out as follows. It needs the axes and at least one of ``spectra``, ``lines`` or ``log10_specific_ionising_luminosity``; everything else is read if present. Grids written by syncretize already have all of it.
 
 .. list-table::
    :header-rows: 1
@@ -22,45 +24,70 @@ An HDF5 file with:
    * - ``axes`` (root attribute)
      - The axis names, in order.
    * - ``axes/<name>``
-     - One dataset per axis, with a ``Units`` attribute, and ``log_on_read`` if it should be read in log space.
+     - One dataset per axis. A ``Units`` attribute gives its units, and ``log_on_read`` marks an axis to be read in log space.
    * - ``spectra/``
-     - One dataset per spectrum (``incident``, ``nebular``, …) and a ``wavelength`` dataset.
+     - One dataset per spectrum (``incident``, ``nebular``, …), plus their ``wavelength``.
    * - ``lines/``
-     - Line luminosities: ``id``, ``wavelength`` and the luminosities.
+     - Line luminosities, with the line ``id`` and ``wavelength``.
    * - ``log10_specific_ionising_luminosity``
      - Ionising photon luminosities.
    * - ``Model/``
-     - The model: ``sps_name`` and ``sps_version`` for SPS, ``type = "agn"`` and ``family`` for AGN.
+     - The model. ``sps_name`` and ``sps_version`` for an SPS model; ``type = "agn"`` and ``family`` for an AGN model.
    * - ``CloudyParams/``
-     - Photoionisation parameters, including ``cloudy_version``. Photoionised grids only.
+     - The photoionisation parameters, including ``cloudy_version``. Photoionised grids only.
    * - Root attributes
-     - ``synthesizer_version``, ``synthesizer_grids_version``, ``date_created``.
-
-A grid needs the axes and at least one of ``spectra``, ``lines`` or ``log10_specific_ionising_luminosity``. Grids written by syncretize have all of this already.
+     - ``synthesizer_version``, ``synthesizer_grids_version`` and ``date_created``.
 
 Naming
 ======
 
-Model, version, variant, IMF and its parameters, with ``p`` for a decimal point:
+A grid is named by model, version, variant, then the IMF and its parameters. A photoionised grid takes the name of the grid it was made from, followed by the code and its version. Anything that differs from the default photoionisation setup comes last.
 
-- ``bpass-2p2p1-bin-chabrier03-0p1-300p0``: incident BPASS 2.2.1 binary models, Chabrier (2003) IMF from 0.1 to 300 solar masses.
-- ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01``: the same models photoionised with Cloudy c23.01. A photoionised grid is named after its incident grid plus the code and version.
-- ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01-resolution0p05``: anything that differs from the default photoionisation setup goes last.
+.. list-table::
+   :header-rows: 1
+   :widths: 55 45
+
+   * - Name
+     - Grid
+   * - ``bpass-2p2p1-bin-chabrier03-0p1-300p0``
+     - BPASS 2.2.1 binary models, Chabrier (2003) IMF from 0.1 to 300 solar masses. Incident.
+   * - ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01``
+     - The same models, photoionised with Cloudy c23.01.
+   * - ``bpass-2p2p1-bin-chabrier03-0p1-300p0-cloudy-c23p01-resolution0p05``
+     - The same again, at a different resolution.
 
 Submitting one
 ==============
 
-``syndex-check`` reads the type from the file, not the filename. It refuses a grid that:
+``syndex-check`` works out what kind of grid a file is from its contents, with one exception: a filename containing ``dust`` marks it as a :doc:`dust grid <dust_grids>`, whatever its ``Model`` group says. Keep ``dust`` out of the name of any other grid.
 
-- **does not say what kind of grid it is**: the ``Model`` group needs ``sps_name`` (SPS) or ``type = "agn"`` (AGN).
-- **does not say what emission it holds**: it needs ``CloudyParams``, reprocessed spectra (names starting ``nebular``, ``transmitted`` or ``linecont``), or only ``incident``.
-- **has no axes**.
+Errors stop a grid being published; warnings are reported but do not.
 
-It warns, without refusing, when:
+.. list-table::
+   :header-rows: 1
+   :widths: 15 40 45
 
-- an axis name is singular. Grid axes are plural: ``ages``, ``metallicities``, ``ionisation_parameters``, ``hydrogen_densities``, …
-- an axis has the wrong units: ``ages`` in a time unit, and ``metallicities``, ``ionisation_parameters``, ``accretion_rates_eddington`` and ``cosine_inclinations`` dimensionless.
-- the filename names a Cloudy version (e.g. ``cloudy-c25.00``) that ``cloudy_version`` in the file disagrees with.
-- there is no model name, no wavelength, or no ``synthesizer_version``.
-
-Do not put ``dust`` in the filename of a grid that is not a dust grid: a filename containing it is read as a :doc:`dust grid <dust_grids>`, whatever the ``Model`` group says.
+   * -
+     - Problem
+     - Fix
+   * - Error
+     - The grid does not say what kind of grid it is.
+     - Give the ``Model`` group ``sps_name`` for an SPS model, or ``type = "agn"`` for an AGN model.
+   * - Error
+     - The grid does not say what emission it holds.
+     - Include ``CloudyParams``, or spectra showing reprocessing (names beginning ``nebular``, ``transmitted`` or ``linecont``). A grid holding only ``incident`` spectra is read as incident.
+   * - Error
+     - The grid has no axes.
+     - Add the ``axes`` attribute and the ``axes/`` group.
+   * - Warning
+     - An axis name is singular.
+     - Use the plural: ``ages``, ``metallicities``, ``ionisation_parameters``, ``hydrogen_densities``, and so on.
+   * - Warning
+     - An axis has unexpected units.
+     - ``ages`` should be a time; ``metallicities``, ``ionisation_parameters``, ``accretion_rates_eddington`` and ``cosine_inclinations`` should be dimensionless.
+   * - Warning
+     - The filename and the file disagree on the Cloudy version.
+     - A filename containing ``cloudy-c25.00`` must hold ``cloudy_version = c25.00``. Correct whichever is wrong.
+   * - Warning
+     - No model name, wavelength or ``synthesizer_version`` could be read.
+     - Add what is missing. Without a model name the grid will not appear under its model in the portal's filters.

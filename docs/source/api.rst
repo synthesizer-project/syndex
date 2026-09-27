@@ -1,7 +1,7 @@
 Catalogue API
 *************
 
-Everything the portal shows is available as JSON from ``https://data.synthesizer-project.org``. It is read-only, needs no key, and allows requests from any origin.
+Everything the portal shows is available as JSON from ``https://data.synthesizer-project.org``. The API is read-only, needs no key, and accepts requests from any origin.
 
 .. list-table::
    :header-rows: 1
@@ -82,19 +82,46 @@ The response is ``{"datasets": [...], "cursor": ...}``. ``cursor`` is ``null`` o
 One dataset
 ===========
 
-``GET /v1/datasets/{name}`` returns the dataset and everything stored about its current release under ``current_release``:
+``GET /v1/datasets/{name}`` returns the dataset, and everything stored about its current release under ``current_release``:
 
-- ``file``: filename, format, size and ``sha256``.
-- ``grid`` (grids and dust grids): model, photoionisation code, spectra, line ids, wavelength range, and every axis with its full ``values``. Enough to plot or filter a grid without downloading it.
-- ``instrument`` (instruments): type, filters, capabilities.
-- ``citations``: in bibliography order, each with its bibcode, DOI and BibTeX.
-- ``known_bug`` and ``known_bug_description``.
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
 
-``GET /v1/datasets/{name}/releases`` lists every release, including superseded ones, each with ``is_current`` and a ``download_url``. Use it to pin a release deliberately. ``GET /v1/releases/{id}`` returns one of them in the same form as ``current_release``, plus its ``dataset`` and ``is_current``.
+   * - Field
+     - Holds
+   * - ``file``
+     - The filename, format, size and ``sha256``.
+   * - ``grid``
+     - For grids and dust grids: the model, photoionisation code, spectra, line ids, wavelength range, and every axis with its full ``values``. Enough to plot or filter a grid without downloading it.
+   * - ``instrument``
+     - For instruments: the type, filters and capabilities.
+   * - ``citations``
+     - In bibliography order, each with its bibcode, DOI and BibTeX.
+   * - ``known_bug``, ``known_bug_description``
+     - Whether a defect has been found in the release, and what it is.
+
+Releases
+========
+
+``GET /v1/datasets/{name}/releases`` lists every release of a dataset, newest first and including superseded ones, each with ``is_current`` and a ``download_url``. Use it to choose a release to pin.
+
+``GET /v1/releases/{id}`` returns one release in the same form as ``current_release``, plus its ``dataset`` and ``is_current``.
 
 Downloading
 ===========
 
-``GET /v1/releases/{id}/download`` streams the file. The ``X-Syndex-SHA256`` header gives the expected digest, and ``HEAD`` returns the headers without the body, to check size and digest before downloading. ``Range`` requests are supported, so an interrupted download can be resumed.
+``GET /v1/releases/{id}/download`` streams the file. ``synthesizer-download`` does this for you, but a client of its own can rely on:
 
-In practice, ``synthesizer-download`` does all of this for you.
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Feature
+     - Use
+   * - ``X-Syndex-SHA256`` header
+     - The digest the file should have, to verify it after downloading.
+   * - ``HEAD`` requests
+     - The same headers without the file, to check its size and digest first.
+   * - ``Range`` requests
+     - Part of the file, to resume an interrupted download.

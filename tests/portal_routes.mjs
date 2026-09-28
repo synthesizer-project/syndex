@@ -1598,6 +1598,48 @@ const tests = {
     assert.deepEqual(recorded.params, [SUBMISSION.submission_id, 3, "etag-3"]);
   },
 
+  async "a part answers with the transfer it joined, for resuming"() {
+    const env = contributorEnv({ rows: { submission: SUBMISSION } });
+    const { status, body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/part/1`,
+      env,
+      { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } },
+    );
+
+    assert.equal(status, 200);
+    assert.deepEqual(JSON.parse(body), { part: 1, upload: "upload-1" });
+  },
+
+  async "the parts received so far are listed with their transfer"() {
+    const env = contributorEnv({
+      rows: {
+        submission: { ...SUBMISSION, upload_id: "upload-7" },
+        parts: [{ part_number: 1 }, { part_number: 2 }],
+      },
+    });
+    const { status, body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/parts`,
+      env,
+      SIGNED_IN,
+    );
+
+    assert.equal(status, 200);
+    assert.deepEqual(JSON.parse(body), { upload: "upload-7", parts: [1, 2] });
+  },
+
+  async "a transfer not yet begun has no parts to resume"() {
+    const env = contributorEnv({
+      rows: { submission: SUBMISSION, parts: [{ part_number: 1 }] },
+    });
+    const { body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}/parts`,
+      env,
+      SIGNED_IN,
+    );
+
+    assert.deepEqual(JSON.parse(body), { upload: null, parts: [] });
+  },
+
   async "the ceiling is a part count, which a client cannot misreport"() {
     // The service's ceiling, not the browser's. A terminal client resumes, so
     // it is allowed files a tab would be the wrong tool for.

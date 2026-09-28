@@ -27,6 +27,7 @@ import {
   MAX_UPLOAD_BYTES,
   PART_SIZE,
   finishUpload,
+  receivedParts,
   submissionRefusal,
   submissionsOpen,
   writePart,
@@ -500,8 +501,23 @@ routes.post("/submit/:token/part/:number{[0-9]+}", requireRole("contributor"), a
     return c.json({ error: "That part carried no data" }, 400);
   }
 
-  await writePart(c.env, submission, partNumber, c.req.raw.body);
-  return c.json({ part: partNumber }, 200, { "cache-control": "no-store" });
+  const upload = await writePart(c.env, submission, partNumber, c.req.raw.body);
+  return c.json({ part: partNumber, upload }, 200, { "cache-control": "no-store" });
+});
+
+// What has arrived so far, so `syndex-submit` can resume a transfer rather
+// than send 30 GB again because the connection dropped at 29.
+routes.get("/submit/:token/parts", requireRole("contributor"), async (c) => {
+  const submission = await ownSubmission(c);
+  if (submission === null) {
+    return c.json({ error: "No such submission" }, 404);
+  }
+  if (submission.uploaded_at !== null) {
+    return c.json({ error: "This submission already has its file" }, 409);
+  }
+  return c.json(await receivedParts(c.env, submission), 200, {
+    "cache-control": "no-store",
+  });
 });
 
 routes.get("/submit/:token/check", requireRole("contributor"), async (c) => {

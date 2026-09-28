@@ -53,6 +53,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The build renders the user documentation with Sphinx.
+      - uses: astral-sh/setup-uv@v5
       - name: Build and deploy
         run: npm run deploy
         env:

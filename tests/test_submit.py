@@ -14,6 +14,12 @@ import pytest
 from syndex import submit
 
 
+@pytest.fixture(autouse=True)
+def _private_config(tmp_path, monkeypatch):
+    """Keep sessions and transfer progress out of the real home directory."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
 def _worker_constant(name):
     """Read one exported constant out of the Worker's submissions module.
 
@@ -142,3 +148,79 @@ def test_check_stops_a_file_that_would_be_rejected(tmp_path, capsys, monkeypatch
 
     assert submit.main([str(path.name), str(path), "--check"]) == 1
     assert "would not be published" in capsys.readouterr().err
+
+
+class _Portal:
+    """A stand-in portal that remembers which parts arrived, as the Worker does."""
+
+    def __init__(self, upload="upload-1"):
+        self.upload = upload
+        self.parts = {}
+        self.sent = []
+        self.fail_at = None
+
+    def __call__(self, url, payload=None, **kwargs):
+        if url.endswith("/parts"):
+            return 200, {"upload": self.upload, "parts": sorted(self.parts)}
+        if "/part/" in url:
+            number = int(url.rsplit("/", 1)[1])
+            if number == self.fail_at:
+                raise submit.SubmitError("connection dropped")
+            if number == 1:
+                # As the Worker does: part one starts the transfer again.
+                self.parts = {}
+            self.parts[number] = kwargs["data"]
+            self.sent.append(number)
+            return 200, {"part": number, "upload": self.upload}
+        return 200, {}
+
+
+def _interrupted(tmp_path, monkeypatch):
+    """Send a four-piece file that drops out on its third piece.
+
+    Returns:
+        tuple: The file, and the portal holding its first two pieces.
+    """
+    monkeypatch.setattr(submit, "PART_SIZE", 4)
+    path = tmp_path / "grid.hdf5"
+    path.write_bytes(b"aaaabbbbccccdd")
+    portal = _Portal()
+    portal.fail_at = 3
+    monkeypatch.setattr(submit, "_json_request", portal)
+    with pytest.raises(submit.SubmitError):
+        submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+    portal.fail_at = None
+    portal.sent = []
+    return path, portal
+
+
+def test_an_interrupted_transfer_resumes(tmp_path, monkeypatch):
+    """Running it again sends only what is missing, and the bytes line up."""
+    path, portal = _interrupted(tmp_path, monkeypatch)
+
+    submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+
+    assert portal.sent == [3, 4]
+    assert b"".join(portal.parts[n] for n in sorted(portal.parts)) == path.read_bytes()
+    # Finished, so there is nothing left to resume.
+    assert not submit._state_path("tok").exists()
+
+
+def test_a_changed_file_starts_again(tmp_path, monkeypatch):
+    """Pieces of the old file must not be assembled with pieces of the new."""
+    path, portal = _interrupted(tmp_path, monkeypatch)
+    path.write_bytes(b"xxxxyyyyzzzzw")
+
+    submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+
+    assert portal.sent == [1, 2, 3, 4]
+
+
+def test_a_transfer_restarted_elsewhere_starts_again(tmp_path, monkeypatch):
+    """A browser may have begun the upload again; its pieces are not ours."""
+    path, portal = _interrupted(tmp_path, monkeypatch)
+    portal.upload = "upload-2"
+
+    submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+
+    assert portal.sent == [1, 2, 3, 4]

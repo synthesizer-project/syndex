@@ -42,6 +42,9 @@ plots = ["matplotlib>=3.8"]
 # through the other extras rather than repeated, which is what stops a
 # dependency added to one of them going missing from CI.
 test = ["cosmos-syndex[publish,plots]", "pytest>=8"]
+# The user documentation, served by the Worker at /syndex/docs. Sphinx pinned
+# to Synthesizer's version so the two sites render alike.
+docs = ["sphinx==7.4.7", "furo", "sphinx-copybutton", "sphinx-argparse"]
 
 [project.scripts]
 syndex-check = "syndex.check:main"
@@ -55,7 +58,7 @@ syndex-previews = "syndex.previews.cli:main"
 # these appear on the next one.
 [project.urls]
 Homepage = "https://synthesizer-project.org/syndex"
-Documentation = "https://github.com/synthesizer-project/syndex/tree/main/docs"
+Documentation = "https://synthesizer-project.org/syndex/docs/"
 Repository = "https://github.com/synthesizer-project/syndex"
 Issues = "https://github.com/synthesizer-project/syndex/issues"
 Changelog = "https://github.com/synthesizer-project/syndex/releases"

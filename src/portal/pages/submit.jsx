@@ -560,7 +560,7 @@ export const Upload = ({
             </div>
             <p class="mt-3 text-right text-xs">
               <a
-                href="https://github.com/synthesizer-project/syndex#readme"
+                href={`${BASE}/docs/contributing/contributing.html#before-you-start`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -648,7 +648,7 @@ export const Upload = ({
             </p>
             <p class="mt-3 text-right text-xs">
               <a
-                href="https://github.com/synthesizer-project/syndex#readme"
+                href={`${BASE}/docs/contributing/contributing.html#before-you-start`}
                 target="_blank"
                 rel="noopener noreferrer"
               >

@@ -11,7 +11,7 @@
 
 Syndex is the data index for the [Synthesizer project](https://github.com/synthesizer-project): a searchable catalogue of stellar population synthesis and AGN grids, dust models, instruments and simulation data, and a stable service for downloading them.
 
-Browse it at [synthesizer-project.org/syndex](https://synthesizer-project.org/syndex).
+Browse it at [synthesizer-project.org/syndex](https://synthesizer-project.org/syndex), and read the [documentation](https://synthesizer-project.org/syndex/docs/) for what it holds and how to contribute.
 
 This package is the tooling that goes with it. You do not need it to download data — [Synthesizer](https://github.com/synthesizer-project/synthesizer) does that with `synthesizer-download` — you need it to **contribute** data: to check a file against what the catalogue requires before submitting it, and to send large files from a machine that has no browser.
 
@@ -37,7 +37,7 @@ You do not need this package for that. Browse the [catalogue](https://synthesize
 synthesizer-download --dataset bpass-2p2p1-bin-chabrier03-0p1-300p0
 ```
 
-Everything the portal shows is also available as JSON from `https://data.synthesizer-project.org`, described in [`docs/api.md`](https://github.com/synthesizer-project/syndex/blob/main/docs/api.md).
+Everything the portal shows is also available as JSON from `https://data.synthesizer-project.org`, described in the [documentation](https://synthesizer-project.org/syndex/docs/api.html).
 
 ## Contributing data
 

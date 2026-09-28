@@ -70,6 +70,89 @@ def _config_path() -> Path:
     return base / "session.json"
 
 
+def _state_path(upload_token: str) -> Path:
+    """Where the progress of one transfer is kept.
+
+    Args:
+        upload_token (str): Which submission the transfer is for.
+
+    Returns:
+        Path: The progress file, which may not exist yet.
+    """
+    return _config_path().parent / "uploads" / f"{upload_token}.json"
+
+
+def _file_identity(path: Path) -> dict:
+    """What identifies a file well enough to resume sending it.
+
+    Size and modification time rather than a digest: hashing 30 GB to decide
+    whether to skip sending it would cost most of what skipping saves, and a
+    file rewritten in place changes its mtime.
+
+    Args:
+        path (Path): The file being sent.
+
+    Returns:
+        dict: Its resolved path, size and modification time.
+    """
+    stat = path.stat()
+    return {
+        "path": str(path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def _already_sent(portal: str, token: str, upload_token: str, path: Path) -> set[int]:
+    """The pieces of this file the portal already holds.
+
+    Only trusted when both sides agree it is the same transfer: the file must
+    be unchanged since the last attempt, and the portal must still be holding
+    the upload that attempt began. Anything else -- a different file, or a
+    browser having started the transfer again since -- starts from the first
+    piece, which discards whatever the portal held.
+
+    Args:
+        portal (str): Base URL of the portal.
+        token (str): Session token.
+        upload_token (str): Which submission the file belongs to.
+        path (Path): The file to send.
+
+    Returns:
+        set[int]: Part numbers that need not be sent again.
+    """
+    try:
+        state = json.loads(_state_path(upload_token).read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if state.get("file") != _file_identity(path) or not state.get("upload"):
+        return set()
+
+    status, answer = _json_request(
+        f"{portal}/submit/{upload_token}/parts",
+        headers={"authorization": f"Bearer {token}"},
+    )
+    if status != 200 or answer.get("upload") != state["upload"]:
+        return set()
+    parts = {number for number in answer.get("parts", []) if isinstance(number, int)}
+    # Sending part one discards the transfer, so a set without it cannot be
+    # resumed from.
+    return parts if 1 in parts else set()
+
+
+def _record_progress(upload_token: str, path: Path, upload: str) -> None:
+    """Note which transfer this file is going into, for a later resume.
+
+    Args:
+        upload_token (str): Which submission the file belongs to.
+        path (Path): The file being sent.
+        upload (str): The portal's id for the transfer.
+    """
+    state_path = _state_path(upload_token)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"upload": upload, "file": _file_identity(path)}))
+
+
 def _request(
     url: str,
     *,
@@ -265,10 +348,18 @@ def send(
             f"{path.name} is {size / 1000**3:.1f} GB, and the portal accepts "
             f"up to {PART_SIZE * MAX_PARTS / 1000**3:.0f} GB"
         )
+    done = _already_sent(portal, token, upload_token, path)
+    if done and not quiet:
+        print(f"  resuming: {len(done)} of {parts} pieces already sent")
     sent = 0
+    recorded = None
 
     with path.open("rb") as stream:
         for number in range(1, parts + 1):
+            if number in done:
+                stream.seek(PART_SIZE, os.SEEK_CUR)
+                sent = min(sent + PART_SIZE, size)
+                continue
             chunk = stream.read(PART_SIZE)
 
             for attempt in range(RETRIES + 1):
@@ -279,6 +370,10 @@ def send(
                     method="POST",
                 )
                 if status == 200:
+                    upload = answer.get("upload")
+                    if upload and upload != recorded:
+                        _record_progress(upload_token, path, upload)
+                        recorded = upload
                     break
                 # A refusal is the portal's final answer; a 5xx might not be.
                 if status < 500 or attempt == RETRIES:
@@ -315,16 +410,17 @@ def send(
         raise SubmitError(
             answer.get("error", f"the portal answered {status} on completion")
         )
+    _state_path(upload_token).unlink(missing_ok=True)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Send a file for a submission that has already been described.
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser.
 
-    Args:
-        argv (list[str] | None): Arguments, or None to read from sys.argv.
+    Separate from :func:`main` so the documentation can render the same
+    options the command accepts, rather than a copy that drifts.
 
     Returns:
-        int: 0 on success, 1 on anything the person can act on.
+        argparse.ArgumentParser: The parser.
     """
     parser = argparse.ArgumentParser(
         prog="syndex-submit",
@@ -346,7 +442,19 @@ def main(argv: list[str] | None = None) -> int:
         help="run the checker on the file before sending it, and stop if it fails",
     )
     parser.add_argument("--quiet", action="store_true", help="no progress output")
-    arguments = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Send a file for a submission that has already been described.
+
+    Args:
+        argv (list[str] | None): Arguments, or None to read from sys.argv.
+
+    Returns:
+        int: 0 on success, 1 on anything the person can act on.
+    """
+    arguments = build_parser().parse_args(argv)
 
     if not arguments.path.is_file():
         print(f"{arguments.path}: no such file", file=sys.stderr)

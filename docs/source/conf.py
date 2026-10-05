@@ -31,3 +31,5 @@ html_theme_options = {
 html_title = "Syndex"
 html_logo = "../../src/portal/static/syndex_logo_2.png"
 html_favicon = "../../src/portal/static/syndex_logo_2.png"
+html_static_path = ["_static"]
+html_js_files = [("expand-nav.js", {"defer": "defer"})]

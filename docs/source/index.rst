@@ -1,48 +1,59 @@
 Syndex
 ******
 
-Syndex is the data catalogue for the `Synthesizer <https://synthesizer-project.org/synthesizer/>`_ project. It holds the stellar population synthesis and AGN grids, dust grids and instruments that Synthesizer uses, and serves every published version of them for download.
+Syndex is where the `Synthesizer <https://synthesizer-project.org/synthesizer/>`_ project keeps its data. It catalogues the stellar population synthesis and AGN grids, dust grids and instruments that Synthesizer uses, and keeps every version ever published available to download, so a result can always be reproduced from the file it was made with.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+.. grid:: 1 2 2 2
+   :gutter: 3
 
-   * - To…
-     - Go to
-   * - Find a dataset
-     - The `catalogue <https://synthesizer-project.org/syndex>`_, which shows what each dataset holds, its releases and its citations.
-   * - Download one
-     - Synthesizer's ``synthesizer-download``, below. Nothing from this package is needed.
-   * - Understand what one contains
-     - :doc:`data/data`
-   * - Contribute one
-     - :doc:`contributing/contributing`
-   * - Query the catalogue from code
-     - :doc:`api`
+   .. grid-item-card:: Browse the catalogue
+      :link: https://synthesizer-project.org/syndex
 
-Getting data
-============
+      Search every dataset, and see what each one holds, its releases and how to cite it.
 
-Download a dataset by its catalogue name:
+   .. grid-item-card:: What's in the catalogue
+      :link: data/data
+      :link-type: doc
+
+      The kinds of data Syndex holds, how datasets are named, and what goes inside each file.
+
+   .. grid-item-card:: Contribute data
+      :link: contributing/contributing
+      :link-type: doc
+
+      Check a file, describe it, and upload it from your browser or the command line.
+
+   .. grid-item-card:: Use the API
+      :link: api
+      :link-type: doc
+
+      Query the catalogue as JSON, from a script or your own tools.
+
+Downloading data
+================
+
+You download data with Synthesizer itself, so there is nothing extra to install. Find a dataset in the `catalogue <https://synthesizer-project.org/syndex>`_, then fetch it by name:
 
 .. code-block:: bash
 
     synthesizer-download --dataset bpass-2p2p1-bin-chabrier03-0p1-300p0
 
-This fetches the current release. To reproduce a result from exactly the file it used, pin the release instead. Each dataset's page lists its releases with their ids and download commands:
+That gets the current release. If you are publishing a result, pin the exact release you used, so others can reproduce it. Each dataset's page lists its releases, with the command for each:
 
 .. code-block:: bash
 
     synthesizer-download --dataset bpass-2p2p1-bin-chabrier03-0p1-300p0 --release 42
 
-Synthesizer's `downloading guide <https://synthesizer-project.org/synthesizer/getting_started/downloading_grids.html>`_ explains where files are saved and how to load them.
+Synthesizer's `downloading guide <https://synthesizer-project.org/synthesizer/getting_started/downloading_grids.html>`_ covers where files are saved and how to load them.
+
+.. warning::
+
+   A dataset marked **known bug** has a problem in its current release. Read the description on its page before you rely on it.
 
 Citing data
 ===========
 
-Each release lists the papers to cite when you use it: the model, the paper that released it, and the code it was processed with. The dataset's page gives them as BibTeX, exactly as ADS produced them, to copy or download. Please cite these alongside Synthesizer itself.
-
-Before relying on a release, check whether it is marked **known bug**. The dataset's page describes the problem.
+The data in Syndex comes from other people's work, so please cite it. Each dataset's page lists the papers to cite, in order (the model, the paper it was released in, then the code it was processed with), and gives them as BibTeX, exactly as ADS has them, ready to copy or download. Cite them alongside Synthesizer itself.
 
 .. toctree::
    :maxdepth: 2

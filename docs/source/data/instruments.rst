@@ -1,71 +1,64 @@
 Instruments
 ***********
 
-What it is
-==========
+An instrument file is a Synthesizer instrument saved to disk, filters, PSFs, noise and all, so anyone can produce the same observables without rebuilding it. Synthesizer's `instruments documentation <https://synthesizer-project.org/synthesizer/observatories/observatories.html>`_ explains how to use one.
 
-An instrument file is a saved Synthesizer instrument, or a collection of them, ready to produce observables without rebuilding its filters, PSFs or noise. Synthesizer's `instruments documentation <https://synthesizer-project.org/synthesizer/observatories/observatories.html>`_ explains how to use one.
+Every instrument is one of five types:
 
-There are five types:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - ``instrument_type``
-     - What it can do
-   * - ``photometric``
-     - Integrated photometry through a set of filters.
-   * - ``photometric_imager``
-     - Photometry and imaging. Adds a resolution, and optionally PSFs and noise maps for each filter.
-   * - ``spectroscopic``
-     - One-dimensional spectroscopy over a wavelength array.
-   * - ``ifu``
-     - Resolved spectroscopy: a wavelength array and a resolution.
-   * - ``collection``
-     - Several of the above in one file.
+``photometric``
+   Integrated photometry through a set of filters.
+``photometric_imager``
+   Photometry and imaging. Adds a resolution, and optionally a PSF and noise map for each filter.
+``spectroscopic``
+   One-dimensional spectroscopy over a wavelength array.
+``ifu``
+   Spatially resolved spectroscopy: a wavelength array and a resolution.
+``collection``
+   Several of the above in one file.
 
 What's in the file
 ==================
 
-Whatever Synthesizer wrote when the instrument was saved, with ``InstrumentCollection.write_instruments`` or an instrument's ``to_hdf5``. That is an ``instrument_type`` attribute, then the groups the instrument has: ``Filters`` or ``Wavelength``, and optionally ``Resolution``, ``PSFs``, ``Depth``, ``SNRs`` and ``NoiseMaps``. A collection holds one such group per instrument, plus a ``Header``.
+Whatever Synthesizer writes when it saves an instrument, with ``InstrumentCollection.write_instruments`` or an instrument's ``to_hdf5``. You do not need to add anything by hand.
 
-Synthesizer's premade instrument files, which have no ``instrument_type``, are recognised too.
+That is an ``instrument_type`` attribute, followed by the groups the instrument has: ``Filters`` or ``Wavelength``, and optionally ``Resolution``, ``PSFs``, ``Depth``, ``SNRs`` and ``NoiseMaps``. A collection holds one such group per instrument, plus a ``Header``. Synthesizer's premade instrument files have no ``instrument_type`` attribute, and are recognised too.
 
-What an instrument can do is worked out from which groups are present, so there is nothing to fill in by hand.
+What an instrument can do (photometry, imaging, spectroscopy) is worked out from which of these groups are present.
 
 Naming
 ======
 
-The observatory and instrument, ending ``-instrument``:
+Name an instrument after its observatory and instrument, ending in ``-instrument``, as in ``euclid-nisp-instrument`` for Euclid's NISP photometric imager.
+
+Checks
+======
+
+Errors
+------
+
+These stop an instrument being published.
 
 .. list-table::
    :header-rows: 1
-   :widths: 55 45
+   :widths: 40 60
 
-   * - Name
-     - Instrument
-   * - ``euclid-nisp-instrument``
-     - Euclid's NISP photometric imager.
-
-Submitting one
-==============
-
-Errors stop an instrument being published; warnings are reported but do not.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 45 40
-
-   * -
-     - Problem
+   * - Problem
      - Fix
-   * - Error
-     - ``instrument_type`` is not one of the types above.
-     - Save the instrument again with a current Synthesizer.
-   * - Error
-     - A collection holds no instruments.
+   * - ``instrument_type`` is not one Synthesizer recognises.
+     - Save the instrument again with a current version of Synthesizer.
+   * - A collection holds no instruments.
      - Check the file was written with ``write_instruments``.
-   * - Warning
-     - A ``photometric`` or ``photometric_imager`` instrument has no filter codes.
-     - Save the filters with their codes. Without them the instrument cannot be found by filter on the portal.
+
+Warnings
+--------
+
+These are reported, but do not stop an instrument being published.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Problem
+     - Fix
+   * - A ``photometric`` or ``photometric_imager`` instrument has no filter codes.
+     - Save the filters with their codes. Without them, the instrument cannot be found by filter in the portal.

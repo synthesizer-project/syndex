@@ -1,58 +1,40 @@
 Dust grids
 **********
 
-What it is
-==========
+A dust grid describes what dust does to light, worked out over a range of parameters. Synthesizer uses them in its dust models. They come in two kinds:
 
-A dust grid holds either **dust attenuation curves** or **dust emission** spectra, computed over a set of parameters. Synthesizer uses them in its dust attenuation and dust emission models.
+**Attenuation**
+   How much light the dust absorbs and scatters, as a function of wavelength.
+**Emission**
+   The infrared spectrum the dust gives off as it re-emits that energy.
 
 What's in the file
 ==================
 
-A dust grid uses the same axes as a :doc:`grid <grids>`: an ``axes`` root attribute naming them, and one ``axes/<name>`` dataset per axis with a ``Units`` attribute. What it holds over those axes depends on its kind:
+A dust grid has the same axes as a :doc:`grid <grids>`: an ``axes`` attribute naming them, and an ``axes/<name>`` dataset for each, with its ``Units``. Over those axes it holds one of:
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 35 35
-
-   * - Kind
-     - Group
-     - Recognised by
-   * - Attenuation
-     - ``extinction_curves/``, with ``wavelength``
-     - The group alone.
-   * - Emission
-     - ``spectra/``, with ``wavelength``
-     - ``dust`` in the filename.
+``extinction_curves/``
+   Attenuation curves, and the ``wavelength`` they cover.
+``spectra/``
+   Dust emission spectra, and their ``wavelength``.
 
 Naming
 ======
 
-Include ``dust`` and say which kind it is.
+Name a dust grid after its model, include ``dust``, and say which kind it is:
 
-.. list-table::
-   :header-rows: 1
-   :widths: 55 45
+``draine-li-dust-extcurve-mrn``
+   Draine and Li attenuation curves, for an MRN grain size distribution.
+``draine-li-dust-emission-mw-3p1``
+   Draine and Li (2007) dust emission for the Milky Way, with :math:`R_V = 3.1`.
 
-   * - Name
-     - Grid
-   * - ``draine-li-dust-extcurve-mrn``
-     - Draine and Li attenuation curves, MRN grain size distribution.
-   * - ``draine-li-dust-emission-mw-3p1``
-     - Draine and Li (2007) Milky Way dust emission, :math:`R_V = 3.1`.
+Checks
+======
 
-Submitting one
-==============
+A dust grid is checked like any other :doc:`grid <grids>`, axis warnings included. The one difference is how it is recognised.
 
-A ``spectra`` group looks the same in a dust emission grid as in an SPS grid, so for emission grids the filename decides. Otherwise dust grids are checked as :doc:`grids <grids>` are, including their axis warnings.
+An ``extinction_curves`` group is unmistakable, so attenuation grids are recognised by their contents. A ``spectra`` group, though, looks the same in a dust emission grid as in an SPS grid, so for emission grids the filename decides.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 15 40 45
+.. important::
 
-   * -
-     - Problem
-     - Fix
-   * - Error
-     - A dust emission grid is refused for not saying what kind of grid it is.
-     - Put ``dust`` in the filename. Without it the file is treated as an ordinary grid.
+   A dust emission grid's filename must contain ``dust``. Without it, the file is treated as an ordinary grid and refused for not saying what kind of grid it is.

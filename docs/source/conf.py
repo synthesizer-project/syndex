@@ -17,6 +17,7 @@ release = __version__
 extensions = [
     "sphinxarg.ext",  # Render the commands' options from their parsers
     "sphinx_copybutton",  # Add a copy button to code blocks
+    "sphinx_design",  # Cards and tabs
 ]
 
 master_doc = "index"

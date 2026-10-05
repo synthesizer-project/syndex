@@ -1,6 +1,8 @@
 Command line
 ************
 
+Every option of the two commands that come with ``cosmos-syndex``. :doc:`contributing` explains when to use each.
+
 syndex-check
 ============
 
@@ -8,6 +10,7 @@ syndex-check
    :module: syndex.check
    :func: build_parser
    :prog: syndex-check
+   :nodefault:
 
 syndex-submit
 =============
@@ -16,3 +19,4 @@ syndex-submit
    :module: syndex.submit
    :func: build_parser
    :prog: syndex-submit
+   :nodefault:

@@ -44,7 +44,7 @@ plots = ["matplotlib>=3.8"]
 test = ["cosmos-syndex[publish,plots]", "pytest>=8"]
 # The user documentation, served by the Worker at /syndex/docs. Sphinx pinned
 # to Synthesizer's version so the two sites render alike.
-docs = ["sphinx==7.4.7", "furo", "sphinx-copybutton", "sphinx-argparse"]
+docs = ["sphinx==7.4.7", "furo", "sphinx-copybutton", "sphinx-argparse", "sphinx-design"]
 
 [project.scripts]
 syndex-check = "syndex.check:main"

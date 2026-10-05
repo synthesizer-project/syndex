@@ -1,7 +1,7 @@
 Catalogue API
 *************
 
-Everything the portal shows is available as JSON from ``https://data.synthesizer-project.org``. The API is read-only, needs no key, and accepts requests from any origin.
+Everything the portal shows is also available as JSON from ``https://data.synthesizer-project.org``, for scripts and tools that want to search the catalogue or fetch files themselves. The API is read-only, needs no key, and can be called from any website.
 
 .. list-table::
    :header-rows: 1
@@ -24,12 +24,12 @@ Everything the portal shows is available as JSON from ``https://data.synthesizer
    * - ``GET /v1/releases/{id}/preview.png``
      - Its preview plot
 
-Errors come back as ``{"error": "explanation"}`` with a ``4xx`` or ``5xx`` status.
+If something goes wrong, the response has a ``4xx`` or ``5xx`` status and a body of ``{"error": "explanation"}``.
 
 Listing datasets
 ================
 
-``GET /v1/datasets`` returns datasets ordered by name, each with a summary of its current release and a ``download_url``.
+``GET /v1/datasets`` returns datasets in name order, each with a summary of its current release and a ``download_url``. These parameters narrow it down:
 
 .. list-table::
    :header-rows: 1
@@ -58,7 +58,7 @@ Listing datasets
 
     curl 'https://data.synthesizer-project.org/v1/datasets?data_type=dust_grid'
 
-The response is ``{"datasets": [...], "cursor": ...}``. ``cursor`` is ``null`` on the last page. To read the whole catalogue from Python:
+Results come a page at a time, as ``{"datasets": [...], "cursor": ...}``. Pass ``cursor`` back as ``after`` to get the next page; it is ``null`` on the last one. In Python, using only the standard library:
 
 .. code-block:: python
 
@@ -111,17 +111,11 @@ Releases
 Downloading
 ===========
 
-``GET /v1/releases/{id}/download`` streams the file. ``synthesizer-download`` does this for you, but a client of its own can rely on:
+``GET /v1/releases/{id}/download`` streams the file. ``synthesizer-download`` handles all of this for you, but if you write your own client, three things help:
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Feature
-     - Use
-   * - ``X-Syndex-SHA256`` header
-     - The digest the file should have, to verify it after downloading.
-   * - ``HEAD`` requests
-     - The same headers without the file, to check its size and digest first.
-   * - ``Range`` requests
-     - Part of the file, to resume an interrupted download.
+``X-Syndex-SHA256`` header
+   The file's expected digest, to verify the download.
+``HEAD`` requests
+   The headers without the file, to check its size and digest before downloading.
+``Range`` requests
+   Part of the file, to resume an interrupted download.

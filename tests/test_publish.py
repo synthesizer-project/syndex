@@ -27,7 +27,7 @@ from samples import (
 )
 from syndex.errors import UploadError
 from syndex.publish import cli, registry
-from syndex.publish.citations import parse_bibtex_entries
+from syndex.publish.citations import USER_AGENT, parse_bibtex_entries
 from syndex.publish.cli import run
 from syndex.publish.plan import build_plan, build_plans
 from syndex.publish.registry import d1_statements, publish_all, register_d1
@@ -365,6 +365,28 @@ def test_d1_batch_is_parameterized(tmp_path):
     assert "DROP TABLE" not in " ".join(item["sql"] for item in statements)
     assert any("DROP TABLE" in str(item["params"]) for item in statements)
     assert "ELSE NULL" in statements[2]["sql"]
+
+
+def test_api_verification_sends_user_agent(monkeypatch):
+    captured = {}
+
+    def urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        response = io.BytesIO()
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(registry.urllib.request, "urlopen", urlopen)
+
+    registry.verify_api("https://data.synthesizer-project.org/", "sample/data")
+
+    request = captured["request"]
+    assert request.get_header("User-agent") == USER_AGENT
+    assert request.full_url == (
+        "https://data.synthesizer-project.org/v1/datasets/sample%2Fdata"
+    )
+    assert captured["timeout"] == 30
 
 
 def test_d1_registration_sends_one_batch(tmp_path, monkeypatch):

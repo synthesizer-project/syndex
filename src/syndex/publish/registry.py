@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from syndex.errors import UploadError
+from syndex.publish.citations import USER_AGENT
 from syndex.publish.serialise import json_dump
 from syndex.publish.storage import upload_and_verify
 
@@ -298,8 +299,9 @@ def verify_api(api_url: str, dataset_name: str) -> None:
     url = (
         f"{api_url.rstrip('/')}/v1/datasets/{urllib.parse.quote(dataset_name, safe='')}"
     )
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             if response.status != 200:
                 raise UploadError(
                     f"API verification failed with HTTP {response.status}"

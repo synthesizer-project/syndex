@@ -149,6 +149,22 @@ const tests = {
     assert.equal(body.cursor, null);
   },
 
+  async "a deprecated dataset says so, apart from its release"() {
+    const row = {
+      ...DATASET_ROW,
+      dataset_deprecated_at: "2026-11-19T00:00:00+00:00",
+      dataset_deprecation_reason: "Superseded by bpass-2-3.",
+    };
+    const env = { DB: stubDb({ rows: [row] }) };
+    const { body } = await call("/v1/datasets/bpass-2-2-1-cloudy-sps-test", env);
+
+    assert.equal(body.deprecated_at, "2026-11-19T00:00:00+00:00");
+    assert.equal(body.deprecation_reason, "Superseded by bpass-2-3.");
+    // The release was not deprecated: the dataset was.
+    assert.equal(body.current_release.deprecated_at, null);
+    assert.equal(body.current_release.deprecation_reason, null);
+  },
+
   async "dataset name comes from the path and is decoded"() {
     const bindings = [];
     const env = { DB: stubDb({ rows: [DATASET_ROW], bindings }) };

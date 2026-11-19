@@ -143,6 +143,39 @@ const tests = {
     assert.equal(body.is_ci, true);
   },
 
+  async "a boolean filter is true or false, in any case, or refused"() {
+    const bound = async (query) => {
+      const bindings = [];
+      const result = await call(`/v1/datasets?${query}`, {
+        DB: stubDb({ rows: [DATASET_ROW], bindings }),
+      });
+      return { ...result, flags: bindings[0]?.slice(1, 5) };
+    };
+
+    // Python's str(True), which used to be read as false.
+    assert.deepEqual((await bound("has_spectra=True&is_ci=FALSE")).flags, [null, 0, 1, null]);
+    assert.deepEqual((await bound("is_test=1&has_lines=0")).flags, [1, null, null, 0]);
+
+    for (const query of ["has_spectra=yes", "is_ci=", "is_test=2"]) {
+      const refused = await bound(query);
+      assert.equal(refused.status, 400, query);
+      assert.match(refused.body.error, /must be true or false/);
+      assert.equal(refused.flags, undefined, "nothing was asked of the database");
+    }
+  },
+
+  async "an empty limit is the default, and a broken escape is the caller's fault"() {
+    const bindings = [];
+    await call("/v1/datasets?limit=", { DB: stubDb({ rows: [DATASET_ROW], bindings }) });
+    assert.equal(bindings[0].at(-1), 100);
+
+    for (const path of ["/v1/datasets/%E0%A4%A", "/v1/datasets/%zz/releases"]) {
+      const { status, body } = await call(path, { DB: stubDb() });
+      assert.equal(status, 400, path);
+      assert.equal(body.error, "Malformed dataset name");
+    }
+  },
+
   async "listing without a full page reports no cursor"() {
     const env = { DB: stubDb({ rows: [DATASET_ROW] }) };
     const { body } = await call("/v1/datasets?limit=5", env);

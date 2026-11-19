@@ -31,20 +31,23 @@ newly registered domains, and `synthesizer-download` falls back to it.
 - A release id must be digits. `Number()` would accept `0x10`, `1e3` and a
   leading space, so the check is stricter than parsing.
 - Errors are `{"error": "explanation"}`.
-- Catalogue responses cache for 60 seconds; file bytes are content-addressed
-  and served `immutable` for a year.
+- Catalogue responses cache for 5 minutes; file bytes are content-addressed
+  and served `immutable` for a year. Errors are never cached.
+- Boolean parameters take `true`, `false`, `1` or `0`, in any case. Anything
+  else is a `400` rather than being read as false.
 
 | Status | Meaning |
 |---|---|
 | `204` | `OPTIONS` preflight |
 | `206` | A satisfied `Range` |
 | `304` | `ETag` still matches |
-| `400` | Malformed path parameter |
+| `400` | Malformed path or query parameter |
 | `404` | Unknown route, name, or id; or a release with no preview |
 | `405` | Unsupported method |
 | `416` | `Range` outside the file |
 | `500` | Unhandled error; logged, not returned |
 | `502` | D1 references an R2 object that is gone |
+| `503` | The database is unreachable or out of its daily allowance. Carries `Retry-After`, and `retry_after_seconds` in the body |
 
 ## `GET /v1/datasets`
 
@@ -57,7 +60,7 @@ Datasets with summary information from the current release, ordered by name.
 | `is_ci` | `true`/`false`; downloaded by Synthesizer's CI | all |
 | `has_spectra` | `true`/`false`; grids carrying spectra | all |
 | `has_lines` | `true`/`false`; grids carrying line luminosities | all |
-| `limit` | Page size, clamped to 1–1000; unparseable falls back | `100` |
+| `limit` | Page size, clamped to 1–1000; empty or unparseable falls back | `100` |
 | `after` | Name to continue after, from the previous `cursor` | start |
 
 ```json

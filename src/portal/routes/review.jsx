@@ -71,13 +71,23 @@ async function reviewState(c) {
     // Everyone waiting, and the first page of everyone who holds a role. The
     // queue is the point of this page, so the account list is cut short here
     // and continues on one of its own rather than pushing the queue down.
+    //
+    // Those waiting are counted apart from those shown for reference: one
+    // limit over both meant an eleventh request pushed the twelfth, and every
+    // account after it, off the only page a reviewer looks at.
     c.env.DB.prepare(
-      `SELECT user_id, login, name, role, created_at, access_requested_at,
-              access_request_note
-       FROM users
-       WHERE access_requested_at IS NOT NULL OR role != 'pending'
-       ORDER BY access_requested_at IS NULL, access_requested_at, login
-       LIMIT ?`,
+      `SELECT * FROM (
+         SELECT user_id, login, name, role, created_at, access_requested_at,
+                access_request_note
+         FROM users WHERE access_requested_at IS NOT NULL
+         ORDER BY access_requested_at, login LIMIT 200)
+       UNION ALL
+       SELECT * FROM (
+         SELECT user_id, login, name, role, created_at, access_requested_at,
+                access_request_note
+         FROM users
+         WHERE access_requested_at IS NULL AND role != 'pending'
+         ORDER BY login LIMIT ?)`,
     )
       .bind(ACCOUNTS_SHOWN + 1)
       .all(),
@@ -137,7 +147,10 @@ routes.get("/review/previous", async (c) => {
   const [counts, { results }] = await Promise.all([
     tabCounts(c.env.DB),
     c.env.DB.prepare(
-      `SELECT * FROM submissions WHERE state != 'pending'
+      `SELECT s.*, d.name AS release_of_name
+       FROM submissions s
+       LEFT JOIN datasets d ON d.dataset_id = s.release_of_dataset_id
+       WHERE s.state != 'pending'
        ORDER BY reviewed_at DESC LIMIT 200`,
     ).all(),
   ]);

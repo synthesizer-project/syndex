@@ -432,8 +432,14 @@ routes.post("/submit/new", requireRole("contributor"), async (c) => {
  */
 async function ownSubmission(c, { write = false } = {}) {
   const { user } = c.get("viewer");
+  // With the name of the dataset it is a release of, which is what lets the
+  // page tell "this release is the file already there" from "this is a
+  // second copy of something published".
   const submission = await c.env.DB.prepare(
-    "SELECT * FROM submissions WHERE upload_token = ?",
+    `SELECT s.*, d.name AS release_of_name
+     FROM submissions s
+     LEFT JOIN datasets d ON d.dataset_id = s.release_of_dataset_id
+     WHERE s.upload_token = ?`,
   )
     .bind(c.req.param("token"))
     .first();
@@ -545,7 +551,9 @@ routes.get("/submit/:token/check", requireRole("contributor"), async (c) => {
     <CheckReport
       submission={submission}
       duplicate={await duplicateOf(c.env, submission)}
-      forContributor
+      // A reviewer's page polls this too, and should go on being told what a
+      // reviewer can do about the result, not what its submitter can.
+      forContributor={submission.user_id === c.get("viewer").user.user_id}
     />,
   );
 });

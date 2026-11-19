@@ -188,7 +188,7 @@ function resultsFor(sql, rows) {
   if (sql.includes("UPDATE submissions")) {
     return rows.reviewed ?? [{ name: "example-new-grid" }];
   }
-  if (sql.includes("WHERE upload_token")) {
+  if (sql.includes("upload_token = ?")) {
     return rows.submission === undefined ? [] : [rows.submission];
   }
   if (sql.includes("FROM submissions")) {
@@ -2401,6 +2401,45 @@ const tests = {
     assert.match(body, />failed</);
     assert.match(body, /1 warning/);
     assert.match(body, /b{64}/);
+  },
+
+  async "a duplicate is described to whoever is looking, as what it is"() {
+    const twin = "bpass-2p2p1-bin-chabrier03-0p1-300p0";
+    const check = (viewer, submission) =>
+      call(
+        `/syndex/submit/${SUBMISSION.upload_token}/check`,
+        submissionEnv({
+          rows: {
+            viewer,
+            submission: {
+              ...SUBMISSION,
+              uploaded_at: "2026-09-14T10:00:00Z",
+              sha256: "c".repeat(64),
+              ...submission,
+            },
+            publishedTwin: [{ name: twin }],
+          },
+        }),
+        SIGNED_IN,
+      );
+
+    // Its submitter is told what to do instead.
+    const own = await check(USER, { user_id: USER.user_id });
+    assert.match(own.body, /submit it as a new release/);
+
+    // A reviewer's page polls the same address and is not the submitter.
+    const reviewing = await check(
+      { ...USER, user_id: USER.user_id + 1, role: "reviewer" },
+      { user_id: USER.user_id },
+    );
+    assert.match(reviewing.body, /There is nothing here to publish/);
+
+    // And a release of that very dataset is not a second copy of it.
+    const release = await check(USER, {
+      user_id: USER.user_id,
+      release_of_name: twin,
+    });
+    assert.match(release.body, /already there, unchanged/);
   },
 
   async "bytes already in the catalogue are said so before anything else"() {

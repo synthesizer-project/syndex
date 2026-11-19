@@ -132,6 +132,7 @@ function columnsFor(tab, filters, rows, axesByRelease) {
   };
   const tags = rows.some(
     (row) =>
+      row.deprecated_at != null ||
       row.known_bug === 1 ||
       row.is_recommended === 1 ||
       row.is_test === 1 ||

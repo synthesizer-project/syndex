@@ -492,6 +492,7 @@ const FROM = `FROM datasets d
 const COLUMNS = `d.name, d.display_name, d.description, d.data_type,
   d.is_test, d.is_ci,
   d.is_recommended, r.release_id, r.published_at, r.known_bug,
+  COALESCE(d.deprecated_at, r.deprecated_at) AS deprecated_at,
   f.filename, f.size_bytes, f.format,
   g.grid_type, g.emission_type, g.model_name, g.has_spectra, g.has_lines,
   g.wavelength_min, g.wavelength_max, g.wavelength_units,
@@ -826,7 +827,9 @@ function byRelease(results) {
 export async function dataset(db, name) {
   const row = await db
     .prepare(
-      `SELECT d.*, r.release_id, r.published_at, r.deprecated_at,
+      `SELECT d.*, r.release_id, r.published_at,
+              r.deprecated_at AS release_deprecated_at,
+              r.deprecation_reason AS release_deprecation_reason,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description, r.provenance_json,
               f.file_id, f.filename, f.format, f.size_bytes, f.sha256,
@@ -859,7 +862,7 @@ export async function dataset(db, name) {
     db
       .prepare(
         `SELECT r.release_id, r.published_at, r.known_bug,
-                r.known_bug_description, r.synthesizer_min_version,
+                r.known_bug_description, r.deprecated_at, r.synthesizer_min_version,
                 r.synthesizer_max_version, f.size_bytes, f.sha256
          FROM releases r JOIN files f ON f.file_id = r.file_id
          WHERE r.dataset_id = ?

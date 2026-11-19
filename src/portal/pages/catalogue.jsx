@@ -284,7 +284,8 @@ const Releases = ({ dataset }) => (
               {release.release_id === dataset.current_release_id && (
                 <Badge strong>current</Badge>
               )}{" "}
-              {release.known_bug === 1 && <Badge>known bug</Badge>}
+              {release.known_bug === 1 && <Badge>known bug</Badge>}{" "}
+              {release.deprecated_at != null && <Badge>deprecated</Badge>}
             </td>
           </tr>
         ))}
@@ -502,6 +503,20 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
               </figure>
             )}
           </div>
+        )}
+
+        {dataset.deprecated_at != null && (
+          <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
+            <strong class="text-accent-light">This dataset is deprecated.</strong>{" "}
+            {dataset.deprecation_reason} It is still available to download.
+          </p>
+        )}
+
+        {dataset.release_deprecated_at != null && (
+          <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
+            <strong class="text-accent-light">This release is deprecated.</strong>{" "}
+            {dataset.release_deprecation_reason}
+          </p>
         )}
 
         {dataset.known_bug === 1 && (

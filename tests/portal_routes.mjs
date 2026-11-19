@@ -925,6 +925,33 @@ const tests = {
     );
   },
 
+  async "a deprecated dataset page says so and why"() {
+    const env = {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              current_release_id: 2,
+              metadata_json: "{}",
+              provenance_json: "{}",
+              deprecated_at: "2026-11-19T00:00:00+00:00",
+              deprecation_reason: "Superseded by bpass-2-3.",
+            },
+          ],
+        },
+      }),
+    };
+
+    const { status, body } = await call(`/syndex/datasets/${GRID_ROW.name}`, env);
+
+    assert.equal(status, 200);
+    assert.match(body, /This dataset is deprecated\./);
+    assert.match(body, /Superseded by bpass-2-3\./);
+    assert.doesNotMatch(body, /This release is deprecated/);
+  },
+
   async "a dataset page prints the command that fetches it"() {
     const env = {
       DB: stubDb({

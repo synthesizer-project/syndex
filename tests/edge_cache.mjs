@@ -269,6 +269,32 @@ const tests = {
     );
   },
 
+  async "the API cache cannot be stepped around with a junk parameter"() {
+    cache.entries.clear();
+    statements = [];
+    const base = "https://data.synthesizer-project.org/v1/datasets";
+
+    await call(`${base}?limit=5&is_test=true`);
+    const once = statements.length;
+    assert.ok(once > 0);
+
+    // The same question asked five other ways.
+    await call(`${base}?is_test=true&limit=5`);
+    await call(`${base}?limit=5&is_test=true&cb=1`);
+    await call(`${base}?limit=5&is_test=true&cb=2&utm_source=x`);
+    await call(`${base}?limit=5&is_test=true`, { headers: { cookie: "a=b" } });
+    const head = await call(`${base}?limit=5&is_test=true`, { method: "HEAD" });
+    assert.equal(statements.length, once, "each of these ran the queries again");
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), "");
+    assert.equal(cache.entries.size, 1);
+
+    // A different question is still a different entry.
+    await call(`${base}?limit=6&is_test=true`);
+    assert.ok(statements.length > once);
+    assert.equal(cache.entries.size, 2);
+  },
+
   async "both hostnames answer robots.txt, without touching the database"() {
     cache.entries.clear();
     statements = [];

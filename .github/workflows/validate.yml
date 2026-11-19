@@ -10,9 +10,10 @@
 # plan and this does not. Runner disk is 14 GB, larger than any container tier
 # offered, which matters for a catalogue whose grids reach 30 GB.
 #
-# Nothing here decides anything. The rules live in `syndex.check`, a reviewer
-# reads every submission regardless, and a run that fails to report leaves the
-# submission exactly as it was.
+# Nothing here decides anything. The rules live in `syndex.check`, and a
+# reviewer reads every submission regardless. A run that cannot fetch or check
+# the file says so, rather than leaving the submission showing a check that is
+# still running and never finishes.
 name: Validate a submission
 
 on:
@@ -44,12 +45,21 @@ jobs:
       - name: Install the checker
         run: pip install .
 
+      # The link is a credential: it fetches an unreviewed file from anywhere
+      # for six hours, and this repository's logs are public. So it is read
+      # from the event file rather than set as `env:`, which is printed at the
+      # top of the step, and masked before anything can echo it -- curl names
+      # the URL in its errors.
+      #
+      # The time limit is under the job's, so a transfer that is too slow
+      # fails here, where the last step can report it, rather than being
+      # killed with the job.
       - name: Fetch the submitted file
-        env:
-          FETCH_URL: ${{ github.event.client_payload.fetch_url }}
         run: |
+          fetch_url=$(jq -r .client_payload.fetch_url "$GITHUB_EVENT_PATH")
+          echo "::add-mask::$fetch_url"
           curl --fail --silent --show-error --location \
-            --max-time 5400 --output submitted.bin "$FETCH_URL"
+            --max-time 4800 --output submitted.bin "$fetch_url"
           ls -l submitted.bin
 
       # The digest costs nothing here: every byte is read to check the file
@@ -84,3 +94,19 @@ jobs:
             --header "authorization: Bearer $SECRET" \
             --header "content-type: application/json" \
             --data @reported.json
+
+      # Fetching is the step most likely to fail -- a grid larger than the
+      # runner's disk, a transfer that ran out of time -- and it used to fail
+      # silently: nothing was posted, and the submission said a check was
+      # running for ever.
+      - name: Say so if the check could not be done
+        if: failure() || cancelled()
+        env:
+          REPORT_URL: ${{ github.event.client_payload.report_url }}
+          SECRET: ${{ secrets.SYNDEX_REPORT_SECRET }}
+        run: |
+          curl --fail --silent --show-error \
+            --request POST "$REPORT_URL" \
+            --header "authorization: Bearer $SECRET" \
+            --header "content-type: application/json" \
+            --data '{"state":"failed","errors":["The file could not be fetched or checked by the validation run. This says nothing about the file itself."]}'

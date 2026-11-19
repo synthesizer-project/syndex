@@ -199,7 +199,12 @@ uv run syndex-deprecate NAME --undo
 uv run syndex-deprecate NAME --release 14 --undo
 ```
 
-It needs `SYNTHESIZER_D1_API_TOKEN`, as publishing does, and exits non-zero
+A reviewer can do the same from the portal: a dataset's page shows them a
+Deprecate section, with a choice of the whole dataset or one release, a
+reason, and a button to take it back. Anonymous readers see the change within
+five minutes, when the cached page expires.
+
+The command needs `SYNTHESIZER_D1_API_TOKEN`, as publishing does, and exits non-zero
 when the name or the release does not exist. `--release` only accepts a
 release belonging to `NAME`, so a mistyped id cannot touch another dataset.
 

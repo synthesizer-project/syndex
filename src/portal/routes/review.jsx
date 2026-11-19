@@ -15,6 +15,7 @@
 
 import { Hono } from "hono";
 
+import { BASE } from "../base.js";
 import { endSessions } from "../data/auth.js";
 import { tabCounts } from "../data/catalogue.js";
 import { duplicateOf } from "../data/validation.js";
@@ -358,6 +359,60 @@ routes.post("/review/users/:id{[0-9]+}", async (c) => {
   }
 
   return accountsOrQueue(c, viewer, form.from, note);
+});
+
+// Under the dataset's own path, because that is the page the form is on, but
+// registered here with the rest of what only a reviewer may do. Mirrors
+// `syndex-deprecate`: the same two statements, and the same rule that a
+// release is only matched under the dataset it belongs to.
+routes.post("/datasets/:name/deprecate", requireRole("reviewer"), async (c) => {
+  const name = c.req.param("name");
+  const form = await c.req.parseBody();
+  const undo = form.undo === "1";
+  const reason = String(form.reason ?? "").trim().slice(0, 1000);
+  const release = Number(form.release || 0);
+
+  const refuse = async (status, message) =>
+    page(c, <NotFound counts={await tabCounts(c.env.DB)} message={message} />, {
+      status,
+      cache: "no-store",
+    });
+
+  if (!Number.isInteger(release) || release < 0) {
+    return refuse(400, "That is not a release.");
+  }
+  if (!undo && reason === "") {
+    return refuse(400, "A deprecation needs a reason.");
+  }
+
+  const when = undo ? null : new Date().toISOString();
+  const why = undo ? null : reason;
+  const changed = await (release === 0
+    ? c.env.DB.prepare(
+        `UPDATE datasets SET deprecated_at = ?, deprecation_reason = ?
+         WHERE name = ? RETURNING name`,
+      ).bind(when, why, name)
+    : c.env.DB.prepare(
+        `UPDATE releases SET deprecated_at = ?, deprecation_reason = ?
+         WHERE release_id = ? AND dataset_id =
+           (SELECT dataset_id FROM datasets WHERE name = ?)
+         RETURNING release_id`,
+      ).bind(when, why, release, name)
+  ).first();
+
+  if (changed === null) {
+    return refuse(
+      404,
+      release === 0
+        ? `There is no dataset named ${name}.`
+        : `${name} has no release ${release}.`,
+    );
+  }
+
+  // Back to the page it was done from, as a GET, so a reload does not do it
+  // again. A reviewer's pages are never cached, so it shows at once; an
+  // anonymous reader's copy catches up when its five minutes are over.
+  return c.redirect(`${BASE}/datasets/${encodeURIComponent(name)}`, 303);
 });
 
 routes.post("/review/:id{[0-9]+}", async (c) => {

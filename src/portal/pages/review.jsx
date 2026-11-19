@@ -25,6 +25,7 @@ import {
 import {
   Fact,
   Fields,
+  Section,
   SectionHead,
   StateBadge,
 } from "./shared.jsx";
@@ -33,6 +34,82 @@ import {
   CheckReport,
   verdictOf,
 } from "./validation.jsx";
+
+/**
+ * What a reviewer can do to a dataset from its own page: retire it, retire
+ * one release of it, or take either back.
+ *
+ * Rendered on the dataset page but kept here, with everything else only a
+ * reviewer is shown. One form with a choice of what, rather than a button per
+ * release, because every deprecation needs a reason and a reason field on
+ * every row of the release table would be most of the table.
+ *
+ * @param {object} props Component props.
+ * @param {object} props.dataset The dataset, with its releases.
+ * @returns {unknown} The rendered section.
+ */
+export const Deprecation = ({ dataset }) => {
+  const action = `${BASE}/datasets/${encodeURIComponent(dataset.name)}/deprecate`;
+  const field = "w-full rounded-lg border border-muted bg-bg px-3 py-1.5";
+  const deprecated = [
+    ...(dataset.deprecated_at != null
+      ? [{ label: "the whole dataset", release: "" }]
+      : []),
+    ...dataset.releases
+      .filter((release) => release.deprecated_at != null)
+      .map((release) => ({
+        label: `release ${release.release_id}`,
+        release: release.release_id,
+      })),
+  ];
+
+  return (
+    <Section title="Deprecate">
+      <p class="mb-4 text-sm text-muted">
+        Only reviewers see this. Nothing is deleted: the files stay
+        downloadable, and the catalogue says they are deprecated and why.
+        Deprecate the whole dataset when people should use something else, or
+        one release when they should use a newer one.
+      </p>
+      <form method="post" action={action} class="flex flex-wrap items-end gap-3">
+        <label for="deprecate-what">
+          <span class="label-caps mb-1 block">What</span>
+          <select id="deprecate-what" name="release" class={field}>
+            <option value="">The whole dataset</option>
+            {dataset.releases.map((release) => (
+              <option value={release.release_id}>
+                Release {release.release_id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label for="deprecate-reason" class="min-w-48 flex-1">
+          <span class="label-caps mb-1 block">Reason</span>
+          <input
+            id="deprecate-reason"
+            name="reason"
+            required
+            maxlength="1000"
+            placeholder="What to use instead, or what is wrong with it."
+            class={field}
+          />
+        </label>
+        <button type="submit" class="btn">
+          Deprecate
+        </button>
+      </form>
+      {deprecated.map((item) => (
+        <form method="post" action={action} class="mt-3">
+          <input type="hidden" name="undo" value="1" />
+          <input type="hidden" name="release" value={item.release} />
+          <button type="submit" class="btn-quiet">
+            Remove the deprecation from {item.label}
+          </button>
+        </form>
+      ))}
+    </Section>
+  );
+};
 
 /**
  * One step of a review, which opens when it is acknowledged.

@@ -99,6 +99,10 @@ function resultsFor(sql, rows) {
   if (sql.includes("GROUP BY value")) {
     return rows.facets ?? [{ value: "BPASS", n: 47 }];
   }
+  // Setting or clearing a deprecation, which answers with what it matched.
+  if (sql.includes("SET deprecated_at")) {
+    return rows.deprecated ?? [{ name: GRID_ROW.name }];
+  }
   // Before the generic count, which would otherwise answer for it.
   if (sql.includes("AS accounts")) {
     return [
@@ -950,6 +954,77 @@ const tests = {
     assert.match(body, /This dataset is deprecated\./);
     assert.match(body, /Superseded by bpass-2-3\./);
     assert.doesNotMatch(body, /This release is deprecated/);
+  },
+
+  async "only a reviewer is offered the deprecate form, or may use it"() {
+    const path = `/syndex/datasets/${GRID_ROW.name}`;
+    const row = { ...GRID_ROW, dataset_id: 1, current_release_id: 2 };
+    const env = (viewer, issued = []) => ({
+      DB: stubDb({ rows: { viewer, datasets: [row] }, issued }),
+    });
+
+    const anonymous = await call(path, env(undefined));
+    assert.doesNotMatch(anonymous.body, /\/deprecate"/);
+    const contributor = await call(path, env(USER), SIGNED_IN);
+    assert.doesNotMatch(contributor.body, /\/deprecate"/);
+    const reviewer = await call(path, env({ ...USER, role: "reviewer" }), SIGNED_IN);
+    assert.match(reviewer.body, new RegExp(`action="${path}/deprecate"`));
+
+    // Refused before anything is written.
+    const issued = [];
+    const refused = await call(
+      `${path}/deprecate`,
+      env(USER, issued),
+      signedInPost({ reason: "Gone." }),
+    );
+    assert.equal(refused.status, 403);
+    assert.equal(issued.filter((r) => r.sql.includes("SET deprecated_at")).length, 0);
+  },
+
+  async "deprecating writes the reason and returns to the dataset"() {
+    const path = `/syndex/datasets/${GRID_ROW.name}`;
+    const reviewer = { ...USER, role: "reviewer" };
+    const issued = [];
+    const env = (rows = {}) => ({
+      DB: stubDb({ rows: { viewer: reviewer, ...rows }, issued }),
+    });
+
+    const whole = await call(
+      `${path}/deprecate`,
+      env(),
+      signedInPost({ release: "", reason: " Superseded by bpass-2-3. " }),
+    );
+    assert.equal(whole.status, 303);
+    assert.equal(whole.headers.get("location"), path);
+    const dataset = statement(issued, "UPDATE datasets SET deprecated_at");
+    assert.match(dataset.params[0], /^\d{4}-/);
+    assert.deepEqual(dataset.params.slice(1), ["Superseded by bpass-2-3.", GRID_ROW.name]);
+
+    // One release, and only under the dataset named in the path.
+    issued.length = 0;
+    await call(`${path}/deprecate`, env(), signedInPost({ release: "2", reason: "Bad." }));
+    const release = statement(issued, "UPDATE releases SET deprecated_at");
+    assert.deepEqual(release.params.slice(1), ["Bad.", 2, GRID_ROW.name]);
+
+    // Taking it back clears both columns and needs no reason.
+    issued.length = 0;
+    await call(`${path}/deprecate`, env(), signedInPost({ undo: "1", release: "" }));
+    assert.deepEqual(
+      statement(issued, "UPDATE datasets SET deprecated_at").params,
+      [null, null, GRID_ROW.name],
+    );
+
+    // No reason, nothing written; nothing matched, a 404.
+    issued.length = 0;
+    const blank = await call(`${path}/deprecate`, env(), signedInPost({ reason: "  " }));
+    assert.equal(blank.status, 400);
+    assert.equal(issued.filter((r) => r.sql.includes("SET deprecated_at")).length, 0);
+    const missing = await call(
+      `${path}/deprecate`,
+      env({ deprecated: [] }),
+      signedInPost({ release: "99", reason: "Bad." }),
+    );
+    assert.equal(missing.status, 404);
   },
 
   async "a dataset page prints the command that fetches it"() {

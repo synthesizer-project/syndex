@@ -623,6 +623,21 @@ const tests = {
     assert.equal(status, 204);
     assert.equal(headers.get("access-control-allow-methods"), "GET, HEAD, OPTIONS");
     assert.equal(headers.get("access-control-allow-origin"), "*");
+    // A conditional or resumed fetch from a browser is preflighted, and is
+    // refused unless its headers are allowed here.
+    assert.match(headers.get("access-control-allow-headers"), /if-none-match/);
+    assert.match(headers.get("access-control-allow-headers"), /range/);
+  },
+
+  async "a page on another origin can read the headers it needs"() {
+    const listing = await worker.fetch(
+      new Request(`${ORIGIN}/v1/datasets`),
+      { DB: stubDb({ rows: [DATASET_ROW] }) },
+    );
+    const exposed = listing.headers.get("access-control-expose-headers");
+    for (const name of ["etag", "content-range", "x-syndex-sha256", "retry-after"]) {
+      assert.match(exposed, new RegExp(name));
+    }
   },
 
   async "an unexpected binding failure becomes a 500"() {
@@ -790,6 +805,9 @@ const tests = {
       env,
     );
     assert.equal(response.status, 304);
+    // Or a cross-origin script never sees the 304 at all.
+    assert.equal(response.headers.get("access-control-allow-origin"), "*");
+    assert.equal(response.headers.get("etag"), '"abc"');
   },
 
   async "a release id is digits or it is nothing"() {

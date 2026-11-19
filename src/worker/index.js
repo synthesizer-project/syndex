@@ -7,10 +7,26 @@
 
 import { describeFailure, failureHeaders } from "../failure.js";
 
+/**
+ * What lets a page on another origin use an answer, and read it.
+ *
+ * Allowing the origin is only half of it. A browser hides every response
+ * header from a cross-origin script unless it is named here, and the ones a
+ * client needs are exactly the ones it hides: the ETag to revalidate with,
+ * which bytes a range holds, the digest to check a download against, the
+ * filename, and how long to wait after a 503.
+ */
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers":
+    "accept-ranges, content-disposition, content-length, content-range, " +
+    "etag, retry-after, x-syndex-sha256",
+};
+
 /** What every JSON answer carries, whatever it is answering. */
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
-  "access-control-allow-origin": "*",
+  ...CORS,
   "cache-control": "public, max-age=300",
 };
 
@@ -281,7 +297,7 @@ async function releasePreview(env, request, releaseId) {
     "content-type": "image/png",
     "content-length": String(object.size),
     etag: object.httpEtag,
-    "access-control-allow-origin": "*",
+    ...CORS,
     // The object is content addressed but this URL is not: it names a
     // release, and regenerating a preview repoints that release at new
     // bytes. Marking it immutable therefore pinned stale plots in browsers
@@ -297,7 +313,9 @@ async function releasePreview(env, request, releaseId) {
     return new Response(null, { headers });
   }
   if (object.body === undefined) {
-    return new Response(null, { status: 304 });
+    // With the headers: a 304 with no allow-origin is one a cross-origin
+    // script is not allowed to see, so its revalidation fails outright.
+    return new Response(null, { status: 304, headers });
   }
   return new Response(object.body, { headers });
 }
@@ -355,7 +373,7 @@ async function releaseCitations(db, releaseId) {
     headers: {
       "content-type": "application/x-bibtex; charset=utf-8",
       "content-disposition": contentDisposition(`${release.dataset}.bib`),
-      "access-control-allow-origin": "*",
+      ...CORS,
       // Citations can be corrected, and this URL names a release rather than
       // the bytes, so it revalidates for the same reason the preview does.
       "cache-control": "public, max-age=3600, must-revalidate",
@@ -756,7 +774,7 @@ async function downloadRelease(env, request, releaseId) {
   }
 
   const headers = new Headers({
-    "access-control-allow-origin": "*",
+    ...CORS,
     "accept-ranges": "bytes",
     "cache-control": "public, max-age=31536000, immutable",
     "content-disposition": contentDisposition(row.filename),
@@ -807,6 +825,9 @@ export default {
         headers: {
           "access-control-allow-origin": "*",
           "access-control-allow-methods": "GET, HEAD, OPTIONS",
+          // The request headers worth sending here that a browser will not
+          // send without asking: a conditional fetch, and a resumed one.
+          "access-control-allow-headers": "if-none-match, if-range, range",
           "access-control-max-age": "86400",
         },
       });

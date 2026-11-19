@@ -175,6 +175,13 @@ replacing anything: the old release keeps its bytes and stays resolvable.
 `set_current` decides what the dataset points at — leave it false when
 publishing a superseded file after the fact.
 
+A dataset that already exists keeps what a later publication does not state.
+`display_name`, `description`, `licence`, `metadata`, `is_test`, `is_ci` and
+`is_recommended` change only when the metadata file or the command line gives
+them, so a new release can be published with nothing but its path. To clear
+one, state it: `"description": null`. The defaults in the table above apply to
+a dataset's first publication only.
+
 An existing R2 object is reused only when size and digest match. Database rows
 update idempotently. Reusing one file release under a different dataset fails
 rather than silently moving it.

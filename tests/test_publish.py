@@ -540,6 +540,33 @@ def _plan_with_citations(tmp_path, name, citations):
     return plan
 
 
+def test_a_later_release_keeps_what_it_does_not_state(tmp_path):
+    """The description written once should survive a release that omits it."""
+    database = migrated_database()
+    described = "SELECT display_name, description, licence, is_ci FROM datasets"
+
+    def publish(content, **stated):
+        path = tmp_path / "kept.dat"
+        path.write_text(content)
+        plan = build_plan(
+            SourceFile(path, path.name),
+            {"data_type": "simulation_data", "name": "kept", **stated},
+            {},
+        )
+        _publish(database, plan)
+
+    publish("one", description="What it is.", licence="CC-BY-4.0", is_ci=True)
+    publish("two")
+    assert database.execute(described).fetchall() == [
+        ("kept", "What it is.", "CC-BY-4.0", 1)
+    ]
+
+    # Stating a field changes it, and stating nothing is how one is cleared.
+    publish("three", description=None, is_ci=False)
+    assert database.execute(described).fetchall() == [("kept", None, "CC-BY-4.0", 0)]
+    assert database.execute("SELECT COUNT(*) FROM releases").fetchone() == (3,)
+
+
 def test_a_paper_cited_by_two_files_is_stored_once(tmp_path):
     """The release paper is shared by every grid; it must not be duplicated."""
     database = migrated_database()

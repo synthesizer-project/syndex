@@ -44,6 +44,14 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
     # refreshed citation, the same file registered again after a failure half
     # way through, all have to land on the row that is already there rather
     # than fail on a constraint or leave a second copy.
+    # A dataset that already exists keeps whatever this publication did not
+    # state. Its type is always written, because that comes from the file
+    # when nobody says; the rest only when the metadata or the command line
+    # gave it, so a release published with nothing but a path changes nothing
+    # about how the dataset is described.
+    kept = ["data_type"] + [
+        "metadata_json" if field == "metadata" else field for field in dataset["stated"]
+    ]
     statements = [
         {
             "sql": "INSERT INTO files (filename, r2_path, format, size_bytes, sha256) VALUES (?, ?, ?, ?, ?) ON CONFLICT(sha256) DO UPDATE SET filename = excluded.filename, r2_path = excluded.r2_path, format = excluded.format, size_bytes = excluded.size_bytes",
@@ -56,7 +64,8 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
             ],
         },
         {
-            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_ci, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, data_type = excluded.data_type, is_test = excluded.is_test, is_ci = excluded.is_ci, is_recommended = excluded.is_recommended, licence = excluded.licence, citations_json = excluded.citations_json, metadata_json = excluded.metadata_json",
+            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_ci, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+            + ", ".join(f"{column} = excluded.{column}" for column in kept),
             "params": [
                 dataset["name"],
                 dataset["display_name"],

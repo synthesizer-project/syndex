@@ -37,6 +37,19 @@ from syndex.publish.sources import (
 GRID_DATA_TYPES = ("grid", "dust_grid")
 
 
+# The dataset fields that describe it rather than identify or classify it,
+# which is to say the ones a later release may reasonably leave unsaid.
+DATASET_FIELDS = (
+    "display_name",
+    "description",
+    "is_test",
+    "is_ci",
+    "is_recommended",
+    "licence",
+    "metadata",
+)
+
+
 def build_plan(
     source: SourceFile,
     defaults: dict[str, Any],
@@ -161,6 +174,12 @@ def build_plan(
             "is_recommended": bool(config.get("is_recommended", False)),
             "licence": config.get("licence"),
             "metadata": config.get("metadata", {}),
+            # Which of the fields above somebody actually stated, as opposed
+            # to the ones filled in with a default. A new release of an
+            # existing dataset changes only these: the description written
+            # for the first release should not vanish because the second was
+            # published without restating it.
+            "stated": sorted(key for key in DATASET_FIELDS if key in config),
         },
         "release": {
             "published_at": published_at,

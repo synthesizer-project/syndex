@@ -224,3 +224,28 @@ def test_classify_only_json_omits_the_verdict(tmp_path, capsys):
     assert payload["data_type"] == "grid"
     assert "state" not in payload
     assert "errors" not in payload
+
+
+def test_a_file_missing_part_of_its_layout_is_an_error_not_a_crash(tmp_path):
+    """Filters without a Header looks like an instrument and then is not one."""
+    path = tmp_path / "broken.hdf5"
+    with h5py.File(path, "w") as hdf:
+        hdf.create_group("Filters")
+
+    report = check_file(path)
+    assert report.state == "failed"
+    assert "could not be read" in report.errors[0]
+
+
+def test_an_axis_holding_nothing_usable_fails(tmp_path):
+    """NaN cannot be written to the catalogue, and an empty axis has no values."""
+    path = tmp_path / "grid.hdf5"
+    make_grid(path)
+    with h5py.File(path, "a") as hdf:
+        hdf["axes/age"][...] = [1.0, np.nan]
+        del hdf["axes/metallicity"]
+        hdf["axes"].create_dataset("metallicity", data=np.zeros(0))
+
+    errors = check_file(path).errors
+    assert "axis 'age' holds values that are not finite numbers" in errors
+    assert "axis 'metallicity' is empty" in errors

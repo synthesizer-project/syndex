@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -173,6 +174,20 @@ def check_grid(classification: Classification, report: Report) -> None:
     axes = extracted.get("axes", [])
     if not axes:
         report.errors.append("the grid has no axes")
+    # An axis is published value by value, and JSON has no way to write NaN
+    # or infinity, so one such value is an axis that cannot be stored. Every
+    # value is looked at rather than the extent: `min` and `max` step over a
+    # NaN without noticing it.
+    for axis in axes:
+        values = axis.get("values") or []
+        if not values:
+            report.errors.append(f"axis '{axis['name']}' is empty")
+        elif not all(
+            math.isfinite(value) for value in values if isinstance(value, float)
+        ):
+            report.errors.append(
+                f"axis '{axis['name']}' holds values that are not finite numbers"
+            )
     report.warnings.extend(check_axis_conventions(axes))
     report.warnings.extend(
         check_photoionisation_version(

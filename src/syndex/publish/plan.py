@@ -180,7 +180,10 @@ def build_plan(
     # sent to D1 as JSON, and a NumPy scalar that survived extraction should
     # fail here, where the message names the file, rather than at the point of
     # sending where it would not.
-    json_dump(plan)
+    try:
+        json_dump(plan)
+    except (TypeError, ValueError) as error:
+        raise UploadError(f"{source.key}: {error}") from error
     return plan
 
 

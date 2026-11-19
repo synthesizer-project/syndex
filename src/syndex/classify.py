@@ -213,7 +213,11 @@ def classify(path: Path) -> Classification:
         with contextlib.redirect_stderr(io.StringIO()):
             grid = extract_hdf5(path)
             instrument = None if grid is not None else extract_instrument_hdf5(path)
-    except (OSError, ValueError) as error:
+    #
+    # KeyError and TypeError are the same fact arriving differently: a file
+    # that looks like a grid or an instrument and then lacks a group or an
+    # attribute the layout promises, or holds a dataset where a group belongs.
+    except (OSError, ValueError, KeyError, TypeError) as error:
         return Classification(
             filename=path.name,
             size_bytes=size_bytes,

@@ -2421,6 +2421,30 @@ const tests = {
     assert.match(body, /marked approved/);
   },
 
+  async "a decision is one of two things, and approval needs a file"() {
+    const reviewer = { ...USER, role: "reviewer" };
+    const issued = [];
+    const env = () => ({ DB: stubDb({ rows: { viewer: reviewer }, issued }) });
+
+    // A form without the field, or with nonsense in it, decides nothing.
+    for (const fields of [{}, { decision: "approve" }, { decision: "" }]) {
+      issued.length = 0;
+      const { status, body } = await call("/syndex/review/7", env(), signedInPost(fields));
+      assert.equal(status, 400);
+      assert.match(body, /Nothing was decided/);
+      assert.equal(issued.filter((one) => one.sql.includes("UPDATE submissions")).length, 0);
+    }
+
+    // The decision is bound twice: once to record, once to ask whether a
+    // missing file matters.
+    issued.length = 0;
+    await call("/syndex/review/7", env(), signedInPost({ decision: "rejected" }));
+    const update = statement(issued, "UPDATE submissions");
+    assert.match(update.sql, /\? = 'rejected' OR uploaded_at IS NOT NULL/);
+    assert.equal(update.params[0], "rejected");
+    assert.equal(update.params.at(-1), "rejected");
+  },
+
   async "the tabs are in the bar on a wide screen and the menu on a narrow one"() {
     const { body } = await call("/syndex/search", {
       DB: stubDb({ rows: { viewer: { ...USER, role: "admin" }, waiting: 2 } }),

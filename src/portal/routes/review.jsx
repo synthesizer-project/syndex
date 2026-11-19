@@ -417,12 +417,30 @@ routes.post("/datasets/:name/deprecate", requireRole("reviewer"), async (c) => {
 
 routes.post("/review/:id{[0-9]+}", async (c) => {
   const form = await c.req.parseBody();
-  const decision = form.decision === "approved" ? "approved" : "rejected";
+  const decision = String(form.decision ?? "");
 
+  // One of the two, said outright. Anything else used to be read as a
+  // rejection -- including a form that arrived without the field at all --
+  // and a rejection has no way back.
+  if (decision !== "approved" && decision !== "rejected") {
+    return page(
+      c,
+      <Review
+        {...(await reviewState(c))}
+        viewer={c.get("viewer").user}
+        note="Nothing was decided: that was neither an approval nor a rejection."
+      />,
+      { status: 400, cache: "no-store" },
+    );
+  }
+
+  // Approving is approving a file. A submission whose file has not arrived
+  // can still be turned away, but there is nothing in it yet to approve.
   const submission = await c.env.DB.prepare(
     `UPDATE submissions
      SET state = ?, reviewed_at = ?, reviewer_note = ?, reviewed_by = ?
      WHERE submission_id = ? AND state = 'pending'
+       AND (? = 'rejected' OR uploaded_at IS NOT NULL)
      RETURNING name`,
   )
     .bind(
@@ -431,6 +449,7 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
       String(form.reviewer_note ?? "").slice(0, 1000) || null,
       c.get("viewer").user.user_id,
       Number(c.req.param("id")),
+      decision,
     )
     .first();
 
@@ -441,7 +460,7 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
       viewer={c.get("viewer").user}
       note={
         submission === null
-          ? "That submission has already been reviewed."
+          ? "That submission has already been reviewed, or its file has not arrived yet."
           : `${submission.name} marked ${decision}. Publishing it is still a` +
             " deliberate run of syndex-upload."
       }

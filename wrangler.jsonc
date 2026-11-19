@@ -82,6 +82,8 @@
     "SYNTHESIZER_SUBMISSIONS_BUCKET": "synthesizer-submissions",
     "GITHUB_CLIENT_ID": "Ov23liGN3tfhkew9i4Il",
     "GITHUB_ISSUE_REPO": "synthesizer-project/syndex",
-    "SYNDEX_ADMIN_LOGINS": "willjroper"
+    // GitHub account ids, not logins: a login can be renamed and re-registered.
+    // `gh api users/LOGIN -q .id` finds one.
+    "SYNDEX_ADMIN_IDS": "40025495"
   }
 }

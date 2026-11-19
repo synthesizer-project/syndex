@@ -2768,6 +2768,46 @@ const tests = {
     }
   },
 
+  async "signing out everywhere ends every session the account holds"() {
+    const issued = [];
+    const { status, headers } = await call(
+      "/syndex/logout/everywhere",
+      { DB: stubDb({ rows: { viewer: USER }, issued }) },
+      signedInPost({}),
+    );
+    assert.equal(status, 303);
+    assert.deepEqual(
+      statement(issued, "DELETE FROM sessions WHERE user_id").params,
+      [USER.user_id],
+    );
+    assert.match(headers.get("set-cookie"), /syndex_session=;/);
+
+    // Nobody signed in: nothing to end, and nobody else's sessions to guess at.
+    issued.length = 0;
+    await call("/syndex/logout/everywhere", { DB: stubDb({ issued }) }, {
+      method: "POST",
+    });
+    assert.equal(
+      issued.filter((one) => one.sql.includes("WHERE user_id")).length,
+      0,
+    );
+  },
+
+  async "an administrator is appointed by account id, never by login"() {
+    const { recordSignIn } = await import("../src/portal/data/auth.js");
+    const admin = async (profile) => {
+      const issued = [];
+      await recordSignIn(
+        { DB: stubDb({ issued }), SYNDEX_ADMIN_IDS: "40025495, 7" },
+        { name: null, email: null, ...profile },
+      );
+      return statement(issued, "INSERT INTO users").params.at(-1);
+    };
+    assert.equal(await admin({ githubId: 40025495, login: "anything" }), 1);
+    // Somebody who registered a login an administrator used to have.
+    assert.equal(await admin({ githubId: 999, login: "willjroper" }), 0);
+  },
+
   async "signing in is unavailable rather than broken when unconfigured"() {
     const { status } = await call("/syndex/login", { DB: stubDb() });
     assert.equal(status, 503);

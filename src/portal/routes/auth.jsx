@@ -19,6 +19,7 @@ import {
   beginSignIn,
   consumeState,
   endSession,
+  endSessions,
   profileForCode,
   recordSignIn,
   sessionForGithubToken,
@@ -135,6 +136,18 @@ routes.post("/auth/cli", async (c) => {
 });
 
 routes.post("/logout", async (c) => {
+  await endSession(c);
+  return c.redirect(BASE, 303);
+});
+
+// Every session the account holds, not only this browser's. The one that
+// matters is the one this browser cannot reach: a `syndex-submit` session
+// sitting in a file on a shared login node, good for thirty days.
+routes.post("/logout/everywhere", async (c) => {
+  const { user } = c.get("viewer");
+  if (user !== null) {
+    await endSessions(c.env, user.user_id);
+  }
   await endSession(c);
   return c.redirect(BASE, 303);
 });

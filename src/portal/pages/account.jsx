@@ -185,11 +185,22 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
         <h1 class="text-3xl sm:text-4xl">{user.login}</h1>
         {/* A form, because signing out changes something. A link would let
             any page anywhere sign a reader out by embedding it. */}
-        <form method="post" action={`${BASE}/logout`}>
-          <button type="submit" class="btn cursor-pointer">
-            Sign out
-          </button>
-        </form>
+        <div class="flex flex-wrap gap-2">
+          <form method="post" action={`${BASE}/logout`}>
+            <button type="submit" class="btn cursor-pointer">
+              Sign out
+            </button>
+          </form>
+          <form method="post" action={`${BASE}/logout/everywhere`}>
+            <button
+              type="submit"
+              class="btn-quiet cursor-pointer"
+              title="Ends every session, including any syndex-submit has stored on another machine."
+            >
+              Sign out everywhere
+            </button>
+          </form>
+        </div>
       </div>
 
       <div class="mt-8 grid gap-6 lg:grid-cols-2">

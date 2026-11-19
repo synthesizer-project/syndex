@@ -108,7 +108,7 @@ export function authConfigured(env) {
 }
 
 /**
- * The logins that hold the admin role regardless of what the table says.
+ * The accounts that hold the admin role regardless of what the table says.
  *
  * This is how the first administrator exists. Without it the only way to
  * appoint one would be to write a row by hand, and a database whose access
@@ -117,15 +117,20 @@ export function authConfigured(env) {
  *
  * It is also the way back in if the last admin's role is removed by accident.
  *
+ * By numeric id, not by login. A login can be renamed and the old name
+ * registered by somebody else, who would then be an administrator here the
+ * first time they signed in; the id is the one thing about a GitHub account
+ * that never changes hands, which is why `users` is keyed on it too.
+ *
  * @param {object} env Worker bindings and secrets.
- * @returns {Set<string>} Lowercased GitHub logins.
+ * @returns {Set<number>} GitHub account ids.
  */
-function adminLogins(env) {
+function adminIds(env) {
   return new Set(
-    String(env.SYNDEX_ADMIN_LOGINS ?? "")
+    String(env.SYNDEX_ADMIN_IDS ?? "")
       .split(",")
-      .map((login) => login.trim().toLowerCase())
-      .filter(Boolean),
+      .map((id) => Number(id.trim()))
+      .filter((id) => Number.isInteger(id) && id > 0),
   );
 }
 
@@ -363,7 +368,7 @@ export async function profileForCode(env, code, redirectUri) {
  */
 export async function recordSignIn(env, profile) {
   const now = new Date().toISOString();
-  const isAdmin = adminLogins(env).has(profile.login.toLowerCase());
+  const isAdmin = adminIds(env).has(Number(profile.githubId));
 
   return env.DB.prepare(
     `INSERT INTO users (github_id, login, name, email, role, created_at,

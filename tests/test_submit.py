@@ -224,3 +224,28 @@ def test_a_transfer_restarted_elsewhere_starts_again(tmp_path, monkeypatch):
     submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
 
     assert portal.sent == [1, 2, 3, 4]
+
+
+def test_requests_identify_themselves(monkeypatch):
+    """Cloudflare refuses urllib's default User-Agent, so one is always sent."""
+    seen = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b""
+
+    def urlopen(request):
+        seen.update(request.header_items())
+        return Response()
+
+    monkeypatch.setattr(submit.urllib.request, "urlopen", urlopen)
+    submit._request("https://example.org", headers={"accept": "application/json"})
+    assert seen["User-agent"] == submit.USER_AGENT

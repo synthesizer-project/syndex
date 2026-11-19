@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from syndex import __version__
 from syndex.errors import UploadError
 from syndex.publish.serialise import json_dump
 
@@ -23,7 +24,7 @@ from syndex.publish.serialise import json_dump
 # nobody has to paste BibTeX correctly. A personal token raises the rate limit;
 # without one, ADS issues an anonymous token which is enough for occasional
 # publishing.
-USER_AGENT = "syndex-upload/1.0"
+USER_AGENT = f"syndex-upload/{__version__}"
 
 ADS_EXPORT_URL = "https://api.adsabs.harvard.edu/v1/export/bibtex"
 

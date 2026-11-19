@@ -13,13 +13,21 @@ For every file:
 4. Extracts axes, spectra names, line IDs, wavelength coverage, model and
    photoionisation metadata, without reading any bulk array.
 5. Hashes the file and builds the whole catalogue record in memory.
-6. Uploads to a content-addressed R2 path and verifies size and digest.
+6. Uploads to a content-addressed R2 path and confirms the object is there at
+   the right size, labelled with the right digest.
 7. Registers every row in one transactional D1 batch.
 8. Optionally verifies through the public API.
 
 R2 and D1 cannot share a transaction, so bytes go first: D1 can then never
 point at a missing object, and a failed registration leaves only an
 unreferenced object that rerunning reuses.
+
+Step 6 does not read the bytes back. The digest it compares is the one this
+tool attached to the object as metadata when uploading, so the check catches
+a missing object, a truncated one, and a different file already sitting at
+that path — not corruption in transit that left the size unchanged. The
+end-to-end check is the one `synthesizer-download` makes, hashing what it
+fetched against the digest in the catalogue.
 
 Previews are separate, because they read the whole file back out of R2:
 

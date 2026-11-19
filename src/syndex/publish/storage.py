@@ -342,7 +342,14 @@ def _arrived(client, bucket: str, key: str, plan: dict[str, Any]) -> bool:
 
 
 def upload_and_verify(client, bucket: str, plan: dict[str, Any]) -> None:
-    """Idempotently upload one file and verify size and digest metadata.
+    """Idempotently upload one file and confirm it arrived as planned.
+
+    What is compared is the object's size and the digest recorded in its
+    metadata, which this module wrote when uploading. That establishes that
+    the object exists, is whole, and is the file this plan describes rather
+    than another at the same key. It is not a re-read of the stored bytes: a
+    30 GiB grid would have to come all the way back to be hashed, and the
+    download client hashes what it fetches in any case.
 
     Args:
         client: Configured boto3 S3 client.

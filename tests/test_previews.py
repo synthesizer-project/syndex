@@ -139,3 +139,42 @@ def test_make_preview_skips_unplottable_types_without_opening_the_file():
         None, "bucket", {"data_type": "archive", "name": "x", "size_bytes": 1}
     )
     assert reason == "archive has no indicative plot"
+
+
+def test_a_run_survives_a_failed_upload_and_resumes_by_file(tmp_path, monkeypatch):
+    """One refused upload is one failure, and a new release is new work."""
+    from syndex.previews import cli
+
+    rows = [
+        {"name": name, "data_type": "grid", "file_id": file_id, "size_bytes": 1}
+        for name, file_id in (("one", 1), ("two", 2))
+    ]
+    uploaded = []
+
+    def upload(client, bucket, png, name, kind):
+        if name == "one" and not uploaded:
+            uploaded.append("refused")
+            raise OSError("connection reset")
+        uploaded.append(name)
+        return f"previews/{name}.png"
+
+    monkeypatch.setenv("SYNTHESIZER_D1_API_TOKEN", "token")
+    monkeypatch.setattr(cli, "s3_client", lambda account: None)
+    monkeypatch.setattr(cli, "make_preview", lambda *args: (b"png", "spectra"))
+    monkeypatch.setattr(cli, "upload_preview", upload)
+    monkeypatch.setattr(
+        cli, "d1_query", lambda a, d, t, sql, params=None: [] if params else rows
+    )
+    manifest = ["--apply", "--manifest", str(tmp_path / "manifest.json")]
+
+    assert cli.run(manifest) == 1
+    assert uploaded == ["refused", "two"]
+
+    # The failure is tried again; what was published is not.
+    assert cli.run(manifest) == 0
+    assert uploaded == ["refused", "two", "one"]
+
+    # A new release under the same name is a file nothing has drawn yet.
+    rows[1]["file_id"] = 3
+    assert cli.run(manifest) == 0
+    assert uploaded == ["refused", "two", "one", "two"]

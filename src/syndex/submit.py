@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from syndex import __version__
+
 # Where the portal lives. Overridable so that a development deployment can be
 # submitted to without editing anything.
 DEFAULT_PORTAL = os.environ.get(
@@ -36,6 +38,10 @@ DEFAULT_PORTAL = os.environ.get(
 # GitHub's device flow endpoints.
 DEVICE_CODE = "https://github.com/login/device/code"
 DEVICE_TOKEN = "https://github.com/login/oauth/access_token"
+
+# Sent with every request. The portal sits behind Cloudflare, which refuses
+# urllib's default identifier outright (403, error 1010).
+USER_AGENT = f"syndex-submit/{__version__}"
 
 # Only what the portal itself asks for. This token is used once, to ask GitHub
 # who it belongs to, and never stored.
@@ -175,7 +181,10 @@ def _request(
         SubmitError: If the host cannot be reached at all.
     """
     request = urllib.request.Request(
-        url, data=data, headers=headers or {}, method=method
+        url,
+        data=data,
+        headers={"User-Agent": USER_AGENT, **(headers or {})},
+        method=method,
     )
     try:
         with urllib.request.urlopen(request) as response:
@@ -228,7 +237,9 @@ def sign_in(portal: str) -> str:
     """
     status, config = _json_request(f"{portal}/auth/cli")
     client_id = config.get("client_id")
-    if status != 200 or not client_id:
+    if status != 200:
+        raise SubmitError(f"the portal refused to start a sign-in (HTTP {status})")
+    if not client_id:
         raise SubmitError("this portal is not set up for signing in")
 
     status, start = _json_request(

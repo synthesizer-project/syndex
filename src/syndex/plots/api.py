@@ -17,6 +17,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from syndex import __version__
+
 DEFAULT_API_URL = "https://data.synthesizer-project.org"
 
 
@@ -36,7 +38,7 @@ def fetch(api_url: str, path: str) -> dict[str, Any]:
     request = urllib.request.Request(
         f"{api_url}{path}",
         # Cloudflare rejects urllib's default agent, so name ourselves.
-        headers={"User-Agent": "syndex-plots/1.0"},
+        headers={"User-Agent": f"syndex-plots/{__version__}"},
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:

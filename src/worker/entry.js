@@ -83,6 +83,9 @@ Disallow: /
  */
 const MAX_CACHED_BYTES = 5 * 1024 * 1024;
 
+/** The hostname that is the API and nothing else. */
+const API_HOST = "data.synthesizer-project.org";
+
 /** Hostnames whose non-portal traffic belongs to the org site, not the API. */
 const SITE_HOSTS = new Set([
   "synthesizer-project.org",
@@ -261,6 +264,19 @@ export default {
       );
     }
     if (pathname === "/syndex" || pathname.startsWith("/syndex/")) {
+      // The portal has one address. On the API's hostname it would be a
+      // second copy with its own cookies, and one where signing in cannot
+      // work: GitHub only returns people to the callback registered with it.
+      // Only that hostname is turned away, so `wrangler dev` and a
+      // workers.dev preview still serve the portal where they are.
+      if (url.hostname === API_HOST) {
+        return new Response(null, {
+          status: 301,
+          headers: {
+            location: `https://synthesizer-project.org${pathname}${url.search}`,
+          },
+        });
+      }
       return cached(request, ctx, () => portal.fetch(request, env, ctx));
     }
 

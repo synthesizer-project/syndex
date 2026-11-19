@@ -459,6 +459,19 @@ const tests = {
     assert.match(await onApi.text(), /No route for/);
   },
 
+  async "the portal is not served a second time on the API's hostname"() {
+    const moved = await worker.fetch(
+      new Request("https://data.synthesizer-project.org/syndex/grids?q=bpass"),
+      {},
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+    assert.equal(moved.status, 301);
+    assert.equal(
+      moved.headers.get("location"),
+      "https://synthesizer-project.org/syndex/grids?q=bpass",
+    );
+  },
+
   async "a filter URL survives being parsed and rebuilt"() {
     const query =
       "?q=bpass&type=grid&model=BPASS&model=FSPS&emission=photoionised&content=spectra" +

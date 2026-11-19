@@ -877,6 +877,31 @@ const tests = {
     assert.match(body, /title="Noise: no"/);
   },
 
+  async "sorting and flag counts ask what the page then shows"() {
+    const issued = [];
+    await call(
+      "/syndex/search?type=grid&content=spectra&sort=axis.masses",
+      { DB: stubDb({ issued }) },
+    );
+
+    // Ticking "lines" as well would narrow to grids with both, so that is
+    // what its count has to be of.
+    const lines = issued.find(
+      (record) =>
+        record.sql.includes("COUNT(*) AS n") &&
+        record.sql.endsWith("AND g.has_lines = 1"),
+    );
+    assert.match(lines.sql, /g\.has_spectra = 1[^]*AND g\.has_lines = 1$/);
+
+    // Masses are stored in two units; the sort scales them as the filter does.
+    const rows = statement(issued, "ORDER BY (SELECT a.minimum");
+    assert.match(rows.sql, /a\.minimum \* CASE WHEN a\.units = 'kg'/);
+
+    const byFormat = [];
+    await call("/syndex/search?sort=format", { DB: stubDb({ issued: byFormat }) });
+    statement(byFormat, "ORDER BY f.format ASC");
+  },
+
   async "column headings toggle persistent sorting"() {
     const issued = [];
     const { body } = await call(

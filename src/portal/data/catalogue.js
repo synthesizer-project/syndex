@@ -143,6 +143,7 @@ export function parseFilters(params) {
     "wavelengths",
     "axes",
     "size",
+    "format",
     "type",
     "published",
     "instrument_type",
@@ -503,10 +504,14 @@ const COLUMNS = `d.name, d.display_name, d.description, d.data_type,
 /** Safe ORDER BY expression for one user-visible column. */
 function ordering(filters) {
   if (filters.sort.startsWith("axis.")) {
+    const name = filters.sort.slice(5);
+    // Scaled as the filter and the column scale it, or grids written in
+    // kilogrammes sort thirty orders of magnitude from their neighbours.
+    const scale = AXIS_UNITS[name]?.scale ?? "1";
     return {
-      sql: `(SELECT a.minimum FROM grid_axes a
+      sql: `(SELECT a.minimum * ${scale} FROM grid_axes a
              WHERE a.release_id = r.release_id AND a.name = ?)`,
-      params: [filters.sort.slice(5)],
+      params: [name],
     };
   }
   return {
@@ -711,16 +716,19 @@ export async function search(db, tab, filters) {
   }
 
   // Flag facets are counted one statement at a time: they are independent
-  // questions about the same row, not values of one column.
+  // questions about the same row, not values of one column. That is also why
+  // they are counted against every filter, their own group included: ticking
+  // a second flag narrows what the first left, where a second model widens
+  // it, so the number beside "lines" with "spectra" ticked has to be the
+  // grids carrying both.
   const flags = FLAG_FACETS[tab.id];
-  const unflagged = where(clauses, flags.group);
   for (const [, condition] of flags.values) {
     statements.push(
       db
         .prepare(
-          `SELECT COUNT(*) AS n ${FROM} WHERE ${unflagged.sql} AND ${condition}`,
+          `SELECT COUNT(*) AS n ${FROM} WHERE ${all.sql} AND ${condition}`,
         )
-        .bind(...unflagged.params),
+        .bind(...all.params),
     );
   }
 

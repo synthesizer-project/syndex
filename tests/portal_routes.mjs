@@ -1307,6 +1307,40 @@ const tests = {
     assert.match(body, /<html/);
   },
 
+  async "a dataset page survives a column that is not what it should be"() {
+    // Each of these is a publication bug the page used to answer with a 500:
+    // text that is not JSON, a stored null, and a list where an object goes.
+    const env = {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              metadata_json: "not json",
+              provenance_json: "null",
+              current_release_id: 2,
+              filename: "bpass.hdf5",
+              sha256: "e47f",
+            },
+          ],
+          grid: [
+            {
+              model_parameters_json: "[1, 2]",
+              photoionisation_parameters_json: '"text"',
+              available_spectra_json: '{"incident": true}',
+              available_lines_json: "oops",
+            },
+          ],
+        },
+      }),
+    };
+
+    const { status, body } = await call(`/syndex/datasets/${GRID_ROW.name}`, env);
+    assert.equal(status, 200);
+    assert.match(body, /Direct download bpass\.hdf5/);
+  },
+
   async "a dataset page opens whatever the name contains"() {
     // The tab redirects were one regex route, `:tab{grids|dust|...}`, and `|`
     // binds loosest when Hono composes it: the pattern matched any path

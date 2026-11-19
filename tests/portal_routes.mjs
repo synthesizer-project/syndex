@@ -515,6 +515,29 @@ const tests = {
     assert.deepEqual(rows.params, ["grid", "spins"]);
   },
 
+  async "no URL can ask D1 for more than it will take"() {
+    // 50 bytes of LIKE pattern and 100 bound parameters, both of which D1
+    // answers with an error rather than with nothing.
+    const params = new URLSearchParams("type=grid&sort=axis.ages&kind=sps&kind=agn");
+    params.set("q", "é_%".repeat(40));
+    for (let n = 0; n < 60; n++) {
+      params.append("model", `m${n}`);
+      params.append("emission", `e${n}`);
+      params.append("axis", `a${n}`);
+      params.set(`min.a${n}`, "1");
+      params.set(`max.a${n}`, "2");
+    }
+    const issued = [];
+    await search(stubDb({ issued }), grids, parseFilters(params));
+
+    for (const record of issued) {
+      assert.ok(record.params.length <= 100, `${record.params.length} bound`);
+    }
+    const [pattern] = statement(issued, "ORDER BY").params;
+    assert.ok(new TextEncoder().encode(pattern).length <= 50);
+    assert.match(pattern, /^%(é\\_\\%)+%$/, "cut between characters, not inside one");
+  },
+
   async "the range toggle picks the documented comparison"() {
     const overlap = [];
     await search(

@@ -116,10 +116,14 @@ export const RANGE_MODES = {
  */
 export function parseFilters(params) {
   // A repeated parameter becomes a bound placeholder or, for axes, an EXISTS
-  // subquery. Nothing legitimate needs more than this: the catalogue has 17
-  // distinct axes and 24 models, so a longer list is a hand-written URL, and
-  // it would otherwise walk into SQLite's variable limit as a 500.
-  const LIST_LIMIT = 32;
+  // subquery binding up to three. D1 allows a statement 100 of them, and the
+  // worst a URL can now ask for is 98: six for the search text, two kinds,
+  // twenty models, twenty emission types, one type, sixteen axes at three
+  // each, and one for an axis sort. Nothing legitimate comes near it -- the
+  // catalogue has 17 distinct axes and 24 models -- so a longer list is a
+  // hand-written URL, and it is cut short rather than answered with a 500.
+  const LIST_LIMIT = 20;
+  const AXIS_LIMIT = 16;
   const list = (key) =>
     params
       .getAll(key)
@@ -154,7 +158,7 @@ export function parseFilters(params) {
     "depth",
   ]);
   const axes = [];
-  for (const name of new Set(list("axis"))) {
+  for (const name of [...new Set(list("axis"))].slice(0, AXIS_LIMIT)) {
     axes.push({
       name,
       min: number(params.get(`min.${name}`)),
@@ -308,7 +312,16 @@ function number(value) {
  * @returns {string} Pattern for use with `LIKE ? ESCAPE '\'`.
  */
 function likePattern(text) {
-  return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  const escaped = (part) => part.replace(/[\\%_]/g, (char) => `\\${char}`);
+  // D1 refuses a LIKE pattern over 50 bytes, wildcards and escapes included,
+  // and refuses it as an error rather than as no matches. Text too long for
+  // that is searched for by as much of its start as fits: more results than
+  // were asked for, which is a better answer than a failed page.
+  const characters = [...text];
+  while (new TextEncoder().encode(escaped(characters.join(""))).length > 48) {
+    characters.pop();
+  }
+  return `%${escaped(characters.join(""))}%`;
 }
 
 /**

@@ -84,7 +84,7 @@ def _parser() -> argparse.ArgumentParser:
         "--set-current",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="make this release the dataset's current one (default: yes)",
+        help="make this release the dataset's current one (default: no)",
     )
     parser.add_argument(
         "--account-id",

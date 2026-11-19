@@ -1194,6 +1194,7 @@ const tests = {
               known_bug_description: "Superseded metadata.",
               synthesizer_min_version: "0.9.0",
               synthesizer_max_version: "0.9.9",
+              filename: "bpass-old-name.hdf5",
               size_bytes: 200000000,
               sha256: "abcd",
             },
@@ -1219,6 +1220,11 @@ const tests = {
       /href="\/syndex\/search\?model=BPASS&amp;content=lines&amp;type=grid"/,
     );
     assert.match(body, /aria-label="Direct download bpass\.hdf5"/);
+    // An earlier release keeps the filename it was published under.
+    assert.match(
+      body,
+      /aria-label="Direct download release 1"[^>]*data-download-filename="bpass-old-name\.hdf5"/,
+    );
     assert.match(body, /<span role="tooltip"[^>]*>Direct download bpass\.hdf5<\/span>/);
     assert.match(
       body,

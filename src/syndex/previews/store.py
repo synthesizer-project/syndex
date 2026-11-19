@@ -71,6 +71,11 @@ def d1_query(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise UploadError(f"D1 query failed: HTTP {exc.code}: {detail}") from exc
+    # Everything else that goes wrong before an answer: no route, a refused
+    # or reset connection, a timeout. One error, so no caller meets a
+    # traceback for what is only a bad network.
+    except OSError as exc:
+        raise UploadError(f"D1 could not be reached: {exc}") from exc
     if not payload.get("success"):
         raise UploadError(f"D1 query failed: {payload.get('errors', payload)}")
     return payload["result"][0]["results"]

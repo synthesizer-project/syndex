@@ -64,7 +64,7 @@ def test_a_failed_transfer_is_retried(tmp_path):
 
     class FlakyClient:
         def head_object(self, **kwargs):
-            if not attempts:
+            if len(attempts) < 2:
                 error = Exception("missing")
                 error.response = {"Error": {"Code": "404"}}
                 raise error
@@ -81,6 +81,37 @@ def test_a_failed_transfer_is_retried(tmp_path):
     upload_and_verify(FlakyClient(), "bucket", plan)
 
     assert len(attempts) == 2, "the transfer should have been retried once"
+
+
+def test_a_lost_answer_is_not_a_reason_to_send_it_again(tmp_path):
+    """The object arrived; only the reply saying so did not."""
+    path = tmp_path / "grid.hdf5"
+    make_grid(path)
+    plan = build_plan(
+        SourceFile(path, path.name),
+        {"grid": {"grid_type": "sps", "emission_type": "incident"}},
+        {},
+    )
+    attempts = []
+
+    class DeafClient:
+        def head_object(self, **kwargs):
+            if not attempts:
+                error = Exception("missing")
+                error.response = {"Error": {"Code": "404"}}
+                raise error
+            return {
+                "ContentLength": plan["file"]["size_bytes"],
+                "Metadata": {"sha256": plan["file"]["sha256"]},
+            }
+
+        def upload_file(self, *args, **kwargs):
+            attempts.append(1)
+            raise OSError("connection reset before the response")
+
+    upload_and_verify(DeafClient(), "bucket", plan)
+
+    assert len(attempts) == 1
 
 
 def test_a_transfer_that_keeps_failing_gives_up(tmp_path):

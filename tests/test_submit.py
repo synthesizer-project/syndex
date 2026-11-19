@@ -242,10 +242,86 @@ def test_requests_identify_themselves(monkeypatch):
         def read(self):
             return b""
 
-    def urlopen(request):
+    def urlopen(request, timeout=None):
         seen.update(request.header_items())
         return Response()
 
     monkeypatch.setattr(submit.urllib.request, "urlopen", urlopen)
     submit._request("https://example.org", headers={"accept": "application/json"})
     assert seen["User-agent"] == submit.USER_AGENT
+
+
+def test_a_dropped_connection_is_retried(tmp_path, monkeypatch):
+    """A reset mid-transfer is the ordinary failure, and the piece is in hand."""
+    path = tmp_path / "grid.hdf5"
+    path.write_bytes(b"0123456789")
+    attempts = []
+
+    def flaky(url, payload=None, **kwargs):
+        attempts.append(url)
+        if "part" in url and len(attempts) < 3:
+            raise submit.ConnectionFailed("connection reset")
+        return 200, {}
+
+    monkeypatch.setattr(submit, "_json_request", flaky)
+    monkeypatch.setattr(submit.time, "sleep", lambda _: None)
+
+    submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+    assert len([one for one in attempts if "part" in one]) == 3
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        submit.http.client.RemoteDisconnected("closed without answering"),
+        ConnectionResetError("reset by peer"),
+        TimeoutError("timed out"),
+        submit.urllib.error.URLError("no route"),
+    ],
+)
+def test_no_answer_is_one_error_whatever_went_wrong(monkeypatch, failure):
+    """Every way a connection fails is something to retry, not a traceback."""
+
+    def urlopen(request, timeout=None):
+        assert timeout == submit.TIMEOUT
+        raise failure
+
+    monkeypatch.setattr(submit.urllib.request, "urlopen", urlopen)
+    with pytest.raises(submit.ConnectionFailed, match="could not reach"):
+        submit._request("https://example.org")
+
+
+def test_an_expired_session_signs_in_again(tmp_path, monkeypatch, capsys):
+    """Day thirty-one is a new sign-in, not a 401 with nothing to do about it."""
+    path = tmp_path / "grid.hdf5"
+    path.write_bytes(b"0123456789")
+    portal = "https://example.org/syndex"
+    submit._store_token("stale", portal)
+    used = []
+
+    def answer(url, payload=None, **kwargs):
+        used.append(kwargs["headers"]["authorization"])
+        return (401, {}) if "stale" in used[-1] else (200, {})
+
+    monkeypatch.setattr(submit, "_json_request", answer)
+    monkeypatch.setattr(submit, "sign_in", lambda portal: "fresh")
+
+    assert submit.main(["tok", str(path), "--portal", portal, "--quiet"]) == 0
+    assert used[0] == "Bearer stale"
+    assert used[-1] == "Bearer fresh"
+    assert submit._stored_token(portal) == "fresh"
+    assert "signing in again" in capsys.readouterr().err
+
+
+def test_a_session_is_only_used_at_the_portal_that_issued_it(tmp_path):
+    """Pointing --portal somewhere else must not hand it this credential."""
+    submit._store_token("production", "https://synthesizer-project.org/syndex")
+    assert submit._stored_token("https://elsewhere.example/syndex") is None
+    assert (
+        submit._stored_token("https://synthesizer-project.org/syndex") == "production"
+    )
+
+    # A session stored before the portal was recorded belongs to the real one.
+    submit._config_path().write_text(json.dumps({"token": "older"}))
+    assert submit._stored_token(submit.CANONICAL_PORTAL) == "older"
+    assert submit._stored_token("https://elsewhere.example/syndex") is None

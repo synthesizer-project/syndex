@@ -44,20 +44,20 @@ def statement(
         it matched something and none when it did not.
     """
     if release is None:
-        return (
+        sql = (
             "UPDATE datasets SET deprecated_at = ?, deprecation_reason = ? "
-            "WHERE name = ? RETURNING name",
-            [when, reason, name],
+            "WHERE name = ? RETURNING name"
         )
+        return sql, [when, reason, name]
     # The dataset name is required alongside the release id so that a
     # mistyped id cannot deprecate a release of something else.
-    return (
+    sql = (
         "UPDATE releases SET deprecated_at = ?, deprecation_reason = ? "
         "WHERE release_id = ? AND dataset_id = "
         "(SELECT dataset_id FROM datasets WHERE name = ?) "
-        "RETURNING release_id",
-        [when, reason, release, name],
+        "RETURNING release_id"
     )
+    return sql, [when, reason, release, name]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -120,7 +120,9 @@ def run(argv: list[str] | None = None) -> int:
     when = None if args.undo else datetime.now(timezone.utc).isoformat()
     reason = None if args.undo else args.reason.strip()
     sql, params = statement(args.name, args.release, reason, when)
-    target = args.name if args.release is None else f"{args.name} release {args.release}"
+    target = (
+        args.name if args.release is None else f"{args.name} release {args.release}"
+    )
     try:
         rows = d1_query(args.account_id, args.database_id, token, sql, params)
     except UploadError as exc:

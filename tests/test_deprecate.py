@@ -6,8 +6,8 @@ different dataset must touch none.
 """
 
 import pytest
-from samples import migrated_database
 
+from samples import migrated_database
 from syndex import deprecate
 
 
@@ -15,16 +15,17 @@ from syndex import deprecate
 def database():
     """Two datasets with one release each."""
     db = migrated_database()
+    one, two = "a" * 64, "b" * 64
     db.executescript(
-        """
+        f"""
         INSERT INTO files (file_id, filename, r2_path, format, size_bytes, sha256)
-        VALUES (1, 'a.hdf5', 'a', 'hdf5', 1, '%s'), (2, 'b.hdf5', 'b', 'hdf5', 1, '%s');
+        VALUES (1, 'a.hdf5', 'a', 'hdf5', 1, '{one}'),
+               (2, 'b.hdf5', 'b', 'hdf5', 1, '{two}');
         INSERT INTO datasets (dataset_id, name, display_name, data_type)
         VALUES (1, 'one', 'One', 'grid'), (2, 'two', 'Two', 'grid');
         INSERT INTO releases (release_id, dataset_id, file_id, published_at)
         VALUES (10, 1, 1, '2026-01-01'), (20, 2, 2, '2026-01-01');
         """
-        % ("a" * 64, "b" * 64)
     )
     return db
 

@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // drift from them.
     const next = boxes[boxes.length - 1].cloneNode(true);
     next.value = "";
+    next.setAttribute("aria-label", `ADS bibcode ${boxes.length + 1}`);
     rows.append(next);
     next.focus();
 

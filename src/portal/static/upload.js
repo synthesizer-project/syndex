@@ -211,8 +211,8 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (error) {
         status.textContent =
           `The upload stopped at piece ${index + 1}: ${error.message}.` +
-          " Reload this page and choose the file again to carry on; the" +
-          " pieces already sent are kept.";
+          " Choose the file again to send it from the beginning. For a file" +
+          " too large to repeat, syndex-submit below picks up where it stops.";
         pickLabel.hidden = false;
         send.hidden = true;
         picker.disabled = false;

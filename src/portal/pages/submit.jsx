@@ -401,6 +401,9 @@ export const Submit = ({
                   }).map((_, index) => (
                     <input
                       name="citation"
+                      // The boxes share one visible instruction and have no
+                      // label each, so this is all a screen reader is told.
+                      aria-label={`ADS bibcode ${index + 1}`}
                       value={rows[index] ?? ""}
                       maxlength="19"
                       placeholder="2017PASA...34...58E"
@@ -710,9 +713,9 @@ export const NothingArrived = ({ counts, submission }) => (
     <h1 class="text-3xl sm:text-4xl">Nothing arrived</h1>
     <p class="mt-3 max-w-2xl">
       There is no file under this submission yet. If an upload is still
-      running, let it finish and press the button again. If it stopped part
-      way, start it again and it will carry on from where it got to: the
-      pieces that already arrived are kept, whichever way you sent them.
+      running, let it finish. If it stopped part way, go back and send the
+      file again: <code>syndex-submit</code> carries on from where it got to,
+      and the browser starts from the beginning.
     </p>
     <p class="mt-4">
       <a href={`${BASE}/submit/${submission.upload_token}`}>

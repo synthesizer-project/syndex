@@ -1818,6 +1818,50 @@ const tests = {
     );
   },
 
+  async "a file cannot be changed once it has arrived or been decided"() {
+    const base = `/syndex/submit/${SUBMISSION.upload_token}`;
+    const part = { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } };
+    const env = (submission, extra = {}) =>
+      contributorEnv({ rows: { submission, ...extra } });
+
+    // Already uploaded: completing again changes nothing and assembles nothing.
+    const uploaded = env({ ...SUBMISSION, uploaded_at: "2026-09-08T00:00:00Z" });
+    const again = await call(`${base}/complete`, uploaded, signedInPost({}));
+    assert.equal(again.status, 303);
+    assert.equal(uploaded.uploaded.completed, null);
+
+    // Decided before any file arrived: neither a part nor a completion.
+    for (const state of ["approved", "rejected"]) {
+      const decided = env({ ...SUBMISSION, state });
+      assert.equal((await call(`${base}/part/1`, decided, part)).status, 409);
+      assert.equal(
+        (await call(`${base}/complete`, decided, signedInPost({}))).status,
+        409,
+      );
+      assert.equal(decided.uploaded.parts.length, 0);
+      assert.equal(decided.uploaded.completed, null);
+    }
+
+    // Completed while this part was on its way: the claim finds nothing to
+    // claim, and the part is refused rather than starting a second transfer.
+    const raced = env(SUBMISSION, { reviewed: [] });
+    assert.equal((await call(`${base}/part/1`, raced, part)).status, 409);
+    assert.equal(raced.uploaded.parts.length, 0);
+    assert.equal(raced.uploaded.aborted, true);
+
+    // A reviewer reads anybody's submission and writes to nobody's.
+    const reviewer = env(
+      { ...SUBMISSION, user_id: 99 },
+      { viewer: { ...USER, role: "reviewer" } },
+    );
+    assert.equal((await call(`${base}/part/1`, reviewer, part)).status, 404);
+    assert.equal(
+      (await call(`${base}/complete`, reviewer, signedInPost({}))).status,
+      404,
+    );
+    assert.equal(reviewer.uploaded.parts.length, 0);
+  },
+
   async "completion assembles the parts and believes the bucket"() {
     const issued = [];
     const key = `submissions/${SUBMISSION.upload_token}/example-grid`;

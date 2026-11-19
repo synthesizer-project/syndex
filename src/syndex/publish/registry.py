@@ -196,6 +196,21 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
     # Each paper is stored once and shared. ON CONFLICT on the bibcode means a
     # release paper cited by every grid resolves to the single existing row and
     # picks up any corrected metadata from ADS.
+    #
+    # The list given replaces the one the file had, so a paper dropped from it
+    # stops being cited. An empty list is taken as "nothing said" and leaves
+    # the links alone: republishing without restating the papers is common,
+    # and silently uncrediting them would be the worse mistake.
+    if plan.get("citations"):
+        statements.append(
+            {
+                "sql": (
+                    "DELETE FROM file_citations WHERE file_id = "
+                    "(SELECT file_id FROM files WHERE sha256 = ?)"
+                ),
+                "params": [plan["file"]["sha256"]],
+            }
+        )
     for position, citation in enumerate(plan.get("citations", [])):
         statements.append(
             {

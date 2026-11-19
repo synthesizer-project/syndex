@@ -584,6 +584,46 @@ def test_republishing_refreshes_citation_metadata(tmp_path):
     assert rows == [("A corrected title", 2004)]
 
 
+def test_a_paper_dropped_from_the_list_stops_being_cited(tmp_path):
+    """The list given is the list, but saying nothing changes nothing."""
+    database = migrated_database()
+    links = "SELECT COUNT(*) FROM file_citations"
+    _publish(database, _plan_with_citations(tmp_path, "pruned", [CITATION]))
+    _publish(database, _plan_with_citations(tmp_path, "other", [CITATION]))
+    _publish(database, _plan_with_citations(tmp_path, "pruned", [RELEASE_PAPER]))
+
+    rows = database.execute(
+        "SELECT f.filename, c.bibcode FROM file_citations fc "
+        "JOIN citations c ON c.citation_id = fc.citation_id "
+        "JOIN files f ON f.file_id = fc.file_id ORDER BY f.filename"
+    ).fetchall()
+    assert rows == [
+        ("other.dat", CITATION["bibcode"]),
+        ("pruned.dat", RELEASE_PAPER["bibcode"]),
+    ]
+
+    _publish(database, _plan_with_citations(tmp_path, "pruned", []))
+    assert database.execute(links).fetchone()[0] == 2
+
+
+def test_a_bibtex_field_wrapped_over_lines_is_read_whole():
+    """ADS wraps long titles, and half a title is worse than none."""
+    entries = parse_bibtex_entries(
+        "@ARTICLE{2018MNRAS.480.1247K,\n"
+        '        title = "{A physical model of the broad-band continuum\n'
+        '        of AGN and its implications}",\n'
+        "      journal = {\\mnras},\n"
+        "         year = 2018\n"
+        "}\n"
+    )
+    (entry,) = entries.values()
+    assert entry["title"] == (
+        "A physical model of the broad-band continuum of AGN and its implications"
+    )
+    assert entry["journal"] == "MNRAS"
+    assert entry["year"] == 2018
+
+
 def test_a_file_with_no_citations_writes_nothing(tmp_path):
     database = migrated_database()
     _publish(database, _plan_with_citations(tmp_path, "bare", []))

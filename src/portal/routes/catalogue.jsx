@@ -14,6 +14,7 @@
 import { Hono } from "hono";
 
 import { BASE } from "../base.js";
+import { atLeast } from "../data/auth.js";
 import {
   TABS,
   dataset as fetchDataset,
@@ -150,5 +151,13 @@ routes.get("/datasets/:name", async (c) => {
     );
   }
 
-  return page(c, <Dataset dataset={record} counts={counts} returnTo={returnTo} />);
+  return page(
+    c,
+    <Dataset
+      dataset={record}
+      counts={counts}
+      returnTo={returnTo}
+      canDeprecate={atLeast(c.get("viewer")?.user?.role, "reviewer")}
+    />,
+  );
 });

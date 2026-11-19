@@ -151,6 +151,7 @@ export function modelLabel(model) {
 /** A short, self-describing marker. Never colour alone: the word is the
  *  identity, and the border only groups it. */
 const BADGE_TITLES = {
+  deprecated: "No longer the thing to use; the dataset page says why. Still downloadable.",
   "known bug": "A defect is recorded against this release; the dataset page says what it is.",
   recommended: "The maintainers' default choice for this kind of data.",
   reduced: "A small cut-down copy, for tests rather than for science.",
@@ -177,6 +178,7 @@ export const Badge = ({ children, strong = false }) => (
 /** The badges one dataset row carries. */
 export const Badges = ({ row }) => (
   <>
+    {row.deprecated_at != null && <Badge strong>deprecated</Badge>}
     {row.known_bug === 1 && <Badge strong>known bug</Badge>}
     {row.is_recommended === 1 && <Badge>recommended</Badge>}
     {row.is_test === 1 && <Badge>reduced</Badge>}

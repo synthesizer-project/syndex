@@ -150,6 +150,7 @@ async function listDatasets(db, url) {
     .prepare(
       `SELECT d.name, d.display_name, d.description, d.data_type, d.is_test,
               d.is_ci, d.is_recommended, d.licence,
+              d.deprecated_at, d.deprecation_reason,
               r.release_id, r.published_at,
               f.file_id, f.filename, f.format, f.size_bytes, f.sha256,
               g.has_spectra, g.has_lines
@@ -403,6 +404,7 @@ async function releasePayload(db, row, origin) {
     release_id: releaseId,
     published_at: row.published_at,
     deprecated_at: row.deprecated_at,
+    deprecation_reason: row.deprecation_reason ?? null,
     known_bug: row.known_bug === 1,
     known_bug_description: row.known_bug_description,
     synthesizer_min_version: row.synthesizer_min_version,
@@ -448,6 +450,7 @@ async function listReleases(db, name, origin) {
   const { results } = await db
     .prepare(
       `SELECT r.release_id, r.published_at, r.deprecated_at,
+              r.deprecation_reason,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
               f.file_id, f.filename, f.format, f.size_bytes, f.sha256
@@ -466,6 +469,7 @@ async function listReleases(db, name, origin) {
       release_id: row.release_id,
       published_at: row.published_at,
       deprecated_at: row.deprecated_at,
+      deprecation_reason: row.deprecation_reason ?? null,
       known_bug: row.known_bug === 1,
       known_bug_description: row.known_bug_description,
       is_current: row.release_id === dataset.current_release_id,
@@ -504,6 +508,7 @@ async function getRelease(db, releaseId, origin) {
   const row = await db
     .prepare(
       `SELECT r.release_id, r.published_at, r.deprecated_at,
+              r.deprecation_reason,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
               r.provenance_json,
@@ -548,7 +553,10 @@ async function getDataset(db, name, origin) {
       `SELECT d.name, d.display_name, d.description, d.data_type, d.is_test,
               d.is_ci, d.is_recommended, d.licence, d.citations_json,
               d.metadata_json,
+              d.deprecated_at AS dataset_deprecated_at,
+              d.deprecation_reason AS dataset_deprecation_reason,
               r.release_id, r.published_at, r.deprecated_at,
+              r.deprecation_reason,
               r.synthesizer_min_version, r.synthesizer_max_version,
               r.known_bug, r.known_bug_description,
               r.provenance_json,
@@ -577,6 +585,8 @@ async function getDataset(db, name, origin) {
       is_ci: dataset.is_ci,
       is_recommended: dataset.is_recommended,
       licence: dataset.licence,
+      deprecated_at: dataset.dataset_deprecated_at ?? null,
+      deprecation_reason: dataset.dataset_deprecation_reason ?? null,
       citations: dataset.citations,
       metadata: dataset.metadata,
       current_release: null,
@@ -592,6 +602,8 @@ async function getDataset(db, name, origin) {
     is_ci: dataset.is_ci,
     is_recommended: dataset.is_recommended,
     licence: dataset.licence,
+    deprecated_at: dataset.dataset_deprecated_at ?? null,
+    deprecation_reason: dataset.dataset_deprecation_reason ?? null,
     citations: dataset.citations,
     metadata: dataset.metadata,
     current_release: await releasePayload(db, dataset, origin),

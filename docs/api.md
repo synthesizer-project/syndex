@@ -72,6 +72,8 @@ Datasets with summary information from the current release, ordered by name.
       "is_ci": false,
       "is_recommended": false,
       "licence": null,
+      "deprecated_at": null,
+      "deprecation_reason": null,
       "release_id": 5,
       "published_at": "2026-09-04T16:47:01.631937Z",
       "file_id": 5,
@@ -106,12 +108,15 @@ what replaces a persisted manifest.
   "is_ci": true,
   "is_recommended": false,
   "licence": null,
+  "deprecated_at": null,
+  "deprecation_reason": null,
   "citations": [],
   "metadata": {},
   "current_release": {
     "release_id": 2,
     "published_at": "2026-09-04T16:47:01.550420Z",
     "deprecated_at": null,
+    "deprecation_reason": null,
     "known_bug": false,
     "known_bug_description": null,
     "synthesizer_min_version": null,
@@ -175,6 +180,11 @@ downloading it.
 - Axes come in `axis_index` order with complete `values`.
 - `known_bug` marks a defect found after publication. The release stays
   resolvable; a client pinned to it should surface the description.
+- `deprecated_at` appears twice and means two things. On the dataset: use
+  something else. On a release: use a newer release of this dataset. Each has
+  a `deprecation_reason`. Neither removes anything, and listings still include
+  deprecated datasets, so a client that wants to hide them filters on the
+  field.
 - Use `current_release.citations`, in bibliography order — model, release,
   processing code. The top-level `citations` is the legacy dataset column, `[]`
   on every row, kept only so this migration could not break a deployed client.
@@ -195,6 +205,7 @@ pins deliberately.
       "release_id": 9,
       "published_at": "2026-09-06T12:00:00Z",
       "deprecated_at": null,
+      "deprecation_reason": null,
       "known_bug": false,
       "known_bug_description": null,
       "is_current": true,

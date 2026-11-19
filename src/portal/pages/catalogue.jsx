@@ -5,7 +5,9 @@
  * Reading the catalogue: the landing page, the results page, and one dataset.
  *
  * Everything here is public and anonymous. No page in this file asks who is
- * reading it, and none of them writes anything.
+ * reading it, and none of them writes anything. The one exception is handed
+ * in rather than worked out: a dataset page is told when its reader may
+ * deprecate, and shows the reviewers' form for it.
  */
 
 import { BASE, DATA_API } from "../base.js";
@@ -21,6 +23,7 @@ import {
   size,
 } from "../views/format.jsx";
 import { Layout } from "../views/layout.jsx";
+import { Deprecation } from "./review.jsx";
 import {
   CopyButton,
   CopyTextButton,
@@ -284,7 +287,8 @@ const Releases = ({ dataset }) => (
               {release.release_id === dataset.current_release_id && (
                 <Badge strong>current</Badge>
               )}{" "}
-              {release.known_bug === 1 && <Badge>known bug</Badge>}
+              {release.known_bug === 1 && <Badge>known bug</Badge>}{" "}
+              {release.deprecated_at != null && <Badge>deprecated</Badge>}
             </td>
           </tr>
         ))}
@@ -348,7 +352,12 @@ const previewAlt = (dataset) =>
   `${previewCaption(dataset)} ${dataset.display_name}.`;
 
 /** One dataset, with everything the catalogue holds about it. */
-export const Dataset = ({ dataset, counts, returnTo = null }) => {
+export const Dataset = ({
+  dataset,
+  counts,
+  returnTo = null,
+  canDeprecate = false,
+}) => {
   const grid = dataset.grid;
   const instrument = dataset.instrument;
   const cloudy = decode(grid?.photoionisation_parameters_json, {});
@@ -502,6 +511,20 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
               </figure>
             )}
           </div>
+        )}
+
+        {dataset.deprecated_at != null && (
+          <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
+            <strong class="text-accent-light">This dataset is deprecated.</strong>{" "}
+            {dataset.deprecation_reason} It is still available to download.
+          </p>
+        )}
+
+        {dataset.release_deprecated_at != null && (
+          <p class="mt-6 rounded-lg border border-accent-light bg-accent/10 p-4 text-sm">
+            <strong class="text-accent-light">This release is deprecated.</strong>{" "}
+            {dataset.release_deprecation_reason}
+          </p>
         )}
 
         {dataset.known_bug === 1 && (
@@ -721,6 +744,8 @@ export const Dataset = ({ dataset, counts, returnTo = null }) => {
               <Releases dataset={dataset} />
             </Section>
           )}
+
+          {canDeprecate && <Deprecation dataset={dataset} />}
 
           {citations.length > 0 && (
             <Section

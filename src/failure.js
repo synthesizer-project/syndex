@@ -71,7 +71,10 @@ export function describeFailure(error, now = Date.now()) {
   // Cloudflare's own wording. Matched on the phrase rather than on `D1_ERROR`
   // alone, since every D1 failure carries that prefix and only this one is
   // worth naming a time for.
-  if (/daily row read limit|exceeded .* limit/i.test(message)) {
+  // Only the daily row allowance. "exceeded ... limit" alone also matched a
+  // Worker out of CPU time and a database out of space, and told people to
+  // wait for a midnight that would change nothing.
+  if (/daily row \w+ limit/i.test(message)) {
     const seconds = secondsUntilUtcMidnight(now);
     return {
       status: 503,
@@ -86,7 +89,21 @@ export function describeFailure(error, now = Date.now()) {
     };
   }
 
-  if (/D1_ERROR|Network connection lost|storage.*unavailable/i.test(message)) {
+  // A statement the database understood and refused: a column the schema does
+  // not have, a constraint, a syntax error. These carry the `D1_ERROR` prefix
+  // like everything else, but they are faults in this code or a migration
+  // that was not applied, and will fail identically on every retry. Calling
+  // one "could not be reached, try again in a minute" hid a deploy that had
+  // gone out ahead of its migration behind what looked like a blip.
+  const refused =
+    /SQLITE_(ERROR|CONSTRAINT|MISMATCH)|no such (column|table)|syntax error/i.test(
+      message,
+    );
+
+  if (
+    !refused &&
+    /D1_ERROR|Network connection lost|storage.*unavailable/i.test(message)
+  ) {
     return {
       status: 503,
       retryAfter: 60,

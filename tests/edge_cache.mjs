@@ -131,6 +131,19 @@ const tests = {
     assert.equal(unreachable.status, 503);
     assert.equal(unreachable.retryAfter, 60);
 
+    // A statement the database refused is not an outage. This is the message
+    // a deploy that went out ahead of its migration produces.
+    const schema = describeFailure(
+      new Error("D1_ERROR: no such column: d.deprecated_at at offset 97: SQLITE_ERROR"),
+    );
+    assert.equal(schema.status, 500, "retrying a missing column never helps");
+    assert.equal(schema.retryAfter, null);
+    assert.equal(schema.transient, false);
+
+    // Running out of something other than the daily rows is not "resting".
+    const cpu = describeFailure(new Error("Worker exceeded CPU time limit."));
+    assert.equal(cpu.status, 500);
+
     const fault = describeFailure(new TypeError("x.replace is not a function"));
     assert.equal(fault.status, 500, "a bug here will fail again on retry");
     assert.equal(fault.retryAfter, null);
@@ -234,6 +247,26 @@ const tests = {
 
     // And a fragment is `no-store`, so it never enters the cache itself.
     assert.equal(cache.entries.size, 1);
+  },
+
+  async "a history restore cannot leave a page where a fragment is expected"() {
+    cache.entries.clear();
+    forgetCounts();
+    const url = "https://synthesizer-project.org/syndex/search?q=restore";
+
+    // htmx re-fetching a URL the back button landed on gets the whole page.
+    const restore = await call(url, {
+      headers: { "HX-Request": "true", "HX-History-Restore-Request": "true" },
+    });
+    assert.ok((await restore.text()).startsWith("<!doctype"));
+    // Planting the old marker by hand stores a page, but only under itself.
+    await call(`${url}&__fragment=1`);
+
+    const swap = await call(url, { headers: { "HX-Request": "true" } });
+    assert.ok(
+      !(await swap.text()).startsWith("<!doctype"),
+      "a filter change was answered with a stored full page",
+    );
   },
 
   async "both hostnames answer robots.txt, without touching the database"() {

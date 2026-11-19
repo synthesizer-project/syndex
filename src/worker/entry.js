@@ -119,21 +119,13 @@ function storable(response) {
 }
 
 /**
- * The key one request is cached under.
- *
- * htmx asks for the same URL and expects a fragment rather than a page, so
- * the two answers cannot share an entry. The marker goes in the key and never
- * reaches a handler.
+ * The key one request is cached under: its URL, and nothing about who asked.
  *
  * @param {Request} request Incoming request.
  * @returns {Request} The key to look it up by.
  */
 function cacheKey(request) {
-  const url = new URL(request.url);
-  if (request.headers.get("HX-Request") === "true") {
-    url.searchParams.set("__fragment", "1");
-  }
-  return new Request(url.toString(), { method: "GET" });
+  return new Request(request.url, { method: "GET" });
 }
 
 /**
@@ -148,6 +140,14 @@ function cacheKey(request) {
  * Anonymous GETs only: see `storable`. Signed-in pages answer `private,
  * no-store` and are never kept.
  *
+ * Nothing htmx asks for goes near the cache either. It asks for the same URL
+ * as a full page and wants a fragment, which is `no-store` and was never
+ * kept -- but it used to have a key of its own, the URL plus a marker, and
+ * one htmx request is answered with a whole page: a history restore. That
+ * page was stored under the fragment key and then swapped into the results
+ * panel of everyone who filtered next, and since the marker was an ordinary
+ * query parameter anybody could plant one by asking for it.
+ *
  * @param {Request} request Incoming request.
  * @param {ExecutionContext} ctx Execution context, for storing after replying.
  * @param {Function} handler Produces the answer when the cache has none.
@@ -159,7 +159,8 @@ async function cached(request, ctx, handler) {
   if (
     typeof caches === "undefined" ||
     request.method !== "GET" ||
-    request.headers.has("cookie")
+    request.headers.has("cookie") ||
+    request.headers.has("HX-Request")
   ) {
     return handler();
   }

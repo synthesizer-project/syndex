@@ -955,6 +955,29 @@ const tests = {
     assert.match(headers.get("vary"), /^HX-Request\b/);
   },
 
+  async "a swapped panel brings the tab links that match it"() {
+    // The tabs sit outside the panel and carry the search text, so without
+    // these they would go on linking to the search the page was loaded with.
+    const env = { DB: stubDb() };
+    const { body } = await call("/syndex/search?type=grid&q=bpass", env, {
+      headers: { "HX-Request": "true" },
+    });
+    for (const id of ["tabs-bar", "tabs-menu"]) {
+      assert.match(
+        body,
+        new RegExp(
+          `<span id="${id}" class="contents" hx-swap-oob="true">.*?` +
+            `href="/syndex/search\\?q=bpass&amp;type=dust_grid"`,
+        ),
+      );
+    }
+
+    // And the page they are swapped into has somewhere to put them.
+    const whole = await call("/syndex/search?type=grid", env);
+    assert.match(whole.body, /<span id="tabs-bar" class="contents">/);
+    assert.match(whole.body, /<span id="tabs-menu" class="contents">/);
+  },
+
   async "dataset links preserve the filtered result URL"() {
     const { body } = await call(
       "/syndex/search?type=grid&model=BPASS&content=lines",

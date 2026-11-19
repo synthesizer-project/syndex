@@ -227,6 +227,53 @@ export function consumeState(c, state) {
 }
 
 /**
+ * Whether GitHub issued a token to this portal's own OAuth app.
+ *
+ * A token says who somebody is, and says it to whoever holds it. Asking
+ * GitHub "whose is this?" is therefore not enough: every site with a "Sign in
+ * with GitHub" button holds a token that answers that question correctly, and
+ * so does a leaked personal access token with no scopes at all. Accepting any
+ * of them would let whoever held one sign in here as its owner, with its
+ * owner's role.
+ *
+ * The browser flow does not have this problem -- a code can only be exchanged
+ * by the app it was issued to. The command-line flow hands over a finished
+ * token, so it has to be checked: GitHub answers 200 for a token belonging to
+ * the app whose id and secret ask, and 404 for anybody else's.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {string} githubToken The token a client handed over.
+ * @returns {Promise<boolean>} Whether it is one of ours.
+ */
+async function issuedToThisApp(env, githubToken) {
+  const credentials = btoa(`${env.GITHUB_CLIENT_ID}:${env.GITHUB_CLIENT_SECRET}`);
+  const response = await fetch(
+    `${API}/applications/${encodeURIComponent(env.GITHUB_CLIENT_ID)}/token`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Basic ${credentials}`,
+        "content-type": "application/json",
+        "user-agent": USER_AGENT,
+      },
+      body: JSON.stringify({ access_token: githubToken }),
+    },
+  );
+  if (!response.ok && response.status !== 404) {
+    // 404 is the ordinary answer for somebody else's token. Anything else
+    // means the question itself failed, which is worth being able to find.
+    console.error(
+      JSON.stringify({
+        message: "GitHub would not check a command-line token",
+        status: response.status,
+      }),
+    );
+  }
+  return response.ok;
+}
+
+/**
  * Exchange an authorisation code for the profile it identifies.
  *
  * @param {object} env Worker bindings and secrets.
@@ -409,9 +456,13 @@ export async function endSession(c) {
  * @param {object} env Worker bindings and secrets.
  * @param {string} githubToken A token from the device flow.
  * @returns {Promise<{token: string, user: object} | null>} The session, or
- *     null when GitHub does not recognise the token.
+ *     null when GitHub does not recognise the token as one of this portal's.
  */
 export async function sessionForGithubToken(env, githubToken) {
+  if (!(await issuedToThisApp(env, githubToken))) {
+    return null;
+  }
+
   const headers = {
     accept: "application/vnd.github+json",
     authorization: `Bearer ${githubToken}`,

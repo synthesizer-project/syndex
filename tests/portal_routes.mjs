@@ -2619,6 +2619,52 @@ const tests = {
     );
   },
 
+  async "a command-line sign-in only takes a token issued to this portal"() {
+    // Any GitHub token says who its owner is. Only one issued to this app is
+    // evidence that its owner meant to sign in here.
+    const env = (issued) => ({
+      DB: stubDb({ rows: { datasets: [USER] }, issued }),
+      GITHUB_CLIENT_ID: "id",
+      GITHUB_CLIENT_SECRET: "secret",
+    });
+    const post = (token) => ({
+      method: "POST",
+      body: JSON.stringify({ github_token: token }),
+      headers: { "content-type": "application/json" },
+    });
+    const asked = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      asked.push({ url: String(url), init });
+      if (String(url).includes("/applications/")) {
+        const ours = JSON.parse(init.body).access_token === "ours";
+        return Response.json({}, { status: ours ? 200 : 404 });
+      }
+      // GitHub would say who either token belongs to. That is the problem.
+      return Response.json({ id: 4242, login: "contributor-one", email: "a@b.c" });
+    };
+    try {
+      const issued = [];
+      const foreign = await call("/syndex/auth/cli", env(issued), post("someone-elses"));
+      assert.equal(foreign.status, 401);
+      assert.equal(
+        issued.filter((one) => /INSERT INTO (users|sessions)/.test(one.sql)).length,
+        0,
+        "nothing is recorded for a token from another app",
+      );
+      // Refused on the check alone, without asking who it belongs to.
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].url, "https://api.github.com/applications/id/token");
+      assert.equal(asked[0].init.headers.authorization, `Basic ${btoa("id:secret")}`);
+
+      const ours = await call("/syndex/auth/cli", env([]), post("ours"));
+      assert.equal(ours.status, 200);
+      assert.match(JSON.parse(ours.body).token, /^[0-9a-f]{64}$/);
+    } finally {
+      globalThis.fetch = real;
+    }
+  },
+
   async "signing in is unavailable rather than broken when unconfigured"() {
     const { status } = await call("/syndex/login", { DB: stubDb() });
     assert.equal(status, 503);

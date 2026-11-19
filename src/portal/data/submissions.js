@@ -292,7 +292,13 @@ export async function finishUpload(env, submission) {
     return null;
   }
 
-  const { upload } = await openUpload(env, submission);
+  // Null when the submission was completed or decided while this was being
+  // asked, in which case there is nothing here to assemble.
+  const opened = await openUpload(env, submission);
+  if (opened === null) {
+    return null;
+  }
+  const { upload } = opened;
   try {
     await upload.complete(
       results.map((part) => ({

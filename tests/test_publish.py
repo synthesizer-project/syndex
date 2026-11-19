@@ -676,3 +676,25 @@ def test_bibtex_fields_are_extracted():
     assert record["doi"] == "10.1093/mnras/sty1890"
     assert "Kubota" in record["authors"]
     assert record["title"].startswith("A physical model")
+
+
+def test_a_release_that_would_land_under_the_wrong_prefix_is_refused(monkeypatch):
+    """An unstated is_test keeps the dataset's flag, but the key was chosen."""
+    from syndex.publish import registry
+
+    def fail(*args):
+        raise AssertionError("nothing should be uploaded")
+
+    monkeypatch.setattr(registry, "upload_and_verify", fail)
+    monkeypatch.setattr(registry, "d1_query", lambda *args: [{"is_test": 1}])
+    plan = {"dataset": {"name": "one", "is_test": False, "stated": []}}
+
+    with pytest.raises(registry.UploadError, match="state is_test"):
+        registry.publish_plan(plan, None, "bucket", "a", "d", "t", None)
+
+    # Said outright, the run is taken at its word and nothing is asked.
+    monkeypatch.setattr(registry, "d1_query", fail)
+    monkeypatch.setattr(registry, "upload_and_verify", lambda *args: None)
+    monkeypatch.setattr(registry, "register_d1", lambda *args: None)
+    plan["dataset"]["stated"] = ["is_test"]
+    registry.publish_plan(plan, None, "bucket", "a", "d", "t", None)

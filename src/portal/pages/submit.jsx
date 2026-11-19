@@ -491,6 +491,28 @@ export const Upload = ({
   duplicate = null,
 }) => {
   const uploaded = submission.uploaded_at !== null;
+  // Decided before any file arrived. The upload routes refuse it from then
+  // on, so the controls would only be something to press and be told no.
+  const closed = !uploaded && submission.state !== "pending";
+  const decision = submission.reviewed_at !== null && (
+    <Section title={submission.state === "approved" ? "Approved" : "Not accepted"}>
+      <Fields
+        entries={[
+          ["decided", date(submission.reviewed_at)],
+          ["reviewer said", submission.reviewer_note],
+        ]}
+      />
+      {submission.state === "rejected" && (
+        <p class="mt-3 text-sm text-muted">
+          Fix what is described above and submit it again from{" "}
+          <a href={`${BASE}/submit/new?like=${submission.upload_token}`}>
+            your submissions
+          </a>
+          , which fills the form in from this one.
+        </p>
+      )}
+    </Section>
+  );
 
   return (
     <Layout
@@ -505,10 +527,19 @@ export const Upload = ({
       <p class="mt-3 mb-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
         <span class="font-mono break-all text-text">{submission.name}</span>
         <span>submission {submission.submission_id}</span>
-        <StateBadge state={uploaded ? submission.state : "no file yet"} />
+        <StateBadge
+          state={uploaded || closed ? submission.state : "no file yet"}
+        />
       </p>
 
-      {uploaded ? (
+      {closed ? (
+        <>
+          {decision}
+          <p class="mt-4 text-sm">
+            <a href={`${BASE}/submissions`}>Your submissions</a>
+          </p>
+        </>
+      ) : uploaded ? (
         <>
           <Section title="What arrived">
             <Fields
@@ -520,31 +551,7 @@ export const Upload = ({
             />
           </Section>
 
-          {submission.reviewed_at !== null && (
-            <Section
-              title={
-                submission.state === "approved"
-                  ? "Approved"
-                  : "Not accepted"
-              }
-            >
-              <Fields
-                entries={[
-                  ["decided", date(submission.reviewed_at)],
-                  ["reviewer said", submission.reviewer_note],
-                ]}
-              />
-              {submission.state === "rejected" && (
-                <p class="mt-3 text-sm text-muted">
-                  Fix what is described above and submit it again from{" "}
-                  <a href={`${BASE}/submit/new?like=${submission.upload_token}`}>
-                    your submissions
-                  </a>
-                  , which fills the form in from this one.
-                </p>
-              )}
-            </Section>
-          )}
+          {decision}
 
           <CheckReport submission={submission} duplicate={duplicate} forContributor />
           <p class="mt-4 text-sm">

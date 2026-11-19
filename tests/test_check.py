@@ -249,3 +249,15 @@ def test_an_axis_holding_nothing_usable_fails(tmp_path):
     errors = check_file(path).errors
     assert "axis 'age' holds values that are not finite numbers" in errors
     assert "axis 'metallicity' is empty" in errors
+
+
+def test_an_axis_of_rows_is_not_passed_unread(tmp_path):
+    """A two-dimensional axis is lists, and a NaN inside one is still a NaN."""
+    path = tmp_path / "grid.hdf5"
+    make_grid(path)
+    with h5py.File(path, "a") as hdf:
+        del hdf["axes/age"]
+        hdf["axes"].create_dataset("age", data=np.array([[1.0, np.nan], [2.0, 3.0]]))
+
+    errors = check_file(path).errors
+    assert "axis 'age' holds values that are not finite numbers" in errors

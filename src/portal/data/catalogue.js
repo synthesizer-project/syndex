@@ -186,7 +186,9 @@ export function parseFilters(params) {
     more: list("more"),
     open: list("open"),
     kind: grid
-      ? list("kind").filter((v) => v === "sps" || v === "agn")
+      ? // Deduplicated, or `kind=sps` twenty times is twenty placeholders
+        // where the budget above counts two.
+        [...new Set(list("kind"))].filter((v) => v === "sps" || v === "agn")
       : [],
     model: grid ? list("model") : [],
     emission: grid || dust ? list("emission") : [],
@@ -317,11 +319,20 @@ function likePattern(text) {
   // and refuses it as an error rather than as no matches. Text too long for
   // that is searched for by as much of its start as fits: more results than
   // were asked for, which is a better answer than a failed page.
-  const characters = [...text];
-  while (new TextEncoder().encode(escaped(characters.join(""))).length > 48) {
-    characters.pop();
+  // Built forwards and stopped at the first character that does not fit, so
+  // a very long search costs what fits rather than what was typed.
+  const encoder = new TextEncoder();
+  let body = "";
+  let bytes = 0;
+  for (const character of text) {
+    const next = escaped(character);
+    bytes += encoder.encode(next).length;
+    if (bytes > 48) {
+      break;
+    }
+    body += next;
   }
-  return `%${escaped(characters.join(""))}%`;
+  return `%${body}%`;
 }
 
 /**

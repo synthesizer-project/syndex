@@ -521,6 +521,9 @@ const tests = {
     const params = new URLSearchParams("type=grid&sort=axis.ages&kind=sps&kind=agn");
     params.set("q", "é_%".repeat(40));
     for (let n = 0; n < 60; n++) {
+      // Repeats of a value that is allowed, which is the only way this one
+      // list could grow.
+      params.append("kind", "sps");
       params.append("model", `m${n}`);
       params.append("emission", `e${n}`);
       params.append("axis", `a${n}`);
@@ -1686,6 +1689,30 @@ const tests = {
     assert.match(body, /the type is yours to choose/);
   },
 
+  async "a submission rejected before its file arrived says so and offers no upload"() {
+    const { body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}`,
+      contributorEnv({
+        rows: {
+          submission: {
+            ...SUBMISSION,
+            state: "rejected",
+            reviewed_at: "2026-09-15T09:00:00Z",
+            reviewer_note: "Already in the catalogue under another name.",
+          },
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /Not accepted/);
+    assert.match(body, /Already in the catalogue under another name/);
+    assert.match(body, /submit\/new\?like=/);
+    // The part route would answer 409, so there is nothing to press.
+    assert.doesNotMatch(body, /id="send"/);
+    assert.doesNotMatch(body, /syndex-submit/);
+  },
+
   async "a contributor is told what the checker found and what was decided"() {
     // Being told a submission was rejected and not why is the one thing worse
     // than not being told at all.
@@ -2766,7 +2793,10 @@ const tests = {
     const issued = [];
     const { status, body } = await call("/syndex/access", {
       DB: stubDb({
-        rows: { viewer: { ...USER, role: "pending" }, roleChange: { user_id: 3 } },
+        rows: {
+          viewer: { ...USER, role: "pending" },
+          roleChange: { user_id: 3, first: 1 },
+        },
         issued,
       }),
     }, signedInPost({ note: "A BPASS grid at higher resolution." }));
@@ -2777,10 +2807,14 @@ const tests = {
     // does not rejoin the queue by asking again.
     const update = statement(issued, "SET access_requested_at");
     assert.match(update.sql, /role = 'pending'/);
-    assert.deepEqual(update.params.slice(1), [
+    assert.deepEqual(update.params.slice(1, 3), [
       "A BPASS grid at higher resolution.",
       3,
     ]);
+    // The first request keeps its place, and the statement itself says
+    // whether this was the first: the time bound is the time compared.
+    assert.match(update.sql, /COALESCE\(access_requested_at, \?\)/);
+    assert.equal(update.params[0], update.params[3]);
   },
 
   async "asking for access again does not open another issue"() {
@@ -2790,9 +2824,9 @@ const tests = {
       sent.push(JSON.parse(init.body));
       return Response.json({}, { status: 201 });
     };
-    const ask = async (viewer) => {
+    const ask = async (viewer, first) => {
       await call("/syndex/access", {
-        DB: stubDb({ rows: { viewer, roleChange: { user_id: 3 } } }),
+        DB: stubDb({ rows: { viewer, roleChange: { user_id: 3, first } } }),
         GITHUB_ISSUE_REPO: "o/r",
         GITHUB_ISSUE_TOKEN: "t",
       }, signedInPost({ note: "Grids, and cc @somebody-else." }));
@@ -2800,18 +2834,22 @@ const tests = {
       await new Promise((resolve) => setTimeout(resolve, 10));
     };
     try {
-      await ask({ ...USER, role: "pending" });
+      await ask({ ...USER, role: "pending" }, 1);
       assert.equal(sent.length, 1);
       // The note is quoted, and names nobody GitHub would notify.
       assert.doesNotMatch(sent[0].body, /@somebody-else/);
       assert.match(sent[0].body, /somebody-else/);
 
       // Already in the queue: the note is refreshed and nothing is opened.
-      await ask({
-        ...USER,
-        role: "pending",
-        access_requested_at: "2026-09-13T00:00:00Z",
-      });
+      await ask(
+        { ...USER, role: "pending", access_requested_at: "2026-09-13T00:00:00Z" },
+        0,
+      );
+      assert.equal(sent.length, 1);
+
+      // Two posts at once both load an account that has not asked. Only the
+      // one the database says was first opens an issue.
+      await ask({ ...USER, role: "pending" }, 0);
       assert.equal(sent.length, 1);
     } finally {
       globalThis.fetch = real;

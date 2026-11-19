@@ -476,6 +476,39 @@ const tests = {
     assert.equal(headers.get("accept-ranges"), "bytes");
   },
 
+  async "If-Range earns the part only for the file the client already holds"() {
+    const asked = [];
+    const env = {
+      DB: stubDb({ rows: [DATASET_ROW] }),
+      FILES: {
+        get: async (key, options) => {
+          asked.push(options?.range ?? null);
+          return {
+            body: new Blob(["load"]).stream(),
+            httpEtag: '"abc123"',
+            writeHttpMetadata: () => {},
+          };
+        },
+      },
+    };
+    const ask = (tag) =>
+      call("/v1/releases/2/download", env, {
+        headers: { range: "bytes=1000-1003", "if-range": tag },
+      });
+
+    assert.equal((await ask('"abc123"')).status, 206);
+
+    // Another file's tag, a weak one and a date all get the whole file, read
+    // again without the range.
+    for (const tag of ['"other"', 'W/"abc123"', "Wed, 21 Oct 2026 07:28:00 GMT"]) {
+      asked.length = 0;
+      const { status, headers } = await ask(tag);
+      assert.equal(status, 200, tag);
+      assert.equal(headers.get("content-range"), null);
+      assert.deepEqual(asked, [{ offset: 1000, length: 4 }, null]);
+    }
+  },
+
   async "an open-ended range runs to the last byte"() {
     const asked = [];
     const env = {

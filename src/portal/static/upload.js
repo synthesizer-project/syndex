@@ -211,8 +211,13 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (error) {
         status.textContent =
           `The upload stopped at piece ${index + 1}: ${error.message}.` +
-          " Choose the file again to send it from the beginning. For a file" +
-          " too large to repeat, syndex-submit below picks up where it stops.";
+          " Choose the file again to send it from the beginning. A file too" +
+          " large to repeat is better sent with syndex-submit below, which" +
+          " also starts from the beginning but can resume its own transfers.";
+        // Emptied, or choosing the same file again is no change and the
+        // picker says nothing: the Upload button would never come back.
+        picker.value = "";
+        chosen.textContent = "No file chosen";
         pickLabel.hidden = false;
         send.hidden = true;
         picker.disabled = false;

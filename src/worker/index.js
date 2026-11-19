@@ -735,7 +735,7 @@ async function downloadRelease(env, request, releaseId) {
   // Ranged reads let an interrupted download resume instead of restarting,
   // which matters for multi-gigabyte grids. The size comes from D1, so an
   // impossible range is rejected without touching R2 at all.
-  const range = parseRange(request.headers.get("range"), row.size_bytes);
+  let range = parseRange(request.headers.get("range"), row.size_bytes);
   if (range === "unsatisfiable") {
     return new Response(
       JSON.stringify({ error: "Requested range is outside the file" }),
@@ -752,13 +752,29 @@ async function downloadRelease(env, request, releaseId) {
     );
   }
 
-  const object =
+  let object =
     request.method === "HEAD"
       ? await env.FILES.head(row.r2_path)
       : await env.FILES.get(row.r2_path, {
           onlyIf: request.headers,
           ...(range === null ? {} : { range }),
         });
+
+  // If-Range makes the range conditional: only a matching strong ETag earns
+  // the part, and anything else -- a different tag, a weak one, a date --
+  // gets the whole file. The object is immutable, so a mismatch is a client
+  // holding bytes of something else, which must not be spliced with these.
+  const ifRange = request.headers.get("if-range");
+  if (
+    range !== null &&
+    ifRange !== null &&
+    object?.body !== undefined &&
+    ifRange !== object.httpEtag
+  ) {
+    await object.body.cancel();
+    object = await env.FILES.get(row.r2_path);
+    range = null;
+  }
 
   if (object === null) {
     // D1 references an object R2 does not hold. Publication uploads and

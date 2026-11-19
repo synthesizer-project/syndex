@@ -325,3 +325,71 @@ def test_a_session_is_only_used_at_the_portal_that_issued_it(tmp_path):
     submit._config_path().write_text(json.dumps({"token": "older"}))
     assert submit._stored_token(submit.CANONICAL_PORTAL) == "older"
     assert submit._stored_token("https://elsewhere.example/syndex") is None
+
+
+def _urlopen_answering(monkeypatch, answer):
+    """Stand in for the network under `_request`, recording what was sent."""
+    seen = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def urlopen(request, timeout=None):
+        seen.append(request)
+        return answer(request) or Response()
+
+    monkeypatch.setattr(submit.urllib.request, "urlopen", urlopen)
+    return seen
+
+
+def test_a_piece_reaches_the_network(tmp_path, monkeypatch):
+    """Raw bytes go through the JSON helper, which must pass them on once.
+
+    Every other test here replaces `_json_request`, which is how the helper
+    came to hand `data` to `_request` twice without one of them noticing.
+    """
+    path = tmp_path / "grid.hdf5"
+    path.write_bytes(b"0123456789")
+    seen = _urlopen_answering(monkeypatch, lambda request: None)
+
+    submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+
+    part = next(one for one in seen if "/part/1" in one.full_url)
+    assert part.data == b"0123456789"
+
+
+def test_a_session_ending_at_completion_signs_in_again(tmp_path, monkeypatch):
+    """The last request can be the one that finds the session gone."""
+    path = tmp_path / "grid.hdf5"
+    path.write_bytes(b"0123456789")
+
+    def answer(url, payload=None, **kwargs):
+        return (401, {}) if url.endswith("/complete") else (200, {})
+
+    monkeypatch.setattr(submit, "_json_request", answer)
+    with pytest.raises(submit.SessionExpired):
+        submit.send("https://example.org/syndex", "t", "tok", path, quiet=True)
+
+
+def test_an_error_answer_that_stalls_is_a_failed_connection(monkeypatch):
+    """Reading a 503's body can time out like anything else."""
+
+    class Stalled(submit.urllib.error.HTTPError):
+        def read(self):
+            raise TimeoutError("timed out")
+
+    def answer(request):
+        raise Stalled(request.full_url, 503, "unavailable", {}, None)
+
+    _urlopen_answering(monkeypatch, answer)
+    with pytest.raises(submit.ConnectionFailed, match="could not reach"):
+        submit._request("https://example.org")

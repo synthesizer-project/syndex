@@ -209,10 +209,14 @@ def _request(
         method=method,
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
+        # Nested so that reading the body of an error answer is inside the
+        # same boundary as everything else: a 503 whose body stalls is a
+        # connection that failed, not a traceback.
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.read()
     # Everything else a connection does when it fails. `URLError` is only what
     # urllib wraps while connecting: a reset or a timeout mid-transfer is a
     # bare `OSError`, and a server that hangs up without answering is an
@@ -234,7 +238,9 @@ def _json_request(url: str, payload: dict | None = None, **kwargs) -> tuple[int,
         tuple[int, dict]: The status and the decoded answer.
     """
     headers = {"accept": "application/json", **kwargs.pop("headers", {})}
-    data = None
+    # A caller sending raw bytes passes `data` itself. Taken out of `kwargs`
+    # so it reaches `_request` once rather than twice.
+    data = kwargs.pop("data", None)
     if payload is not None:
         headers["content-type"] = "application/json"
         data = json.dumps(payload).encode()
@@ -470,6 +476,8 @@ def send(
     )
     # The completion answers with a redirect to the submission page, which is
     # a success; anything else is not.
+    if status == 401:
+        raise SessionExpired("the stored session is no longer valid")
     if status not in (200, 303):
         raise SubmitError(
             answer.get("error", f"the portal answered {status} on completion")

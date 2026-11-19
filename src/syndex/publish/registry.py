@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from syndex.errors import UploadError
+from syndex.previews.store import d1_query
 from syndex.publish.citations import USER_AGENT
 from syndex.publish.serialise import json_dump
 from syndex.publish.storage import upload_and_verify
@@ -334,6 +335,43 @@ def verify_api(api_url: str, dataset_name: str) -> None:
         raise UploadError(f"API verification failed: {exc}") from exc
 
 
+def _refuse_ambiguous_prefix(
+    account_id: str, database_id: str, token: str, plan: dict[str, Any]
+) -> None:
+    """Stop a release whose object would land under the wrong prefix.
+
+    A release that does not state `is_test` keeps the dataset's existing flag,
+    but the object key was chosen from the default before the dataset was
+    known. Where the two disagree, the bytes of a test dataset would sit under
+    the science prefix or the reverse, so the run is asked to say which.
+
+    Args:
+        account_id: Cloudflare account identifier.
+        database_id: D1 database identifier.
+        token: Cloudflare API token with D1 access.
+        plan: Validated publication plan.
+
+    Raises:
+        UploadError: If the dataset exists with the other classification.
+    """
+    dataset = plan["dataset"]
+    if "is_test" in dataset.get("stated", []):
+        return
+    rows = d1_query(
+        account_id,
+        database_id,
+        token,
+        "SELECT is_test FROM datasets WHERE name = ?",
+        [dataset["name"]],
+    )
+    if rows and bool(rows[0]["is_test"]) != dataset["is_test"]:
+        raise UploadError(
+            f"{dataset['name']} is already published with is_test="
+            f"{bool(rows[0]['is_test'])}; state is_test for this release so "
+            "its file goes under the matching prefix"
+        )
+
+
 def publish_plan(
     plan: dict[str, Any],
     client,
@@ -362,6 +400,7 @@ def publish_plan(
     # is invisible; a row pointing at an object that is not there is a download
     # that fails for everybody, and there is no way to tell from the catalogue
     # which of the two happened.
+    _refuse_ambiguous_prefix(account_id, database_id, token, plan)
     upload_and_verify(client, bucket, plan)
     register_d1(account_id, database_id, token, plan)
     if api_url:

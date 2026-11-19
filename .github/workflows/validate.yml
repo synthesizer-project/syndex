@@ -99,14 +99,23 @@ jobs:
       # runner's disk, a transfer that ran out of time -- and it used to fail
       # silently: nothing was posted, and the submission said a check was
       # running for ever.
+      #
+      # When the check itself finished and only posting it failed, the verdict
+      # is sent again rather than replaced: "could not be checked" over a
+      # report that says what is wrong with the file would throw the answer
+      # away.
       - name: Say so if the check could not be done
         if: failure() || cancelled()
         env:
           REPORT_URL: ${{ github.event.client_payload.report_url }}
           SECRET: ${{ secrets.SYNDEX_REPORT_SECRET }}
         run: |
-          curl --fail --silent --show-error \
+          if [ ! -s reported.json ]; then
+            printf '%s' '{"state":"failed","errors":["The file could not be fetched or checked by the validation run. This says nothing about the file itself."]}' \
+              > reported.json
+          fi
+          curl --fail --silent --show-error --retry 3 \
             --request POST "$REPORT_URL" \
             --header "authorization: Bearer $SECRET" \
             --header "content-type: application/json" \
-            --data '{"state":"failed","errors":["The file could not be fetched or checked by the validation run. This says nothing about the file itself."]}'
+            --data @reported.json

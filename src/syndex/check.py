@@ -177,13 +177,15 @@ def check_grid(classification: Classification, report: Report) -> None:
     # An axis is published value by value, and JSON has no way to write NaN
     # or infinity, so one such value is an axis that cannot be stored. Every
     # value is looked at rather than the extent: `min` and `max` step over a
-    # NaN without noticing it.
+    # NaN without noticing it. An axis is one-dimensional, so a value that is
+    # not a number at all -- a row of a two-dimensional dataset -- fails too,
+    # rather than being skipped with whatever it holds.
     for axis in axes:
         values = axis.get("values") or []
         if not values:
             report.errors.append(f"axis '{axis['name']}' is empty")
         elif not all(
-            math.isfinite(value) for value in values if isinstance(value, float)
+            isinstance(value, (int, float)) and math.isfinite(value) for value in values
         ):
             report.errors.append(
                 f"axis '{axis['name']}' holds values that are not finite numbers"

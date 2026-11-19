@@ -63,7 +63,13 @@ routes.post("/access", requireRole("pending"), async (c) => {
 
   // Advisory, and deliberately not awaited: whether a maintainer's issue
   // tracker is reachable is not this person's problem.
-  if (updated !== null) {
+  //
+  // Once per request for access, not once per press of the button. Asking
+  // again refreshes the note in the queue, where a reviewer will read it; it
+  // used to open another issue as well, every time, under the project's own
+  // token -- so any GitHub account could fill the tracker by signing in and
+  // posting this form in a loop.
+  if (updated !== null && user.access_requested_at === null) {
     c.executionCtx.waitUntil(
       notifyAccessRequest(c.env, new URL(c.req.url).origin, user, note),
     );

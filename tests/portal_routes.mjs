@@ -2596,6 +2596,41 @@ const tests = {
     ]);
   },
 
+  async "asking for access again does not open another issue"() {
+    const sent = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push(JSON.parse(init.body));
+      return Response.json({}, { status: 201 });
+    };
+    const ask = async (viewer) => {
+      await call("/syndex/access", {
+        DB: stubDb({ rows: { viewer, roleChange: { user_id: 3 } } }),
+        GITHUB_ISSUE_REPO: "o/r",
+        GITHUB_ISSUE_TOKEN: "t",
+      }, signedInPost({ note: "Grids, and cc @somebody-else." }));
+      // The issue is opened after the response, so give it a turn to happen.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    };
+    try {
+      await ask({ ...USER, role: "pending" });
+      assert.equal(sent.length, 1);
+      // The note is quoted, and names nobody GitHub would notify.
+      assert.doesNotMatch(sent[0].body, /@somebody-else/);
+      assert.match(sent[0].body, /somebody-else/);
+
+      // Already in the queue: the note is refreshed and nothing is opened.
+      await ask({
+        ...USER,
+        role: "pending",
+        access_requested_at: "2026-09-13T00:00:00Z",
+      });
+      assert.equal(sent.length, 1);
+    } finally {
+      globalThis.fetch = real;
+    }
+  },
+
   async "an empty access request is refused"() {
     const { status, body } = await call("/syndex/access", {
       DB: stubDb({ rows: { viewer: { ...USER, role: "pending" } } }),

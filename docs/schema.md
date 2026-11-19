@@ -94,7 +94,9 @@ CREATE TABLE datasets (
     is_recommended INTEGER NOT NULL DEFAULT 0 CHECK (is_recommended IN (0, 1)),
     licence TEXT,
     citations_json TEXT NOT NULL DEFAULT '[]',
-    metadata_json TEXT NOT NULL DEFAULT '{}'
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    deprecated_at TEXT,
+    deprecation_reason TEXT
 );
 ```
 
@@ -111,6 +113,9 @@ CREATE TABLE datasets (
 - `licence` and `is_recommended` are curated and currently unset everywhere;
   they are where those decisions will go, not a signal to read yet.
 - `citations_json` is superseded by `file_citations` and unused.
+- `deprecated_at` retires the whole dataset: use something else, and
+  `deprecation_reason` says what. Set with `syndex-deprecate`. Nothing is
+  removed and every release stays downloadable.
 
 ### releases
 
@@ -127,7 +132,8 @@ CREATE TABLE releases (
     synthesizer_max_version TEXT,
     provenance_json TEXT NOT NULL DEFAULT '{}',
     known_bug INTEGER NOT NULL DEFAULT 0 CHECK (known_bug IN (0, 1)),
-    known_bug_description TEXT
+    known_bug_description TEXT,
+    deprecation_reason TEXT
 );
 ```
 
@@ -137,6 +143,9 @@ CREATE TABLE releases (
   `synthesizer.__version__`. Recorded but not yet enforced.
 - `known_bug` belongs to the release, not the dataset: a defect is corrected by
   publishing a new release, and anything pinned to the old one needs telling.
+- `deprecated_at` on a release means "use a newer release of this dataset",
+  with `deprecation_reason` beside it. Retiring the dataset itself is the
+  column of the same name on `datasets`.
 - `provenance_json` holds the HDF5 root attributes the file reports about
   itself under `hdf5`, plus any curated `source`. Returned, never filtered on.
 

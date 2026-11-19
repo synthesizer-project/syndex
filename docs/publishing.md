@@ -181,6 +181,28 @@ rather than silently moving it.
 Once publication starts, one file failing does not stop the rest: every failure
 is reported and the exit status is non-zero.
 
+## Deprecating
+
+`syndex-deprecate` marks a dataset, or one release of it, as no longer the
+thing to use. Nothing is deleted: the files stay downloadable, and the
+catalogue and the API show the flag and the reason.
+
+```bash
+# The whole dataset: use something else.
+uv run syndex-deprecate NAME --reason "Superseded by bpass-2-3."
+
+# One release: use a newer release of the same dataset.
+uv run syndex-deprecate NAME --release 14 --reason "Wrong axis units."
+
+# Take either back.
+uv run syndex-deprecate NAME --undo
+uv run syndex-deprecate NAME --release 14 --undo
+```
+
+It needs `SYNTHESIZER_D1_API_TOKEN`, as publishing does, and exits non-zero
+when the name or the release does not exist. `--release` only accepts a
+release belonging to `NAME`, so a mistyped id cannot touch another dataset.
+
 ## Recovery
 
 Export D1 before bulk or destructive work:

@@ -57,10 +57,12 @@ def build_plan(
         OSError: If the source file cannot be read.
         ValueError: If metadata cannot be represented as strict JSON.
     """
-    # Three sources of truth, merged once: the batch defaults, the per-file
-    # override, and the command line ahead of both (already folded into
-    # `defaults` by `build_plans`). Everything below reads `config` alone, so
-    # no decision further down has to remember which of the three it came from.
+    # Three sources of truth, merged once. Lowest first: the batch defaults,
+    # the command line over those (already folded into `defaults` by
+    # `build_plans`), and the per-file entry over both, since something said
+    # about one file is more specific than an option given for the whole run.
+    # Everything below reads `config` alone, so no decision further down has
+    # to remember which of the three it came from.
     config = merge_metadata(defaults, file_override)
     physical_format = detect_format(source.path)
     extracted_grid = extract_hdf5(source.path) if physical_format == "hdf5" else None

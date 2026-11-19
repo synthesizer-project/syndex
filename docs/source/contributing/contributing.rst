@@ -110,7 +110,7 @@ Saving the form takes you to the submission's page, where you can upload the fil
 
       This suits files up to about **189 GB**, and files on a remote machine you reach over SSH, such as an HPC system.
 
-      The first time, it asks you to sign in by entering a code at `github.com/login/device <https://github.com/login/device>`_ on any device. It keeps that session in ``~/.config/syndex/`` and nothing else, and signing out from your account page ends it.
+      The first time, it asks you to sign in by entering a code at `github.com/login/device <https://github.com/login/device>`_ on any device. It keeps that session in ``~/.config/syndex/`` and nothing else, and **Sign out everywhere** on your account page ends it.
 
       The file goes up in 90 MiB pieces, and any piece that fails is retried. If the upload stops altogether, run the same command again and it will send only the pieces still missing. It starts over instead if the file has changed, or if someone has restarted the upload from the browser.
 

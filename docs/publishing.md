@@ -164,8 +164,9 @@ SYNTHESIZER_DATA_API_URL=https://data.synthesizer-project.org \
     uv run syndex-upload PATH --metadata metadata.json
 ```
 
-It only affects `syndex-upload`; point `syndex-plots` and `syndex-previews`
-elsewhere with `--api-url` and `--account-id`.
+It only affects `syndex-upload`. Point `syndex-plots` elsewhere with
+`--api-url`, and `syndex-previews` with `--account-id`, `--database-id` and
+`--bucket`.
 
 ## Releases
 

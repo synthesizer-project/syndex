@@ -12,8 +12,8 @@ limits, the resumption and the assembling are all the ones already there.
 Signing in is GitHub's device flow: this prints a code, somebody types it into
 github.com from wherever they happen to be, and the portal issues an ordinary
 session in exchange. What is kept on the machine is that session and nothing
-else: no password, no key, and nothing that outlives being signed out from the
-account page.
+else: no password, no key, and nothing that outlives "Sign out everywhere" on
+the account page.
 """
 
 from __future__ import annotations

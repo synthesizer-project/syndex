@@ -106,7 +106,7 @@ routes.get("/auth/cli", (c) =>
  * The client proves who it is to GitHub, which is the only thing it can
  * prove; this asks GitHub who that was and issues an ordinary session for
  * them. No password, no key, nothing to store on the machine but a session
- * that expires and can be revoked from the account page.
+ * that expires, and that "Sign out everywhere" on the account page ends.
  */
 routes.post("/auth/cli", async (c) => {
   if (!authConfigured(c.env)) {

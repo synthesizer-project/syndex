@@ -122,8 +122,11 @@ export function notifyAccessRequest(env, origin, user, note) {
       "They said:",
       "",
       // Quoted so that a note containing Markdown cannot restructure the
-      // issue around it.
+      // issue around it. A quote still notifies anybody it names, though, and
+      // this is posted with the project's token: the zero-width space keeps
+      // the text readable and stops it being a mention.
       note
+        .replace(/@/g, "@\u200b")
         .split("\n")
         .map((line) => `> ${line}`)
         .join("\n"),

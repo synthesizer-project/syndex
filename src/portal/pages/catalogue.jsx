@@ -268,16 +268,19 @@ const Releases = ({ dataset }) => (
             <td class="px-4 py-2">
               <div class="flex items-center gap-2 whitespace-nowrap">
                 <DownloadButton
+                  // Its own filename, not the current release's: a release
+                  // may be published under a new one, and the size beside
+                  // it is this file's.
                   href={`${DATA_API}/v1/releases/${release.release_id}/download`}
                   label={`Direct download release ${release.release_id}`}
-                  filename={dataset.filename}
+                  filename={release.filename}
                   sizeBytes={release.size_bytes}
                   sizeLabel={size(release.size_bytes)}
                 />
                 <CopyButton
                   command={`synthesizer-download --dataset ${dataset.name} --release ${release.release_id}`}
                   label={`Copy download command for release ${release.release_id}`}
-                  filename={dataset.filename}
+                  filename={release.filename}
                   sizeBytes={release.size_bytes}
                   sizeLabel={size(release.size_bytes)}
                 />

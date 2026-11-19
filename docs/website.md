@@ -212,8 +212,10 @@ Sign-in is unavailable rather than broken until all of this exists:
   `https://synthesizer-project.org/syndex/auth/callback`, device flow enabled.
 - `GITHUB_CLIENT_ID` in `vars` — not a secret.
 - `GITHUB_CLIENT_SECRET` via `wrangler secret put`.
-- `SYNDEX_ADMIN_LOGINS`, comma-separated logins that hold `admin` whatever the
-  table says. This is how the first administrator exists, and the way back in
+- `SYNDEX_ADMIN_IDS`, comma-separated numeric GitHub account ids that hold
+  `admin` whatever the table says. Ids rather than logins, because a login can
+  be renamed and re-registered by somebody else; `gh api users/LOGIN -q .id`
+  finds one. This is how the first administrator exists, and the way back in
   if the last one's role is removed by accident.
 
 Notification issues need `GITHUB_ISSUE_REPO` (`owner/name`) in `vars` and

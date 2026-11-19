@@ -143,6 +143,39 @@ const tests = {
     assert.equal(body.is_ci, true);
   },
 
+  async "a boolean filter is true or false, in any case, or refused"() {
+    const bound = async (query) => {
+      const bindings = [];
+      const result = await call(`/v1/datasets?${query}`, {
+        DB: stubDb({ rows: [DATASET_ROW], bindings }),
+      });
+      return { ...result, flags: bindings[0]?.slice(1, 5) };
+    };
+
+    // Python's str(True), which used to be read as false.
+    assert.deepEqual((await bound("has_spectra=True&is_ci=FALSE")).flags, [null, 0, 1, null]);
+    assert.deepEqual((await bound("is_test=1&has_lines=0")).flags, [1, null, null, 0]);
+
+    for (const query of ["has_spectra=yes", "is_ci=", "is_test=2"]) {
+      const refused = await bound(query);
+      assert.equal(refused.status, 400, query);
+      assert.match(refused.body.error, /must be true or false/);
+      assert.equal(refused.flags, undefined, "nothing was asked of the database");
+    }
+  },
+
+  async "an empty limit is the default, and a broken escape is the caller's fault"() {
+    const bindings = [];
+    await call("/v1/datasets?limit=", { DB: stubDb({ rows: [DATASET_ROW], bindings }) });
+    assert.equal(bindings[0].at(-1), 100);
+
+    for (const path of ["/v1/datasets/%E0%A4%A", "/v1/datasets/%zz/releases"]) {
+      const { status, body } = await call(path, { DB: stubDb() });
+      assert.equal(status, 400, path);
+      assert.equal(body.error, "Malformed dataset name");
+    }
+  },
+
   async "listing without a full page reports no cursor"() {
     const env = { DB: stubDb({ rows: [DATASET_ROW] }) };
     const { body } = await call("/v1/datasets?limit=5", env);
@@ -443,6 +476,39 @@ const tests = {
     assert.equal(headers.get("accept-ranges"), "bytes");
   },
 
+  async "If-Range earns the part only for the file the client already holds"() {
+    const asked = [];
+    const env = {
+      DB: stubDb({ rows: [DATASET_ROW] }),
+      FILES: {
+        get: async (key, options) => {
+          asked.push(options?.range ?? null);
+          return {
+            body: new Blob(["load"]).stream(),
+            httpEtag: '"abc123"',
+            writeHttpMetadata: () => {},
+          };
+        },
+      },
+    };
+    const ask = (tag) =>
+      call("/v1/releases/2/download", env, {
+        headers: { range: "bytes=1000-1003", "if-range": tag },
+      });
+
+    assert.equal((await ask('"abc123"')).status, 206);
+
+    // Another file's tag, a weak one and a date all get the whole file, read
+    // again without the range.
+    for (const tag of ['"other"', 'W/"abc123"', "Wed, 21 Oct 2026 07:28:00 GMT"]) {
+      asked.length = 0;
+      const { status, headers } = await ask(tag);
+      assert.equal(status, 200, tag);
+      assert.equal(headers.get("content-range"), null);
+      assert.deepEqual(asked, [{ offset: 1000, length: 4 }, null]);
+    }
+  },
+
   async "an open-ended range runs to the last byte"() {
     const asked = [];
     const env = {
@@ -590,6 +656,21 @@ const tests = {
     assert.equal(status, 204);
     assert.equal(headers.get("access-control-allow-methods"), "GET, HEAD, OPTIONS");
     assert.equal(headers.get("access-control-allow-origin"), "*");
+    // A conditional or resumed fetch from a browser is preflighted, and is
+    // refused unless its headers are allowed here.
+    assert.match(headers.get("access-control-allow-headers"), /if-none-match/);
+    assert.match(headers.get("access-control-allow-headers"), /range/);
+  },
+
+  async "a page on another origin can read the headers it needs"() {
+    const listing = await worker.fetch(
+      new Request(`${ORIGIN}/v1/datasets`),
+      { DB: stubDb({ rows: [DATASET_ROW] }) },
+    );
+    const exposed = listing.headers.get("access-control-expose-headers");
+    for (const name of ["etag", "content-range", "x-syndex-sha256", "retry-after"]) {
+      assert.match(exposed, new RegExp(name));
+    }
   },
 
   async "an unexpected binding failure becomes a 500"() {
@@ -757,6 +838,9 @@ const tests = {
       env,
     );
     assert.equal(response.status, 304);
+    // Or a cross-origin script never sees the 304 at all.
+    assert.equal(response.headers.get("access-control-allow-origin"), "*");
+    assert.equal(response.headers.get("etag"), '"abc"');
   },
 
   async "a release id is digits or it is nothing"() {

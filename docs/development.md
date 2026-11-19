@@ -107,9 +107,16 @@ npx wrangler d1 migrations list synthesizer-database --remote
 npx wrangler d1 migrations apply synthesizer-database --remote
 ```
 
-A deploy can outrun the database. If the Worker writes a column that is not
-there yet, the page it writes from returns a 500 with nothing else to say, so
-apply migrations before deploying the code that needs them.
+A deploy must not outrun the database: a Worker that reads a column which is
+not there yet fails on every request. So apply a migration before merging the
+code that needs it. The deploy workflow enforces the order — it stops, naming
+the file, if `migrations/` holds anything the production database has not
+recorded — which needs the `CLOUDFLARE_API_TOKEN` secret to carry D1 read
+permission as well as Workers deploy. Apply the migration and re-run the
+workflow.
+
+That makes a migration something the running code has to survive: add
+columns and tables, and remove one only after the code that used it has gone.
 
 ## Catalogue plots
 
@@ -220,7 +227,8 @@ wrangler.jsonc           Worker entrypoint, static assets and resource bindings
   digest verification and atomic installation.
 
 R2 is authoritative for bytes and D1 for catalogue metadata. Bytes are written
-and verified first, so D1 can never point at an object that is not there.
+first and confirmed present at the right size, so D1 can never point at an
+object that is not there.
 Publication is a batch operation run from a laptop or an HPC login node, never
 an always-on service, and there are no queues, no separate search
 infrastructure and no scheduled jobs until something measured needs them.

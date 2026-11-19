@@ -71,13 +71,23 @@ async function reviewState(c) {
     // Everyone waiting, and the first page of everyone who holds a role. The
     // queue is the point of this page, so the account list is cut short here
     // and continues on one of its own rather than pushing the queue down.
+    //
+    // Those waiting are counted apart from those shown for reference: one
+    // limit over both meant an eleventh request pushed the twelfth, and every
+    // account after it, off the only page a reviewer looks at.
     c.env.DB.prepare(
-      `SELECT user_id, login, name, role, created_at, access_requested_at,
-              access_request_note
-       FROM users
-       WHERE access_requested_at IS NOT NULL OR role != 'pending'
-       ORDER BY access_requested_at IS NULL, access_requested_at, login
-       LIMIT ?`,
+      `SELECT * FROM (
+         SELECT user_id, login, name, role, created_at, access_requested_at,
+                access_request_note
+         FROM users WHERE access_requested_at IS NOT NULL
+         ORDER BY access_requested_at, login LIMIT 200)
+       UNION ALL
+       SELECT * FROM (
+         SELECT user_id, login, name, role, created_at, access_requested_at,
+                access_request_note
+         FROM users
+         WHERE access_requested_at IS NULL AND role != 'pending'
+         ORDER BY login LIMIT ?)`,
     )
       .bind(ACCOUNTS_SHOWN + 1)
       .all(),
@@ -137,7 +147,10 @@ routes.get("/review/previous", async (c) => {
   const [counts, { results }] = await Promise.all([
     tabCounts(c.env.DB),
     c.env.DB.prepare(
-      `SELECT * FROM submissions WHERE state != 'pending'
+      `SELECT s.*, d.name AS release_of_name
+       FROM submissions s
+       LEFT JOIN datasets d ON d.dataset_id = s.release_of_dataset_id
+       WHERE s.state != 'pending'
        ORDER BY reviewed_at DESC LIMIT 200`,
     ).all(),
   ]);
@@ -417,12 +430,30 @@ routes.post("/datasets/:name/deprecate", requireRole("reviewer"), async (c) => {
 
 routes.post("/review/:id{[0-9]+}", async (c) => {
   const form = await c.req.parseBody();
-  const decision = form.decision === "approved" ? "approved" : "rejected";
+  const decision = String(form.decision ?? "");
 
+  // One of the two, said outright. Anything else used to be read as a
+  // rejection -- including a form that arrived without the field at all --
+  // and a rejection has no way back.
+  if (decision !== "approved" && decision !== "rejected") {
+    return page(
+      c,
+      <Review
+        {...(await reviewState(c))}
+        viewer={c.get("viewer").user}
+        note="Nothing was decided: that was neither an approval nor a rejection."
+      />,
+      { status: 400, cache: "no-store" },
+    );
+  }
+
+  // Approving is approving a file. A submission whose file has not arrived
+  // can still be turned away, but there is nothing in it yet to approve.
   const submission = await c.env.DB.prepare(
     `UPDATE submissions
      SET state = ?, reviewed_at = ?, reviewer_note = ?, reviewed_by = ?
      WHERE submission_id = ? AND state = 'pending'
+       AND (? = 'rejected' OR uploaded_at IS NOT NULL)
      RETURNING name`,
   )
     .bind(
@@ -431,6 +462,7 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
       String(form.reviewer_note ?? "").slice(0, 1000) || null,
       c.get("viewer").user.user_id,
       Number(c.req.param("id")),
+      decision,
     )
     .first();
 
@@ -441,7 +473,7 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
       viewer={c.get("viewer").user}
       note={
         submission === null
-          ? "That submission has already been reviewed."
+          ? "That submission has already been reviewed, or its file has not arrived yet."
           : `${submission.name} marked ${decision}. Publishing it is still a` +
             " deliberate run of syndex-upload."
       }

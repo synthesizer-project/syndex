@@ -419,14 +419,27 @@ routes.post("/submit/new", requireRole("contributor"), async (c) => {
  * accounts the token was both, which meant anybody who came by one could
  * write to somebody else's submission.
  *
+ * Reading and writing are not the same permission. A reviewer may open
+ * anybody's submission, since reading them is the job; nobody but its owner
+ * may put bytes into one, because the file is attributed to whoever submitted
+ * it and a reviewer who could replace it could also approve what they wrote.
+ *
  * @param {import("hono").Context} c Request context.
+ * @param {object} options How it is about to be used.
+ * @param {boolean} options.write Whether the caller is about to change it.
  * @returns {Promise<object | null>} The submission, or null when there is
  *     none or it is not theirs.
  */
-async function ownSubmission(c) {
+async function ownSubmission(c, { write = false } = {}) {
   const { user } = c.get("viewer");
+  // With the name of the dataset it is a release of, which is what lets the
+  // page tell "this release is the file already there" from "this is a
+  // second copy of something published".
   const submission = await c.env.DB.prepare(
-    "SELECT * FROM submissions WHERE upload_token = ?",
+    `SELECT s.*, d.name AS release_of_name
+     FROM submissions s
+     LEFT JOIN datasets d ON d.dataset_id = s.release_of_dataset_id
+     WHERE s.upload_token = ?`,
   )
     .bind(c.req.param("token"))
     .first();
@@ -434,11 +447,10 @@ async function ownSubmission(c) {
   if (submission === null) {
     return null;
   }
-  // A reviewer may open anybody's, since reading them is the job.
-  if (atLeast(user.role, "reviewer") || submission.user_id === user.user_id) {
+  if (submission.user_id === user.user_id) {
     return submission;
   }
-  return null;
+  return !write && atLeast(user.role, "reviewer") ? submission : null;
 }
 
 routes.get("/submit/:token", requireRole("contributor"), async (c) => {
@@ -470,12 +482,17 @@ routes.get("/submit/:token", requireRole("contributor"), async (c) => {
 });
 
 routes.post("/submit/:token/part/:number{[0-9]+}", requireRole("contributor"), async (c) => {
-  const submission = await ownSubmission(c);
+  const submission = await ownSubmission(c, { write: true });
   if (submission === null) {
     return c.json({ error: "No such submission" }, 404);
   }
   if (submission.uploaded_at !== null) {
     return c.json({ error: "This submission already has its file" }, 409);
+  }
+  // What a reviewer decided on is what gets published. A submission rejected
+  // or approved before its file arrived is not waiting for one.
+  if (submission.state !== "pending") {
+    return c.json({ error: "This submission has already been reviewed" }, 409);
   }
   if (!submissionsOpen(c.env)) {
     return c.json({ error: "Submissions are not open" }, 503);
@@ -502,6 +519,10 @@ routes.post("/submit/:token/part/:number{[0-9]+}", requireRole("contributor"), a
   }
 
   const upload = await writePart(c.env, submission, partNumber, c.req.raw.body);
+  if (upload === null) {
+    // Completed or decided between the check above and the write.
+    return c.json({ error: "This submission already has its file" }, 409);
+  }
   return c.json({ part: partNumber, upload }, 200, { "cache-control": "no-store" });
 });
 
@@ -530,13 +551,15 @@ routes.get("/submit/:token/check", requireRole("contributor"), async (c) => {
     <CheckReport
       submission={submission}
       duplicate={await duplicateOf(c.env, submission)}
-      forContributor
+      // A reviewer's page polls this too, and should go on being told what a
+      // reviewer can do about the result, not what its submitter can.
+      forContributor={submission.user_id === c.get("viewer").user.user_id}
     />,
   );
 });
 
 routes.post("/submit/:token/complete", requireRole("contributor"), async (c) => {
-  const submission = await ownSubmission(c);
+  const submission = await ownSubmission(c, { write: true });
   const counts = await tabCounts(c.env.DB);
 
   if (submission === null) {
@@ -544,6 +567,24 @@ routes.post("/submit/:token/complete", requireRole("contributor"), async (c) => 
       c,
       <NotFound counts={counts} message="That submission does not exist." />,
       { status: 404, cache: "no-store" },
+    );
+  }
+
+  // Completing is done once. Without this a second completion assembled
+  // whatever parts had been sent since, over the object a reviewer had
+  // already read -- and left the submission marked as approved.
+  const done = `${BASE}/submit/${submission.upload_token}`;
+  if (submission.uploaded_at !== null) {
+    return c.redirect(done, 303);
+  }
+  if (submission.state !== "pending") {
+    return page(
+      c,
+      <NotFound
+        counts={counts}
+        message="That submission has already been reviewed, so its file can no longer be changed."
+      />,
+      { status: 409, cache: "no-store" },
     );
   }
 
@@ -580,7 +621,7 @@ routes.post("/submit/:token/complete", requireRole("contributor"), async (c) => 
     `UPDATE submissions
      SET uploaded_at = ?, uploaded_size_bytes = ?, r2_key = ?, upload_id = NULL,
          validation_state = ?
-     WHERE upload_token = ?
+     WHERE upload_token = ? AND uploaded_at IS NULL AND state = 'pending'
      RETURNING *`,
   )
     .bind(
@@ -591,6 +632,12 @@ routes.post("/submit/:token/complete", requireRole("contributor"), async (c) => 
       submission.upload_token,
     )
     .first();
+
+  // Another request completed it, or a reviewer decided it, while this one
+  // was assembling. Whichever it was has already said what needed saying.
+  if (complete === null) {
+    return c.redirect(done, 303);
+  }
 
   const origin = new URL(c.req.url).origin;
   // Both advisory, and neither awaited: a contributor's upload does not

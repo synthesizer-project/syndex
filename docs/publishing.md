@@ -13,13 +13,21 @@ For every file:
 4. Extracts axes, spectra names, line IDs, wavelength coverage, model and
    photoionisation metadata, without reading any bulk array.
 5. Hashes the file and builds the whole catalogue record in memory.
-6. Uploads to a content-addressed R2 path and verifies size and digest.
+6. Uploads to a content-addressed R2 path and confirms the object is there at
+   the right size, labelled with the right digest.
 7. Registers every row in one transactional D1 batch.
 8. Optionally verifies through the public API.
 
 R2 and D1 cannot share a transaction, so bytes go first: D1 can then never
 point at a missing object, and a failed registration leaves only an
 unreferenced object that rerunning reuses.
+
+Step 6 does not read the bytes back. The digest it compares is the one this
+tool attached to the object as metadata when uploading, so the check catches
+a missing object, a truncated one, and a different file already sitting at
+that path — not corruption in transit that left the size unchanged. The
+end-to-end check is the one `synthesizer-download` makes, hashing what it
+fetched against the digest in the catalogue.
 
 Previews are separate, because they read the whole file back out of R2:
 
@@ -164,8 +172,9 @@ SYNTHESIZER_DATA_API_URL=https://data.synthesizer-project.org \
     uv run syndex-upload PATH --metadata metadata.json
 ```
 
-It only affects `syndex-upload`; point `syndex-plots` and `syndex-previews`
-elsewhere with `--api-url` and `--account-id`.
+It only affects `syndex-upload`. Point `syndex-plots` elsewhere with
+`--api-url`, and `syndex-previews` with `--account-id`, `--database-id` and
+`--bucket`.
 
 ## Releases
 
@@ -173,6 +182,13 @@ Publishing a regenerated file under the same `name` adds a release rather than
 replacing anything: the old release keeps its bytes and stays resolvable.
 `set_current` decides what the dataset points at — leave it false when
 publishing a superseded file after the fact.
+
+A dataset that already exists keeps what a later publication does not state.
+`display_name`, `description`, `licence`, `metadata`, `is_test`, `is_ci` and
+`is_recommended` change only when the metadata file or the command line gives
+them, so a new release can be published with nothing but its path. To clear
+one, state it: `"description": null`. The defaults in the table above apply to
+a dataset's first publication only.
 
 An existing R2 object is reused only when size and digest match. Database rows
 update idempotently. Reusing one file release under a different dataset fails

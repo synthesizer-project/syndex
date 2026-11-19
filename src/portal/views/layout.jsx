@@ -119,11 +119,26 @@ const Background = () => (
  * menu on a narrow one, where a header holding four tabs and four buttons is
  * mostly header.
  *
+ * The links carry the filters in force, so they go stale the moment htmx
+ * swaps the panel for a different search. Each placement is therefore wrapped
+ * in an element with an id, laid out as though it were not there, and the
+ * panel's response brings fresh copies marked `oob` for htmx to swap in.
+ *
  * @param {object} props Component props.
  * @returns {unknown} The rendered links.
  */
-const TabLinks = ({ counts, filters, active, stacked = false }) => (
-  <>
+export const TabLinks = ({
+  counts,
+  filters,
+  active,
+  stacked = false,
+  oob = false,
+}) => (
+  <span
+    id={stacked ? "tabs-menu" : "tabs-bar"}
+    class="contents"
+    hx-swap-oob={oob ? "true" : undefined}
+  >
     {TABS.map((tab) => (
       <a
         href={
@@ -148,7 +163,7 @@ const TabLinks = ({ counts, filters, active, stacked = false }) => (
         <span class="text-xs text-muted tabular-nums">{counts[tab.id]}</span>
       </a>
     ))}
-  </>
+  </span>
 );
 
 /**

@@ -116,10 +116,14 @@ export const RANGE_MODES = {
  */
 export function parseFilters(params) {
   // A repeated parameter becomes a bound placeholder or, for axes, an EXISTS
-  // subquery. Nothing legitimate needs more than this: the catalogue has 17
-  // distinct axes and 24 models, so a longer list is a hand-written URL, and
-  // it would otherwise walk into SQLite's variable limit as a 500.
-  const LIST_LIMIT = 32;
+  // subquery binding up to three. D1 allows a statement 100 of them, and the
+  // worst a URL can now ask for is 98: six for the search text, two kinds,
+  // twenty models, twenty emission types, one type, sixteen axes at three
+  // each, and one for an axis sort. Nothing legitimate comes near it -- the
+  // catalogue has 17 distinct axes and 24 models -- so a longer list is a
+  // hand-written URL, and it is cut short rather than answered with a 500.
+  const LIST_LIMIT = 20;
+  const AXIS_LIMIT = 16;
   const list = (key) =>
     params
       .getAll(key)
@@ -143,6 +147,7 @@ export function parseFilters(params) {
     "wavelengths",
     "axes",
     "size",
+    "format",
     "type",
     "published",
     "instrument_type",
@@ -153,7 +158,7 @@ export function parseFilters(params) {
     "depth",
   ]);
   const axes = [];
-  for (const name of new Set(list("axis"))) {
+  for (const name of [...new Set(list("axis"))].slice(0, AXIS_LIMIT)) {
     axes.push({
       name,
       min: number(params.get(`min.${name}`)),
@@ -181,7 +186,9 @@ export function parseFilters(params) {
     more: list("more"),
     open: list("open"),
     kind: grid
-      ? list("kind").filter((v) => v === "sps" || v === "agn")
+      ? // Deduplicated, or `kind=sps` twenty times is twenty placeholders
+        // where the budget above counts two.
+        [...new Set(list("kind"))].filter((v) => v === "sps" || v === "agn")
       : [],
     model: grid ? list("model") : [],
     emission: grid || dust ? list("emission") : [],
@@ -307,7 +314,25 @@ function number(value) {
  * @returns {string} Pattern for use with `LIKE ? ESCAPE '\'`.
  */
 function likePattern(text) {
-  return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  const escaped = (part) => part.replace(/[\\%_]/g, (char) => `\\${char}`);
+  // D1 refuses a LIKE pattern over 50 bytes, wildcards and escapes included,
+  // and refuses it as an error rather than as no matches. Text too long for
+  // that is searched for by as much of its start as fits: more results than
+  // were asked for, which is a better answer than a failed page.
+  // Built forwards and stopped at the first character that does not fit, so
+  // a very long search costs what fits rather than what was typed.
+  const encoder = new TextEncoder();
+  let body = "";
+  let bytes = 0;
+  for (const character of text) {
+    const next = escaped(character);
+    bytes += encoder.encode(next).length;
+    if (bytes > 48) {
+      break;
+    }
+    body += next;
+  }
+  return `%${body}%`;
 }
 
 /**
@@ -503,10 +528,14 @@ const COLUMNS = `d.name, d.display_name, d.description, d.data_type,
 /** Safe ORDER BY expression for one user-visible column. */
 function ordering(filters) {
   if (filters.sort.startsWith("axis.")) {
+    const name = filters.sort.slice(5);
+    // Scaled as the filter and the column scale it, or grids written in
+    // kilogrammes sort thirty orders of magnitude from their neighbours.
+    const scale = AXIS_UNITS[name]?.scale ?? "1";
     return {
-      sql: `(SELECT a.minimum FROM grid_axes a
+      sql: `(SELECT a.minimum * ${scale} FROM grid_axes a
              WHERE a.release_id = r.release_id AND a.name = ?)`,
-      params: [filters.sort.slice(5)],
+      params: [name],
     };
   }
   return {
@@ -711,16 +740,19 @@ export async function search(db, tab, filters) {
   }
 
   // Flag facets are counted one statement at a time: they are independent
-  // questions about the same row, not values of one column.
+  // questions about the same row, not values of one column. That is also why
+  // they are counted against every filter, their own group included: ticking
+  // a second flag narrows what the first left, where a second model widens
+  // it, so the number beside "lines" with "spectra" ticked has to be the
+  // grids carrying both.
   const flags = FLAG_FACETS[tab.id];
-  const unflagged = where(clauses, flags.group);
   for (const [, condition] of flags.values) {
     statements.push(
       db
         .prepare(
-          `SELECT COUNT(*) AS n ${FROM} WHERE ${unflagged.sql} AND ${condition}`,
+          `SELECT COUNT(*) AS n ${FROM} WHERE ${all.sql} AND ${condition}`,
         )
-        .bind(...unflagged.params),
+        .bind(...all.params),
     );
   }
 
@@ -863,7 +895,7 @@ export async function dataset(db, name) {
       .prepare(
         `SELECT r.release_id, r.published_at, r.known_bug,
                 r.known_bug_description, r.deprecated_at, r.synthesizer_min_version,
-                r.synthesizer_max_version, f.size_bytes, f.sha256
+                r.synthesizer_max_version, f.filename, f.size_bytes, f.sha256
          FROM releases r JOIN files f ON f.file_id = r.file_id
          WHERE r.dataset_id = ?
          ORDER BY r.published_at DESC, r.release_id DESC`,

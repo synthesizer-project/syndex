@@ -70,8 +70,12 @@ def _bibtex_field(entry: str, field: str) -> str | None:
     Returns:
         str | None: The field value with BibTeX braces stripped, or None.
     """
+    # A value runs to the next field or to the brace closing the entry, not to
+    # the end of its line: ADS wraps long titles and author lists.
     match = re.search(
-        rf"^\s*{field}\s*=\s*(.+?),?\s*$", entry, re.MULTILINE | re.IGNORECASE
+        rf"^\s*{field}\s*=\s*(.+?),?\s*(?=^\s*[\w-]+\s*=|^\s*\}}\s*\Z|\Z)",
+        entry,
+        re.MULTILINE | re.IGNORECASE | re.DOTALL,
     )
     if match is None:
         return None

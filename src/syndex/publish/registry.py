@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from syndex.errors import UploadError
+from syndex.previews.store import d1_query
 from syndex.publish.citations import USER_AGENT
 from syndex.publish.serialise import json_dump
 from syndex.publish.storage import upload_and_verify
@@ -44,6 +45,14 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
     # refreshed citation, the same file registered again after a failure half
     # way through, all have to land on the row that is already there rather
     # than fail on a constraint or leave a second copy.
+    # A dataset that already exists keeps whatever this publication did not
+    # state. Its type is always written, because that comes from the file
+    # when nobody says; the rest only when the metadata or the command line
+    # gave it, so a release published with nothing but a path changes nothing
+    # about how the dataset is described.
+    kept = ["data_type"] + [
+        "metadata_json" if field == "metadata" else field for field in dataset["stated"]
+    ]
     statements = [
         {
             "sql": "INSERT INTO files (filename, r2_path, format, size_bytes, sha256) VALUES (?, ?, ?, ?, ?) ON CONFLICT(sha256) DO UPDATE SET filename = excluded.filename, r2_path = excluded.r2_path, format = excluded.format, size_bytes = excluded.size_bytes",
@@ -56,7 +65,8 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
             ],
         },
         {
-            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_ci, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, data_type = excluded.data_type, is_test = excluded.is_test, is_ci = excluded.is_ci, is_recommended = excluded.is_recommended, licence = excluded.licence, citations_json = excluded.citations_json, metadata_json = excluded.metadata_json",
+            "sql": "INSERT INTO datasets (name, display_name, description, data_type, is_test, is_ci, is_recommended, licence, citations_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+            + ", ".join(f"{column} = excluded.{column}" for column in kept),
             "params": [
                 dataset["name"],
                 dataset["display_name"],
@@ -196,6 +206,21 @@ def d1_statements(plan: dict[str, Any]) -> list[dict[str, Any]]:
     # Each paper is stored once and shared. ON CONFLICT on the bibcode means a
     # release paper cited by every grid resolves to the single existing row and
     # picks up any corrected metadata from ADS.
+    #
+    # The list given replaces the one the file had, so a paper dropped from it
+    # stops being cited. An empty list is taken as "nothing said" and leaves
+    # the links alone: republishing without restating the papers is common,
+    # and silently uncrediting them would be the worse mistake.
+    if plan.get("citations"):
+        statements.append(
+            {
+                "sql": (
+                    "DELETE FROM file_citations WHERE file_id = "
+                    "(SELECT file_id FROM files WHERE sha256 = ?)"
+                ),
+                "params": [plan["file"]["sha256"]],
+            }
+        )
     for position, citation in enumerate(plan.get("citations", [])):
         statements.append(
             {
@@ -310,6 +335,43 @@ def verify_api(api_url: str, dataset_name: str) -> None:
         raise UploadError(f"API verification failed: {exc}") from exc
 
 
+def _refuse_ambiguous_prefix(
+    account_id: str, database_id: str, token: str, plan: dict[str, Any]
+) -> None:
+    """Stop a release whose object would land under the wrong prefix.
+
+    A release that does not state `is_test` keeps the dataset's existing flag,
+    but the object key was chosen from the default before the dataset was
+    known. Where the two disagree, the bytes of a test dataset would sit under
+    the science prefix or the reverse, so the run is asked to say which.
+
+    Args:
+        account_id: Cloudflare account identifier.
+        database_id: D1 database identifier.
+        token: Cloudflare API token with D1 access.
+        plan: Validated publication plan.
+
+    Raises:
+        UploadError: If the dataset exists with the other classification.
+    """
+    dataset = plan["dataset"]
+    if "is_test" in dataset.get("stated", []):
+        return
+    rows = d1_query(
+        account_id,
+        database_id,
+        token,
+        "SELECT is_test FROM datasets WHERE name = ?",
+        [dataset["name"]],
+    )
+    if rows and bool(rows[0]["is_test"]) != dataset["is_test"]:
+        raise UploadError(
+            f"{dataset['name']} is already published with is_test="
+            f"{bool(rows[0]['is_test'])}; state is_test for this release so "
+            "its file goes under the matching prefix"
+        )
+
+
 def publish_plan(
     plan: dict[str, Any],
     client,
@@ -338,6 +400,7 @@ def publish_plan(
     # is invisible; a row pointing at an object that is not there is a download
     # that fails for everybody, and there is no way to tell from the catalogue
     # which of the two happened.
+    _refuse_ambiguous_prefix(account_id, database_id, token, plan)
     upload_and_verify(client, bucket, plan)
     register_d1(account_id, database_id, token, plan)
     if api_url:

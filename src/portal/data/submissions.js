@@ -133,8 +133,9 @@ function uploadKey(submission) {
  *
  * @param {object} env Worker bindings and secrets.
  * @param {object} submission The submission row.
- * @returns {Promise<{upload: R2MultipartUpload, uploadId: string}>} The
- *     upload to write parts into, and its id.
+ * @returns {Promise<{upload: R2MultipartUpload, uploadId: string} | null>}
+ *     The upload to write parts into, and its id; or null when the submission
+ *     stopped accepting a file while this was being asked.
  */
 async function openUpload(env, submission) {
   const key = uploadKey(submission);
@@ -156,6 +157,7 @@ async function openUpload(env, submission) {
   const claimed = await env.DB.prepare(
     `UPDATE submissions SET upload_id = ?
      WHERE submission_id = ? AND upload_id IS NULL
+       AND uploaded_at IS NULL AND state = 'pending'
      RETURNING upload_id`,
   )
     .bind(upload.uploadId, submission.submission_id)
@@ -170,6 +172,12 @@ async function openUpload(env, submission) {
       .bind(submission.submission_id)
       .first();
     await upload.abort().catch(() => {});
+    // Nobody got there first: the submission was completed or decided after
+    // the row this request holds was read. Starting a transfer now would
+    // leave parts waiting behind a file a reviewer has already seen.
+    if (!winner?.upload_id) {
+      return null;
+    }
     return {
       upload: env.SUBMISSIONS.resumeMultipartUpload(key, winner.upload_id),
       uploadId: winner.upload_id,
@@ -194,7 +202,8 @@ async function openUpload(env, submission) {
  * @param {object} submission The submission row.
  * @param {number} partNumber Which part this is, counting from one.
  * @param {ReadableStream} body The part's bytes.
- * @returns {Promise<string>} The id of the transfer the part joined.
+ * @returns {Promise<string | null>} The id of the transfer the part joined,
+ *     or null when the submission no longer accepts a file.
  */
 export async function writePart(env, submission, partNumber, body) {
   // Part one is the beginning of a transfer, so anything already half sent is
@@ -211,7 +220,11 @@ export async function writePart(env, submission, partNumber, body) {
     submission = { ...submission, upload_id: null };
   }
 
-  const { upload, uploadId } = await openUpload(env, submission);
+  const opened = await openUpload(env, submission);
+  if (opened === null) {
+    return null;
+  }
+  const { upload, uploadId } = opened;
   const part = await upload.uploadPart(partNumber, body);
 
   await env.DB.prepare(
@@ -279,7 +292,13 @@ export async function finishUpload(env, submission) {
     return null;
   }
 
-  const { upload } = await openUpload(env, submission);
+  // Null when the submission was completed or decided while this was being
+  // asked, in which case there is nothing here to assemble.
+  const opened = await openUpload(env, submission);
+  if (opened === null) {
+    return null;
+  }
+  const { upload } = opened;
   try {
     await upload.complete(
       results.map((part) => ({

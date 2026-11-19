@@ -188,7 +188,7 @@ function resultsFor(sql, rows) {
   if (sql.includes("UPDATE submissions")) {
     return rows.reviewed ?? [{ name: "example-new-grid" }];
   }
-  if (sql.includes("WHERE upload_token")) {
+  if (sql.includes("upload_token = ?")) {
     return rows.submission === undefined ? [] : [rows.submission];
   }
   if (sql.includes("FROM submissions")) {
@@ -459,6 +459,19 @@ const tests = {
     assert.match(await onApi.text(), /No route for/);
   },
 
+  async "the portal is not served a second time on the API's hostname"() {
+    const moved = await worker.fetch(
+      new Request("https://data.synthesizer-project.org/syndex/grids?q=bpass"),
+      {},
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+    assert.equal(moved.status, 301);
+    assert.equal(
+      moved.headers.get("location"),
+      "https://synthesizer-project.org/syndex/grids?q=bpass",
+    );
+  },
+
   async "a filter URL survives being parsed and rebuilt"() {
     const query =
       "?q=bpass&type=grid&model=BPASS&model=FSPS&emission=photoionised&content=spectra" +
@@ -500,6 +513,32 @@ const tests = {
     assert.match(rows.sql, /EXISTS \(SELECT 1 FROM grid_axes a/);
     // The axis name is the only thing bound beyond the tab's data type.
     assert.deepEqual(rows.params, ["grid", "spins"]);
+  },
+
+  async "no URL can ask D1 for more than it will take"() {
+    // 50 bytes of LIKE pattern and 100 bound parameters, both of which D1
+    // answers with an error rather than with nothing.
+    const params = new URLSearchParams("type=grid&sort=axis.ages&kind=sps&kind=agn");
+    params.set("q", "é_%".repeat(40));
+    for (let n = 0; n < 60; n++) {
+      // Repeats of a value that is allowed, which is the only way this one
+      // list could grow.
+      params.append("kind", "sps");
+      params.append("model", `m${n}`);
+      params.append("emission", `e${n}`);
+      params.append("axis", `a${n}`);
+      params.set(`min.a${n}`, "1");
+      params.set(`max.a${n}`, "2");
+    }
+    const issued = [];
+    await search(stubDb({ issued }), grids, parseFilters(params));
+
+    for (const record of issued) {
+      assert.ok(record.params.length <= 100, `${record.params.length} bound`);
+    }
+    const [pattern] = statement(issued, "ORDER BY").params;
+    assert.ok(new TextEncoder().encode(pattern).length <= 50);
+    assert.match(pattern, /^%(é\\_\\%)+%$/, "cut between characters, not inside one");
   },
 
   async "the range toggle picks the documented comparison"() {
@@ -864,6 +903,31 @@ const tests = {
     assert.match(body, /title="Noise: no"/);
   },
 
+  async "sorting and flag counts ask what the page then shows"() {
+    const issued = [];
+    await call(
+      "/syndex/search?type=grid&content=spectra&sort=axis.masses",
+      { DB: stubDb({ issued }) },
+    );
+
+    // Ticking "lines" as well would narrow to grids with both, so that is
+    // what its count has to be of.
+    const lines = issued.find(
+      (record) =>
+        record.sql.includes("COUNT(*) AS n") &&
+        record.sql.endsWith("AND g.has_lines = 1"),
+    );
+    assert.match(lines.sql, /g\.has_spectra = 1[^]*AND g\.has_lines = 1$/);
+
+    // Masses are stored in two units; the sort scales them as the filter does.
+    const rows = statement(issued, "ORDER BY (SELECT a.minimum");
+    assert.match(rows.sql, /a\.minimum \* CASE WHEN a\.units = 'kg'/);
+
+    const byFormat = [];
+    await call("/syndex/search?sort=format", { DB: stubDb({ issued: byFormat }) });
+    statement(byFormat, "ORDER BY f.format ASC");
+  },
+
   async "column headings toggle persistent sorting"() {
     const issued = [];
     const { body } = await call(
@@ -915,6 +979,29 @@ const tests = {
     assert.equal(headers.get("cache-control"), "no-store");
     // A fragment carries no header, so it does not vary by who asked.
     assert.match(headers.get("vary"), /^HX-Request\b/);
+  },
+
+  async "a swapped panel brings the tab links that match it"() {
+    // The tabs sit outside the panel and carry the search text, so without
+    // these they would go on linking to the search the page was loaded with.
+    const env = { DB: stubDb() };
+    const { body } = await call("/syndex/search?type=grid&q=bpass", env, {
+      headers: { "HX-Request": "true" },
+    });
+    for (const id of ["tabs-bar", "tabs-menu"]) {
+      assert.match(
+        body,
+        new RegExp(
+          `<span id="${id}" class="contents" hx-swap-oob="true">.*?` +
+            `href="/syndex/search\\?q=bpass&amp;type=dust_grid"`,
+        ),
+      );
+    }
+
+    // And the page they are swapped into has somewhere to put them.
+    const whole = await call("/syndex/search?type=grid", env);
+    assert.match(whole.body, /<span id="tabs-bar" class="contents">/);
+    assert.match(whole.body, /<span id="tabs-menu" class="contents">/);
   },
 
   async "dataset links preserve the filtered result URL"() {
@@ -1110,6 +1197,7 @@ const tests = {
               known_bug_description: "Superseded metadata.",
               synthesizer_min_version: "0.9.0",
               synthesizer_max_version: "0.9.9",
+              filename: "bpass-old-name.hdf5",
               size_bytes: 200000000,
               sha256: "abcd",
             },
@@ -1135,6 +1223,11 @@ const tests = {
       /href="\/syndex\/search\?model=BPASS&amp;content=lines&amp;type=grid"/,
     );
     assert.match(body, /aria-label="Direct download bpass\.hdf5"/);
+    // An earlier release keeps the filename it was published under.
+    assert.match(
+      body,
+      /aria-label="Direct download release 1"[^>]*data-download-filename="bpass-old-name\.hdf5"/,
+    );
     assert.match(body, /<span role="tooltip"[^>]*>Direct download bpass\.hdf5<\/span>/);
     assert.match(
       body,
@@ -1292,6 +1385,40 @@ const tests = {
     assert.equal(status, 404);
     assert.match(body, /no dataset named nope/);
     assert.match(body, /<html/);
+  },
+
+  async "a dataset page survives a column that is not what it should be"() {
+    // Each of these is a publication bug the page used to answer with a 500:
+    // text that is not JSON, a stored null, and a list where an object goes.
+    const env = {
+      DB: stubDb({
+        rows: {
+          datasets: [
+            {
+              ...GRID_ROW,
+              dataset_id: 1,
+              metadata_json: "not json",
+              provenance_json: "null",
+              current_release_id: 2,
+              filename: "bpass.hdf5",
+              sha256: "e47f",
+            },
+          ],
+          grid: [
+            {
+              model_parameters_json: "[1, 2]",
+              photoionisation_parameters_json: '"text"',
+              available_spectra_json: '{"incident": true}',
+              available_lines_json: "oops",
+            },
+          ],
+        },
+      }),
+    };
+
+    const { status, body } = await call(`/syndex/datasets/${GRID_ROW.name}`, env);
+    assert.equal(status, 200);
+    assert.match(body, /Direct download bpass\.hdf5/);
   },
 
   async "a dataset page opens whatever the name contains"() {
@@ -1562,6 +1689,30 @@ const tests = {
     assert.match(body, /the type is yours to choose/);
   },
 
+  async "a submission rejected before its file arrived says so and offers no upload"() {
+    const { body } = await call(
+      `/syndex/submit/${SUBMISSION.upload_token}`,
+      contributorEnv({
+        rows: {
+          submission: {
+            ...SUBMISSION,
+            state: "rejected",
+            reviewed_at: "2026-09-15T09:00:00Z",
+            reviewer_note: "Already in the catalogue under another name.",
+          },
+        },
+      }),
+      SIGNED_IN,
+    );
+
+    assert.match(body, /Not accepted/);
+    assert.match(body, /Already in the catalogue under another name/);
+    assert.match(body, /submit\/new\?like=/);
+    // The part route would answer 409, so there is nothing to press.
+    assert.doesNotMatch(body, /id="send"/);
+    assert.doesNotMatch(body, /syndex-submit/);
+  },
+
   async "a contributor is told what the checker found and what was decided"() {
     // Being told a submission was rejected and not why is the one thing worse
     // than not being told at all.
@@ -1816,6 +1967,50 @@ const tests = {
       ).status,
       200,
     );
+  },
+
+  async "a file cannot be changed once it has arrived or been decided"() {
+    const base = `/syndex/submit/${SUBMISSION.upload_token}`;
+    const part = { method: "POST", body: "x", headers: { cookie: SESSION_COOKIE } };
+    const env = (submission, extra = {}) =>
+      contributorEnv({ rows: { submission, ...extra } });
+
+    // Already uploaded: completing again changes nothing and assembles nothing.
+    const uploaded = env({ ...SUBMISSION, uploaded_at: "2026-09-08T00:00:00Z" });
+    const again = await call(`${base}/complete`, uploaded, signedInPost({}));
+    assert.equal(again.status, 303);
+    assert.equal(uploaded.uploaded.completed, null);
+
+    // Decided before any file arrived: neither a part nor a completion.
+    for (const state of ["approved", "rejected"]) {
+      const decided = env({ ...SUBMISSION, state });
+      assert.equal((await call(`${base}/part/1`, decided, part)).status, 409);
+      assert.equal(
+        (await call(`${base}/complete`, decided, signedInPost({}))).status,
+        409,
+      );
+      assert.equal(decided.uploaded.parts.length, 0);
+      assert.equal(decided.uploaded.completed, null);
+    }
+
+    // Completed while this part was on its way: the claim finds nothing to
+    // claim, and the part is refused rather than starting a second transfer.
+    const raced = env(SUBMISSION, { reviewed: [] });
+    assert.equal((await call(`${base}/part/1`, raced, part)).status, 409);
+    assert.equal(raced.uploaded.parts.length, 0);
+    assert.equal(raced.uploaded.aborted, true);
+
+    // A reviewer reads anybody's submission and writes to nobody's.
+    const reviewer = env(
+      { ...SUBMISSION, user_id: 99 },
+      { viewer: { ...USER, role: "reviewer" } },
+    );
+    assert.equal((await call(`${base}/part/1`, reviewer, part)).status, 404);
+    assert.equal(
+      (await call(`${base}/complete`, reviewer, signedInPost({}))).status,
+      404,
+    );
+    assert.equal(reviewer.uploaded.parts.length, 0);
   },
 
   async "completion assembles the parts and believes the bucket"() {
@@ -2235,6 +2430,45 @@ const tests = {
     assert.match(body, /b{64}/);
   },
 
+  async "a duplicate is described to whoever is looking, as what it is"() {
+    const twin = "bpass-2p2p1-bin-chabrier03-0p1-300p0";
+    const check = (viewer, submission) =>
+      call(
+        `/syndex/submit/${SUBMISSION.upload_token}/check`,
+        submissionEnv({
+          rows: {
+            viewer,
+            submission: {
+              ...SUBMISSION,
+              uploaded_at: "2026-09-14T10:00:00Z",
+              sha256: "c".repeat(64),
+              ...submission,
+            },
+            publishedTwin: [{ name: twin }],
+          },
+        }),
+        SIGNED_IN,
+      );
+
+    // Its submitter is told what to do instead.
+    const own = await check(USER, { user_id: USER.user_id });
+    assert.match(own.body, /submit it as a new release/);
+
+    // A reviewer's page polls the same address and is not the submitter.
+    const reviewing = await check(
+      { ...USER, user_id: USER.user_id + 1, role: "reviewer" },
+      { user_id: USER.user_id },
+    );
+    assert.match(reviewing.body, /There is nothing here to publish/);
+
+    // And a release of that very dataset is not a second copy of it.
+    const release = await check(USER, {
+      user_id: USER.user_id,
+      release_of_name: twin,
+    });
+    assert.match(release.body, /already there, unchanged/);
+  },
+
   async "bytes already in the catalogue are said so before anything else"() {
     const { body } = await call(
       "/syndex/review/1",
@@ -2375,6 +2609,30 @@ const tests = {
 
     assert.equal(status, 200);
     assert.match(body, /marked approved/);
+  },
+
+  async "a decision is one of two things, and approval needs a file"() {
+    const reviewer = { ...USER, role: "reviewer" };
+    const issued = [];
+    const env = () => ({ DB: stubDb({ rows: { viewer: reviewer }, issued }) });
+
+    // A form without the field, or with nonsense in it, decides nothing.
+    for (const fields of [{}, { decision: "approve" }, { decision: "" }]) {
+      issued.length = 0;
+      const { status, body } = await call("/syndex/review/7", env(), signedInPost(fields));
+      assert.equal(status, 400);
+      assert.match(body, /Nothing was decided/);
+      assert.equal(issued.filter((one) => one.sql.includes("UPDATE submissions")).length, 0);
+    }
+
+    // The decision is bound twice: once to record, once to ask whether a
+    // missing file matters.
+    issued.length = 0;
+    await call("/syndex/review/7", env(), signedInPost({ decision: "rejected" }));
+    const update = statement(issued, "UPDATE submissions");
+    assert.match(update.sql, /\? = 'rejected' OR uploaded_at IS NOT NULL/);
+    assert.equal(update.params[0], "rejected");
+    assert.equal(update.params.at(-1), "rejected");
   },
 
   async "the tabs are in the bar on a wide screen and the menu on a narrow one"() {
@@ -2535,7 +2793,10 @@ const tests = {
     const issued = [];
     const { status, body } = await call("/syndex/access", {
       DB: stubDb({
-        rows: { viewer: { ...USER, role: "pending" }, roleChange: { user_id: 3 } },
+        rows: {
+          viewer: { ...USER, role: "pending" },
+          roleChange: { user_id: 3, first: 1 },
+        },
         issued,
       }),
     }, signedInPost({ note: "A BPASS grid at higher resolution." }));
@@ -2546,10 +2807,53 @@ const tests = {
     // does not rejoin the queue by asking again.
     const update = statement(issued, "SET access_requested_at");
     assert.match(update.sql, /role = 'pending'/);
-    assert.deepEqual(update.params.slice(1), [
+    assert.deepEqual(update.params.slice(1, 3), [
       "A BPASS grid at higher resolution.",
       3,
     ]);
+    // The first request keeps its place, and the statement itself says
+    // whether this was the first: the time bound is the time compared.
+    assert.match(update.sql, /COALESCE\(access_requested_at, \?\)/);
+    assert.equal(update.params[0], update.params[3]);
+  },
+
+  async "asking for access again does not open another issue"() {
+    const sent = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push(JSON.parse(init.body));
+      return Response.json({}, { status: 201 });
+    };
+    const ask = async (viewer, first) => {
+      await call("/syndex/access", {
+        DB: stubDb({ rows: { viewer, roleChange: { user_id: 3, first } } }),
+        GITHUB_ISSUE_REPO: "o/r",
+        GITHUB_ISSUE_TOKEN: "t",
+      }, signedInPost({ note: "Grids, and cc @somebody-else." }));
+      // The issue is opened after the response, so give it a turn to happen.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    };
+    try {
+      await ask({ ...USER, role: "pending" }, 1);
+      assert.equal(sent.length, 1);
+      // The note is quoted, and names nobody GitHub would notify.
+      assert.doesNotMatch(sent[0].body, /@somebody-else/);
+      assert.match(sent[0].body, /somebody-else/);
+
+      // Already in the queue: the note is refreshed and nothing is opened.
+      await ask(
+        { ...USER, role: "pending", access_requested_at: "2026-09-13T00:00:00Z" },
+        0,
+      );
+      assert.equal(sent.length, 1);
+
+      // Two posts at once both load an account that has not asked. Only the
+      // one the database says was first opens an issue.
+      await ask({ ...USER, role: "pending" }, 0);
+      assert.equal(sent.length, 1);
+    } finally {
+      globalThis.fetch = real;
+    }
   },
 
   async "an empty access request is refused"() {
@@ -2617,6 +2921,92 @@ const tests = {
       schemeRelative.headers.get("set-cookie"),
       /syndex_oauth=[0-9a-f]{64}%3A%2Fsyndex;/,
     );
+  },
+
+  async "a command-line sign-in only takes a token issued to this portal"() {
+    // Any GitHub token says who its owner is. Only one issued to this app is
+    // evidence that its owner meant to sign in here.
+    const env = (issued) => ({
+      DB: stubDb({ rows: { datasets: [USER] }, issued }),
+      GITHUB_CLIENT_ID: "id",
+      GITHUB_CLIENT_SECRET: "secret",
+    });
+    const post = (token) => ({
+      method: "POST",
+      body: JSON.stringify({ github_token: token }),
+      headers: { "content-type": "application/json" },
+    });
+    const asked = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      asked.push({ url: String(url), init });
+      if (String(url).includes("/applications/")) {
+        const ours = JSON.parse(init.body).access_token === "ours";
+        return Response.json({}, { status: ours ? 200 : 404 });
+      }
+      // GitHub would say who either token belongs to. That is the problem.
+      return Response.json({ id: 4242, login: "contributor-one", email: "a@b.c" });
+    };
+    try {
+      const issued = [];
+      const foreign = await call("/syndex/auth/cli", env(issued), post("someone-elses"));
+      assert.equal(foreign.status, 401);
+      assert.equal(
+        issued.filter((one) => /INSERT INTO (users|sessions)/.test(one.sql)).length,
+        0,
+        "nothing is recorded for a token from another app",
+      );
+      // Refused on the check alone, without asking who it belongs to.
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].url, "https://api.github.com/applications/id/token");
+      assert.equal(asked[0].init.headers.authorization, `Basic ${btoa("id:secret")}`);
+
+      const ours = await call("/syndex/auth/cli", env([]), post("ours"));
+      assert.equal(ours.status, 200);
+      assert.match(JSON.parse(ours.body).token, /^[0-9a-f]{64}$/);
+    } finally {
+      globalThis.fetch = real;
+    }
+  },
+
+  async "signing out everywhere ends every session the account holds"() {
+    const issued = [];
+    const { status, headers } = await call(
+      "/syndex/logout/everywhere",
+      { DB: stubDb({ rows: { viewer: USER }, issued }) },
+      signedInPost({}),
+    );
+    assert.equal(status, 303);
+    assert.deepEqual(
+      statement(issued, "DELETE FROM sessions WHERE user_id").params,
+      [USER.user_id],
+    );
+    assert.match(headers.get("set-cookie"), /syndex_session=;/);
+
+    // Nobody signed in: nothing to end, and nobody else's sessions to guess at.
+    issued.length = 0;
+    await call("/syndex/logout/everywhere", { DB: stubDb({ issued }) }, {
+      method: "POST",
+    });
+    assert.equal(
+      issued.filter((one) => one.sql.includes("WHERE user_id")).length,
+      0,
+    );
+  },
+
+  async "an administrator is appointed by account id, never by login"() {
+    const { recordSignIn } = await import("../src/portal/data/auth.js");
+    const admin = async (profile) => {
+      const issued = [];
+      await recordSignIn(
+        { DB: stubDb({ issued }), SYNDEX_ADMIN_IDS: "40025495, 7" },
+        { name: null, email: null, ...profile },
+      );
+      return statement(issued, "INSERT INTO users").params.at(-1);
+    };
+    assert.equal(await admin({ githubId: 40025495, login: "anything" }), 1);
+    // Somebody who registered a login an administrator used to have.
+    assert.equal(await admin({ githubId: 999, login: "willjroper" }), 0);
   },
 
   async "signing in is unavailable rather than broken when unconfigured"() {

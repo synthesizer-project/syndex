@@ -37,6 +37,19 @@ from syndex.publish.sources import (
 GRID_DATA_TYPES = ("grid", "dust_grid")
 
 
+# The dataset fields that describe it rather than identify or classify it,
+# which is to say the ones a later release may reasonably leave unsaid.
+DATASET_FIELDS = (
+    "display_name",
+    "description",
+    "is_test",
+    "is_ci",
+    "is_recommended",
+    "licence",
+    "metadata",
+)
+
+
 def build_plan(
     source: SourceFile,
     defaults: dict[str, Any],
@@ -57,10 +70,12 @@ def build_plan(
         OSError: If the source file cannot be read.
         ValueError: If metadata cannot be represented as strict JSON.
     """
-    # Three sources of truth, merged once: the batch defaults, the per-file
-    # override, and the command line ahead of both (already folded into
-    # `defaults` by `build_plans`). Everything below reads `config` alone, so
-    # no decision further down has to remember which of the three it came from.
+    # Three sources of truth, merged once. Lowest first: the batch defaults,
+    # the command line over those (already folded into `defaults` by
+    # `build_plans`), and the per-file entry over both, since something said
+    # about one file is more specific than an option given for the whole run.
+    # Everything below reads `config` alone, so no decision further down has
+    # to remember which of the three it came from.
     config = merge_metadata(defaults, file_override)
     physical_format = detect_format(source.path)
     extracted_grid = extract_hdf5(source.path) if physical_format == "hdf5" else None
@@ -159,6 +174,12 @@ def build_plan(
             "is_recommended": bool(config.get("is_recommended", False)),
             "licence": config.get("licence"),
             "metadata": config.get("metadata", {}),
+            # Which of the fields above somebody actually stated, as opposed
+            # to the ones filled in with a default. A new release of an
+            # existing dataset changes only these: the description written
+            # for the first release should not vanish because the second was
+            # published without restating it.
+            "stated": sorted(key for key in DATASET_FIELDS if key in config),
         },
         "release": {
             "published_at": published_at,
@@ -180,7 +201,10 @@ def build_plan(
     # sent to D1 as JSON, and a NumPy scalar that survived extraction should
     # fail here, where the message names the file, rather than at the point of
     # sending where it would not.
-    json_dump(plan)
+    try:
+        json_dump(plan)
+    except (TypeError, ValueError) as error:
+        raise UploadError(f"{source.key}: {error}") from error
     return plan
 
 

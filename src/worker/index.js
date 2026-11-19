@@ -7,10 +7,26 @@
 
 import { describeFailure, failureHeaders } from "../failure.js";
 
+/**
+ * What lets a page on another origin use an answer, and read it.
+ *
+ * Allowing the origin is only half of it. A browser hides every response
+ * header from a cross-origin script unless it is named here, and the ones a
+ * client needs are exactly the ones it hides: the ETag to revalidate with,
+ * which bytes a range holds, the digest to check a download against, the
+ * filename, and how long to wait after a 503.
+ */
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers":
+    "accept-ranges, content-disposition, content-length, content-range, " +
+    "etag, retry-after, x-syndex-sha256",
+};
+
 /** What every JSON answer carries, whatever it is answering. */
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
-  "access-control-allow-origin": "*",
+  ...CORS,
   "cache-control": "public, max-age=300",
 };
 
@@ -130,7 +146,9 @@ async function listDatasets(db, url) {
   const params = url.searchParams;
   // Number("abc") is NaN and both clamps preserve it, so an unparseable
   // limit used to reach D1 as `LIMIT NaN` and bound nothing at all.
-  const requested = Number(params.get("limit") ?? 100);
+  // An empty `limit=` is absent, not zero: Number("") is 0, which clamped to
+  // a page of one.
+  const requested = Number(params.get("limit")?.trim() || 100);
   const limit = Number.isFinite(requested)
     ? Math.min(Math.max(Math.trunc(requested), 1), 1000)
     : 100;
@@ -138,13 +156,33 @@ async function listDatasets(db, url) {
   /**
    * Read a boolean query parameter as the 0/1 D1 stores, or null for absent.
    *
+   * Anything that is not plainly one or the other is refused. It used to be
+   * read as false, so `has_spectra=True` -- which is what Python's str(True)
+   * gives -- answered 200 with exactly the grids that have no spectra.
+   *
    * @param {string} key Query parameter name.
-   * @returns {number | null} Bound value for the query.
+   * @returns {number | null | undefined} Bound value for the query, or
+   *     undefined when the value is not a boolean.
    */
   const flag = (key) => {
     const value = params.get(key);
-    return value === null ? null : Number(value === "true" || value === "1");
+    if (value === null) {
+      return null;
+    }
+    const word = value.trim().toLowerCase();
+    if (word === "true" || word === "1") {
+      return 1;
+    }
+    return word === "false" || word === "0" ? 0 : undefined;
   };
+
+  const flags = {};
+  for (const key of ["is_test", "is_ci", "has_spectra", "has_lines"]) {
+    flags[key] = flag(key);
+    if (flags[key] === undefined) {
+      return error(400, `${key} must be true or false`);
+    }
+  }
 
   const { results } = await db
     .prepare(
@@ -169,10 +207,10 @@ async function listDatasets(db, url) {
     )
     .bind(
       params.get("data_type"),
-      flag("is_test"),
-      flag("is_ci"),
-      flag("has_spectra"),
-      flag("has_lines"),
+      flags.is_test,
+      flags.is_ci,
+      flags.has_spectra,
+      flags.has_lines,
       params.get("after"),
       limit,
     )
@@ -259,7 +297,7 @@ async function releasePreview(env, request, releaseId) {
     "content-type": "image/png",
     "content-length": String(object.size),
     etag: object.httpEtag,
-    "access-control-allow-origin": "*",
+    ...CORS,
     // The object is content addressed but this URL is not: it names a
     // release, and regenerating a preview repoints that release at new
     // bytes. Marking it immutable therefore pinned stale plots in browsers
@@ -275,7 +313,9 @@ async function releasePreview(env, request, releaseId) {
     return new Response(null, { headers });
   }
   if (object.body === undefined) {
-    return new Response(null, { status: 304 });
+    // With the headers: a 304 with no allow-origin is one a cross-origin
+    // script is not allowed to see, so its revalidation fails outright.
+    return new Response(null, { status: 304, headers });
   }
   return new Response(object.body, { headers });
 }
@@ -333,7 +373,7 @@ async function releaseCitations(db, releaseId) {
     headers: {
       "content-type": "application/x-bibtex; charset=utf-8",
       "content-disposition": contentDisposition(`${release.dataset}.bib`),
-      "access-control-allow-origin": "*",
+      ...CORS,
       // Citations can be corrected, and this URL names a release rather than
       // the bytes, so it revalidates for the same reason the preview does.
       "cache-control": "public, max-age=3600, must-revalidate",
@@ -695,7 +735,7 @@ async function downloadRelease(env, request, releaseId) {
   // Ranged reads let an interrupted download resume instead of restarting,
   // which matters for multi-gigabyte grids. The size comes from D1, so an
   // impossible range is rejected without touching R2 at all.
-  const range = parseRange(request.headers.get("range"), row.size_bytes);
+  let range = parseRange(request.headers.get("range"), row.size_bytes);
   if (range === "unsatisfiable") {
     return new Response(
       JSON.stringify({ error: "Requested range is outside the file" }),
@@ -703,6 +743,8 @@ async function downloadRelease(env, request, releaseId) {
         status: 416,
         headers: {
           ...JSON_HEADERS,
+          // An error like every other, and not something to keep.
+          "cache-control": "no-store",
           "content-range": `bytes */${row.size_bytes}`,
           "accept-ranges": "bytes",
         },
@@ -710,13 +752,29 @@ async function downloadRelease(env, request, releaseId) {
     );
   }
 
-  const object =
+  let object =
     request.method === "HEAD"
       ? await env.FILES.head(row.r2_path)
       : await env.FILES.get(row.r2_path, {
           onlyIf: request.headers,
           ...(range === null ? {} : { range }),
         });
+
+  // If-Range makes the range conditional: only a matching strong ETag earns
+  // the part, and anything else -- a different tag, a weak one, a date --
+  // gets the whole file. The object is immutable, so a mismatch is a client
+  // holding bytes of something else, which must not be spliced with these.
+  const ifRange = request.headers.get("if-range");
+  if (
+    range !== null &&
+    ifRange !== null &&
+    object?.body !== undefined &&
+    ifRange !== object.httpEtag
+  ) {
+    await object.body.cancel();
+    object = await env.FILES.get(row.r2_path);
+    range = null;
+  }
 
   if (object === null) {
     // D1 references an object R2 does not hold. Publication uploads and
@@ -732,7 +790,7 @@ async function downloadRelease(env, request, releaseId) {
   }
 
   const headers = new Headers({
-    "access-control-allow-origin": "*",
+    ...CORS,
     "accept-ranges": "bytes",
     "cache-control": "public, max-age=31536000, immutable",
     "content-disposition": contentDisposition(row.filename),
@@ -783,6 +841,9 @@ export default {
         headers: {
           "access-control-allow-origin": "*",
           "access-control-allow-methods": "GET, HEAD, OPTIONS",
+          // The request headers worth sending here that a browser will not
+          // send without asking: a conditional fetch, and a resumed one.
+          "access-control-allow-headers": "if-none-match, if-range, range",
           "access-control-max-age": "86400",
         },
       });
@@ -794,22 +855,41 @@ export default {
     try {
       const path = url.pathname.replace(/\/+$/, "") || "/";
 
+      /**
+       * Decode a name out of the path, or null when it is not a valid escape.
+       *
+       * `decodeURIComponent` throws on a stray percent sign, which made a
+       * mistyped or probing URL a logged 500 rather than the caller's 400.
+       *
+       * @param {string} segment One path segment, still encoded.
+       * @returns {string | null} The name, or null.
+       */
+      const named = (segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return null;
+        }
+      };
+
       if (path === "/v1/datasets") {
         return await listDatasets(env.DB, url);
       }
 
       const dataset = /^\/v1\/datasets\/([^/]+)$/.exec(path);
       if (dataset !== null) {
-        return await getDataset(env.DB, decodeURIComponent(dataset[1]), url.origin);
+        const name = named(dataset[1]);
+        return name === null
+          ? error(400, "Malformed dataset name")
+          : await getDataset(env.DB, name, url.origin);
       }
 
       const releases = /^\/v1\/datasets\/([^/]+)\/releases$/.exec(path);
       if (releases !== null) {
-        return await listReleases(
-          env.DB,
-          decodeURIComponent(releases[1]),
-          url.origin,
-        );
+        const name = named(releases[1]);
+        return name === null
+          ? error(400, "Malformed dataset name")
+          : await listReleases(env.DB, name, url.origin);
       }
 
       const download = /^\/v1\/releases\/([^/]+)\/download$/.exec(path);

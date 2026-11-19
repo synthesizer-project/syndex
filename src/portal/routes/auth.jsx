@@ -19,6 +19,7 @@ import {
   beginSignIn,
   consumeState,
   endSession,
+  endSessions,
   profileForCode,
   recordSignIn,
   sessionForGithubToken,
@@ -105,7 +106,7 @@ routes.get("/auth/cli", (c) =>
  * The client proves who it is to GitHub, which is the only thing it can
  * prove; this asks GitHub who that was and issues an ordinary session for
  * them. No password, no key, nothing to store on the machine but a session
- * that expires and can be revoked from the account page.
+ * that expires, and that "Sign out everywhere" on the account page ends.
  */
 routes.post("/auth/cli", async (c) => {
   if (!authConfigured(c.env)) {
@@ -135,6 +136,18 @@ routes.post("/auth/cli", async (c) => {
 });
 
 routes.post("/logout", async (c) => {
+  await endSession(c);
+  return c.redirect(BASE, 303);
+});
+
+// Every session the account holds, not only this browser's. The one that
+// matters is the one this browser cannot reach: a `syndex-submit` session
+// sitting in a file on a shared login node, good for thirty days.
+routes.post("/logout/everywhere", async (c) => {
+  const { user } = c.get("viewer");
+  if (user !== null) {
+    await endSessions(c.env, user.user_id);
+  }
   await endSession(c);
   return c.redirect(BASE, 303);
 });

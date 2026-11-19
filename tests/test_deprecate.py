@@ -74,3 +74,15 @@ def test_a_reason_is_required(monkeypatch):
     with pytest.raises(SystemExit):
         deprecate.run(["one"])
     assert deprecate.run(["one", "--reason", "  "]) == 2
+
+
+def test_a_bad_network_is_an_error_not_a_traceback(monkeypatch, capsys):
+    from syndex.previews import store
+
+    def unreachable(request, timeout=None):
+        raise store.urllib.error.URLError("no route to host")
+
+    monkeypatch.setenv("SYNTHESIZER_D1_API_TOKEN", "token")
+    monkeypatch.setattr(store.urllib.request, "urlopen", unreachable)
+    assert deprecate.run(["one", "--reason", "Gone."]) == 1
+    assert "could not be reached" in capsys.readouterr().err

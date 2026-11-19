@@ -195,21 +195,37 @@ export const DownloadButton = ({
 /**
  * Decode a stored JSON column.
  *
+ * The fallback is also the shape the caller is about to use: a page that
+ * asked for a list maps over it, and one that asked for an object reads its
+ * keys. So anything stored that is not that shape -- text that is not JSON, a
+ * stored `null`, an object where a list belongs -- gets the fallback too.
+ * That is a publication bug, and a section left empty says so better than a
+ * 500 does.
+ *
  * @param {string | null} text The column value.
- * @param {unknown} fallback What to return when there is nothing stored.
+ * @param {unknown} fallback What to return when there is nothing usable
+ *   stored. With none, whatever decodes is returned, and text that does not
+ *   decode is returned as it is.
  * @returns {unknown} The decoded value.
  */
 export function decode(text, fallback = null) {
   if (text === null || text === undefined) {
     return fallback;
   }
+  let value;
   try {
-    return JSON.parse(text);
+    value = JSON.parse(text);
   } catch {
-    // A column that will not decode is a publication bug, not a page
-    // failure: show the raw text rather than a 500.
-    return text;
+    return fallback ?? text;
   }
+  if (fallback === null) {
+    return value;
+  }
+  const sameShape =
+    value !== null &&
+    typeof value === "object" &&
+    Array.isArray(value) === Array.isArray(fallback);
+  return sameShape ? value : fallback;
 }
 
 /** One labelled form control. */

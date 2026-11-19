@@ -83,11 +83,60 @@ Disallow: /
  */
 const MAX_CACHED_BYTES = 5 * 1024 * 1024;
 
+/** The hostname that is the API and nothing else. */
+const API_HOST = "data.synthesizer-project.org";
+
 /** Hostnames whose non-portal traffic belongs to the org site, not the API. */
 const SITE_HOSTS = new Set([
   "synthesizer-project.org",
   "www.synthesizer-project.org",
 ]);
+
+/**
+ * Every query parameter the API reads, in the order they are written back.
+ *
+ * `v` is not read by anything: the portal appends it to a preview's URL so a
+ * regenerated image is a new address, and it has to survive for that to work.
+ *
+ * A parameter added to the API and not to this list is dropped before the
+ * handler sees it, so forgetting shows up at once as a filter that does
+ * nothing rather than later as one answer cached under another's address.
+ */
+const API_PARAMS = [
+  "after",
+  "data_type",
+  "has_lines",
+  "has_spectra",
+  "is_ci",
+  "is_test",
+  "limit",
+  "v",
+];
+
+/**
+ * The same API request with nothing in its address the API does not read.
+ *
+ * The cache is keyed on the URL, and the URL was whatever the caller sent:
+ * `?cb=1`, `?cb=2` and the same parameters in another order were each a miss,
+ * and each miss runs the queries. That made the cache -- the thing standing
+ * between a crawler and the database's daily allowance -- optional for anybody
+ * who added a parameter.
+ *
+ * @param {Request} request Incoming API request.
+ * @returns {Request} One whose query holds only known parameters, in order.
+ */
+function canonicalApiRequest(request) {
+  const url = new URL(request.url);
+  const kept = new URLSearchParams();
+  for (const name of API_PARAMS) {
+    const value = url.searchParams.get(name);
+    if (value !== null) {
+      kept.set(name, value);
+    }
+  }
+  url.search = kept.toString();
+  return new Request(url.toString(), request);
+}
 
 /**
  * Whether this answer may be kept in the edge cache.
@@ -119,21 +168,13 @@ function storable(response) {
 }
 
 /**
- * The key one request is cached under.
- *
- * htmx asks for the same URL and expects a fragment rather than a page, so
- * the two answers cannot share an entry. The marker goes in the key and never
- * reaches a handler.
+ * The key one request is cached under: its URL, and nothing about who asked.
  *
  * @param {Request} request Incoming request.
  * @returns {Request} The key to look it up by.
  */
 function cacheKey(request) {
-  const url = new URL(request.url);
-  if (request.headers.get("HX-Request") === "true") {
-    url.searchParams.set("__fragment", "1");
-  }
-  return new Request(url.toString(), { method: "GET" });
+  return new Request(request.url, { method: "GET" });
 }
 
 /**
@@ -148,18 +189,34 @@ function cacheKey(request) {
  * Anonymous GETs only: see `storable`. Signed-in pages answer `private,
  * no-store` and are never kept.
  *
+ * Nothing htmx asks for goes near the cache either. It asks for the same URL
+ * as a full page and wants a fragment, which is `no-store` and was never
+ * kept -- but it used to have a key of its own, the URL plus a marker, and
+ * one htmx request is answered with a whole page: a history restore. That
+ * page was stored under the fragment key and then swapped into the results
+ * panel of everyone who filtered next, and since the marker was an ordinary
+ * query parameter anybody could plant one by asking for it.
+ *
+ * A HEAD is answered from what a GET stored, without its body, and stores
+ * nothing itself: it has no body to keep.
+ *
  * @param {Request} request Incoming request.
  * @param {ExecutionContext} ctx Execution context, for storing after replying.
  * @param {Function} handler Produces the answer when the cache has none.
+ * @param {object} options How the answer varies.
+ * @param {boolean} options.anonymous Whether the handler ignores cookies, so
+ *     that a request carrying one is no different from one that does not.
  * @returns {Promise<Response>} The answer, cached or fresh.
  */
-async function cached(request, ctx, handler) {
+async function cached(request, ctx, handler, { anonymous = false } = {}) {
+  const head = request.method === "HEAD";
   // `caches` is a Workers global. The tests run under Node, which has none,
   // and a missing cache is a slow path rather than a failure.
   if (
     typeof caches === "undefined" ||
-    request.method !== "GET" ||
-    request.headers.has("cookie")
+    (request.method !== "GET" && !head) ||
+    (!anonymous && request.headers.has("cookie")) ||
+    request.headers.has("HX-Request")
   ) {
     return handler();
   }
@@ -167,11 +224,13 @@ async function cached(request, ctx, handler) {
   const key = cacheKey(request);
   const hit = await caches.default.match(key);
   if (hit !== undefined) {
-    return hit;
+    return head
+      ? new Response(null, { status: hit.status, headers: hit.headers })
+      : hit;
   }
 
   const response = await handler();
-  if (storable(response)) {
+  if (!head && storable(response)) {
     // Stored after the reply goes out, so nobody waits for it.
     ctx.waitUntil(caches.default.put(key, response.clone()));
   }
@@ -205,6 +264,19 @@ export default {
       );
     }
     if (pathname === "/syndex" || pathname.startsWith("/syndex/")) {
+      // The portal has one address. On the API's hostname it would be a
+      // second copy with its own cookies, and one where signing in cannot
+      // work: GitHub only returns people to the callback registered with it.
+      // Only that hostname is turned away, so `wrangler dev` and a
+      // workers.dev preview still serve the portal where they are.
+      if (url.hostname === API_HOST) {
+        return new Response(null, {
+          status: 301,
+          headers: {
+            location: `https://synthesizer-project.org${pathname}${url.search}`,
+          },
+        });
+      }
       return cached(request, ctx, () => portal.fetch(request, env, ctx));
     }
 
@@ -224,6 +296,11 @@ export default {
       });
     }
 
-    return cached(request, ctx, () => api.fetch(request, env, ctx));
+    // The API has no accounts, so a cookie changes nothing about its answer
+    // and is no reason to run the queries again.
+    const asked = canonicalApiRequest(request);
+    return cached(asked, ctx, () => api.fetch(asked, env, ctx), {
+      anonymous: true,
+    });
   },
 };

@@ -12,13 +12,14 @@ limits, the resumption and the assembling are all the ones already there.
 Signing in is GitHub's device flow: this prints a code, somebody types it into
 github.com from wherever they happen to be, and the portal issues an ordinary
 session in exchange. What is kept on the machine is that session and nothing
-else: no password, no key, and nothing that outlives being signed out from the
-account page.
+else: no password, no key, and nothing that outlives "Sign out everywhere" on
+the account page.
 """
 
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -62,8 +63,27 @@ RETRIES = 3
 MAX_PARTS = 2000
 
 
+# How long one read or write on the connection may stall before it is given
+# up on. Not a limit on a whole piece: a slow link still makes progress, and
+# only one that has stopped moving trips this. Without it a stalled connection
+# holds the process for as long as the login node lets it live.
+TIMEOUT = 120
+
+# The portal a session with no portal recorded beside it belongs to: the only
+# one there was when sessions were stored without saying.
+CANONICAL_PORTAL = "https://synthesizer-project.org/syndex"
+
+
 class SubmitError(RuntimeError):
     """Something went wrong that the person running this can act on."""
+
+
+class ConnectionFailed(SubmitError):
+    """The request never got an answer, so trying again might."""
+
+
+class SessionExpired(SubmitError):
+    """The portal no longer recognises the stored session."""
 
 
 def _config_path() -> Path:
@@ -138,6 +158,8 @@ def _already_sent(portal: str, token: str, upload_token: str, path: Path) -> set
         f"{portal}/submit/{upload_token}/parts",
         headers={"authorization": f"Bearer {token}"},
     )
+    if status == 401:
+        raise SessionExpired("the stored session is no longer valid")
     if status != 200 or answer.get("upload") != state["upload"]:
         return set()
     parts = {number for number in answer.get("parts", []) if isinstance(number, int)}
@@ -178,7 +200,7 @@ def _request(
         tuple[int, bytes]: The status and the body.
 
     Raises:
-        SubmitError: If the host cannot be reached at all.
+        ConnectionFailed: If no answer came back at all.
     """
     request = urllib.request.Request(
         url,
@@ -187,12 +209,21 @@ def _request(
         method=method,
     )
     try:
-        with urllib.request.urlopen(request) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
-    except urllib.error.URLError as error:
-        raise SubmitError(f"could not reach {url}: {error.reason}") from error
+        # Nested so that reading the body of an error answer is inside the
+        # same boundary as everything else: a 503 whose body stalls is a
+        # connection that failed, not a traceback.
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.read()
+    # Everything else a connection does when it fails. `URLError` is only what
+    # urllib wraps while connecting: a reset or a timeout mid-transfer is a
+    # bare `OSError`, and a server that hangs up without answering is an
+    # `HTTPException`, and both used to reach the terminal as a traceback.
+    except (OSError, http.client.HTTPException) as error:
+        reason = getattr(error, "reason", None) or error or type(error).__name__
+        raise ConnectionFailed(f"could not reach {url}: {reason}") from error
 
 
 def _json_request(url: str, payload: dict | None = None, **kwargs) -> tuple[int, dict]:
@@ -207,7 +238,9 @@ def _json_request(url: str, payload: dict | None = None, **kwargs) -> tuple[int,
         tuple[int, dict]: The status and the decoded answer.
     """
     headers = {"accept": "application/json", **kwargs.pop("headers", {})}
-    data = None
+    # A caller sending raw bytes passes `data` itself. Taken out of `kwargs`
+    # so it reaches `_request` once rather than twice.
+    data = kwargs.pop("data", None)
     if payload is not None:
         headers["content-type"] = "application/json"
         data = json.dumps(payload).encode()
@@ -291,32 +324,47 @@ def sign_in(portal: str) -> str:
     raise SubmitError("signing in timed out")
 
 
-def _stored_token() -> str | None:
-    """The session from the last time, if there was one.
+def _stored_token(portal: str = CANONICAL_PORTAL) -> str | None:
+    """The session from the last time, if there was one for this portal.
+
+    A session is only good at the portal that issued it, and sending it
+    anywhere else hands a credential to whatever `--portal` happened to name.
+
+    Args:
+        portal (str): Base URL of the portal about to be talked to.
 
     Returns:
-        str | None: The token, or None when there is none to read.
+        str | None: The token, or None when there is none to use.
     """
     path = _config_path()
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text()).get("token")
+        stored = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
+    if stored.get("portal", CANONICAL_PORTAL) != portal:
+        return None
+    return stored.get("token")
 
 
-def _store_token(token: str) -> None:
+def _store_token(token: str, portal: str = CANONICAL_PORTAL) -> None:
     """Keep the session for next time, readable only by its owner.
 
     Args:
         token (str): The session token.
+        portal (str): Base URL of the portal that issued it.
     """
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"token": token}))
-    # It is a bearer credential. The default umask would leave it readable by
-    # everybody on a shared machine, which an HPC login node is.
+    # It is a bearer credential, and an HPC login node is a shared machine.
+    # Created private rather than made private afterwards: writing it under
+    # the default umask and then tightening it leaves a moment in which
+    # anybody on the machine can open it.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(json.dumps({"token": token, "portal": portal}))
+    # A file that already existed keeps the mode it had.
     path.chmod(0o600)
 
 
@@ -329,11 +377,11 @@ def token_for(portal: str) -> str:
     Returns:
         str: A session token.
     """
-    token = _stored_token()
+    token = _stored_token(portal)
     if token is not None:
         return token
     token = sign_in(portal)
-    _store_token(token)
+    _store_token(token, portal)
     return token
 
 
@@ -374,18 +422,29 @@ def send(
             chunk = stream.read(PART_SIZE)
 
             for attempt in range(RETRIES + 1):
-                status, answer = _json_request(
-                    f"{portal}/submit/{upload_token}/part/{number}",
-                    headers={"authorization": f"Bearer {token}"},
-                    data=chunk,
-                    method="POST",
-                )
+                try:
+                    status, answer = _json_request(
+                        f"{portal}/submit/{upload_token}/part/{number}",
+                        headers={"authorization": f"Bearer {token}"},
+                        data=chunk,
+                        method="POST",
+                    )
+                except ConnectionFailed:
+                    # A dropped connection is the ordinary failure over a
+                    # transfer of hundreds of pieces, and the piece is still
+                    # in hand to send again.
+                    if attempt == RETRIES:
+                        raise
+                    time.sleep(2**attempt)
+                    continue
                 if status == 200:
                     upload = answer.get("upload")
                     if upload and upload != recorded:
                         _record_progress(upload_token, path, upload)
                         recorded = upload
                     break
+                if status == 401:
+                    raise SessionExpired("the stored session is no longer valid")
                 # A refusal is the portal's final answer; a 5xx might not be.
                 if status < 500 or attempt == RETRIES:
                     raise SubmitError(
@@ -417,6 +476,8 @@ def send(
     )
     # The completion answers with a redirect to the submission page, which is
     # a success; anything else is not.
+    if status == 401:
+        raise SessionExpired("the stored session is no longer valid")
     if status not in (200, 303):
         raise SubmitError(
             answer.get("error", f"the portal answered {status} on completion")
@@ -484,13 +545,28 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     try:
-        send(
-            portal,
-            token_for(portal),
-            arguments.token,
-            arguments.path,
-            quiet=arguments.quiet,
-        )
+        try:
+            send(
+                portal,
+                token_for(portal),
+                arguments.token,
+                arguments.path,
+                quiet=arguments.quiet,
+            )
+        except SessionExpired:
+            # Sessions last thirty days and can be ended from the portal, and
+            # the stored one is used until the portal says otherwise. Once: a
+            # session refused straight after signing in is not going to be
+            # fixed by signing in again.
+            print("Your session has expired; signing in again.", file=sys.stderr)
+            _config_path().unlink(missing_ok=True)
+            send(
+                portal,
+                token_for(portal),
+                arguments.token,
+                arguments.path,
+                quiet=arguments.quiet,
+            )
     except SubmitError as error:
         print(f"{error}", file=sys.stderr)
         return 1

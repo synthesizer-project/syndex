@@ -110,7 +110,14 @@ def run(argv: list[str] | None = None) -> int:
         else {}
     )
 
-    todo = [row for row in rows if args.refresh or row["name"] not in manifest]
+    # Done means this file, and without a failure. The dataset's name alone
+    # would skip a new release published under it, and a failure is as likely
+    # a dropped connection as a file that cannot be drawn.
+    def done(row: dict[str, Any]) -> bool:
+        entry = manifest.get(row["name"], {})
+        return entry.get("file_id") == row["file_id"] and entry["status"] != "error"
+
+    todo = [row for row in rows if args.refresh or not done(row)]
     if args.limit:
         todo = todo[: args.limit]
 
@@ -142,13 +149,27 @@ def run(argv: list[str] | None = None) -> int:
             f"({row['size_bytes'] / 2**20:.0f} MiB)",
             flush=True,
         )
+        # Rendering and publishing are tried together: a preview that was
+        # drawn and then could not be uploaded or recorded is as unfinished as
+        # one that could not be drawn, and neither is a reason to stop.
         try:
             result = make_preview(client, args.bucket, row)
+            if args.apply and not isinstance(result, str):
+                key = upload_preview(client, args.bucket, result[0], name, result[1])
+                d1_query(
+                    args.account_id,
+                    args.database_id,
+                    token,
+                    "UPDATE files SET preview_path = ?, preview_kind = ? "
+                    "WHERE file_id = ?",
+                    [key, result[1], row["file_id"]],
+                )
         except Exception as exc:  # noqa: BLE001 - one bad file must not end a run
             print(f"    FAILED: {type(exc).__name__}: {exc}", flush=True)
             traceback.print_exc()
             manifest[name] = {
                 "status": "error",
+                "file_id": row["file_id"],
                 "reason": f"{type(exc).__name__}: {exc}"[:200],
             }
             failed += 1
@@ -157,26 +178,27 @@ def run(argv: list[str] | None = None) -> int:
 
         if isinstance(result, str):
             print(f"    omitted: {result}", flush=True)
-            manifest[name] = {"status": "omitted", "reason": result}
+            manifest[name] = {
+                "status": "omitted",
+                "file_id": row["file_id"],
+                "reason": result,
+            }
             omitted += 1
             manifest_path.write_text(json.dumps(manifest, indent=1))
             continue
 
         png, kind = result
-        entry: dict[str, Any] = {"status": "ok", "kind": kind, "bytes": len(png)}
+        entry: dict[str, Any] = {
+            "status": "ok",
+            "file_id": row["file_id"],
+            "kind": kind,
+            "bytes": len(png),
+        }
 
         if args.output_dir:
             (args.output_dir / f"{name}.png").write_bytes(png)
             entry["path"] = str(args.output_dir / f"{name}.png")
         if args.apply:
-            key = upload_preview(client, args.bucket, png, name, kind)
-            d1_query(
-                args.account_id,
-                args.database_id,
-                token,
-                "UPDATE files SET preview_path = ?, preview_kind = ? WHERE file_id = ?",
-                [key, kind, row["file_id"]],
-            )
             entry["preview_path"] = key
         manifest[name] = entry
         made += 1

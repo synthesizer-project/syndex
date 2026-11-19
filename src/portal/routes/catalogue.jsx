@@ -25,6 +25,7 @@ import {
 } from "../data/catalogue.js";
 import { Browse, Dataset, Landing } from "../pages/catalogue.jsx";
 import { NotFound } from "../pages/refusals.jsx";
+import { TabLinks } from "../views/layout.jsx";
 import { Panel } from "../views/results.jsx";
 import { fragment, page } from "./respond.jsx";
 
@@ -78,11 +79,27 @@ routes.get("/search", async (c) => {
   // comes back -- so answering that with a fragment leaves the page as a bare
   // results panel with none of the layout around it.
   const restoring = c.req.header("HX-History-Restore-Request") === "true";
+  const counts = await tabCounts(c.env.DB);
   if (!restoring && c.req.header("HX-Request") === "true") {
-    return fragment(c, panel);
+    // With the header's tab links, in both of their places: they are built
+    // from the filters too, and are outside what the panel replaces.
+    const tabs = {
+      counts,
+      filters,
+      // As `Browse` decides it: a type with no tab of its own lights none.
+      active: tab.id === "search" && filters.type.length > 0 ? null : tab.id,
+      oob: true,
+    };
+    return fragment(
+      c,
+      <>
+        {panel}
+        <TabLinks {...tabs} />
+        <TabLinks {...tabs} stacked />
+      </>,
+    );
   }
 
-  const counts = await tabCounts(c.env.DB);
   return page(
     c,
     <Browse tab={tab} counts={counts} filters={filters}>

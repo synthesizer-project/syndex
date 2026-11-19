@@ -301,6 +301,12 @@ def _upload_with_retries(
                 )
             return
         except Exception as exc:
+            # The failure may be the answer going missing rather than the
+            # request: R2 assembled the object and the connection dropped
+            # before it said so. Sending 30 GiB again to an object that is
+            # already there would be the expensive way to find that out.
+            if _arrived(client, bucket, key, plan):
+                return
             if attempt == attempts:
                 raise
             print(
@@ -310,8 +316,40 @@ def _upload_with_retries(
             )
 
 
+def _arrived(client, bucket: str, key: str, plan: dict[str, Any]) -> bool:
+    """Say whether the object is in R2 as the plan describes it.
+
+    Args:
+        client: Configured boto3 S3 client.
+        bucket: Target R2 bucket name.
+        key: R2 object key.
+        plan: Validated publication plan.
+
+    Returns:
+        True only when the object is there with the planned size and digest.
+        Not being able to ask counts as no: this is called after a failure,
+        when the connection is the likeliest thing to be broken.
+    """
+    try:
+        head = _head_object(client, bucket, key)
+    except Exception:  # noqa: BLE001 - unknown is treated as not arrived
+        return False
+    return (
+        head is not None
+        and head.get("ContentLength") == plan["file"]["size_bytes"]
+        and head.get("Metadata", {}).get("sha256") == plan["file"]["sha256"]
+    )
+
+
 def upload_and_verify(client, bucket: str, plan: dict[str, Any]) -> None:
-    """Idempotently upload one file and verify size and digest metadata.
+    """Idempotently upload one file and confirm it arrived as planned.
+
+    What is compared is the object's size and the digest recorded in its
+    metadata, which this module wrote when uploading. That establishes that
+    the object exists, is whole, and is the file this plan describes rather
+    than another at the same key. It is not a re-read of the stored bytes: a
+    30 GiB grid would have to come all the way back to be hashed, and the
+    download client hashes what it fetches in any case.
 
     Args:
         client: Configured boto3 S3 client.

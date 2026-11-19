@@ -52,18 +52,31 @@ routes.post("/access", requireRole("pending"), async (c) => {
   // Recorded only while the account is still pending. Re-requesting refreshes
   // the note rather than queueing a second request, and an account that has
   // since been granted access does not reappear in the queue by asking again.
+  //
+  // The first request keeps its place in the queue, and the statement says
+  // whether this was it: `first` is true only for the request whose timestamp
+  // was the one stored. Two posts arriving together both read an account that
+  // had not asked yet, so the row the session loaded cannot settle it.
+  const now = new Date().toISOString();
   const updated = await c.env.DB.prepare(
     `UPDATE users
-     SET access_requested_at = ?, access_request_note = ?
+     SET access_requested_at = COALESCE(access_requested_at, ?),
+         access_request_note = ?
      WHERE user_id = ? AND role = 'pending'
-     RETURNING user_id`,
+     RETURNING user_id, access_requested_at = ? AS first`,
   )
-    .bind(new Date().toISOString(), note, user.user_id)
+    .bind(now, note, user.user_id, now)
     .first();
 
   // Advisory, and deliberately not awaited: whether a maintainer's issue
   // tracker is reachable is not this person's problem.
-  if (updated !== null) {
+  //
+  // Once per request for access, not once per press of the button. Asking
+  // again refreshes the note in the queue, where a reviewer will read it; it
+  // used to open another issue as well, every time, under the project's own
+  // token -- so any GitHub account could fill the tracker by signing in and
+  // posting this form in a loop.
+  if (updated?.first) {
     c.executionCtx.waitUntil(
       notifyAccessRequest(c.env, new URL(c.req.url).origin, user, note),
     );
@@ -73,7 +86,7 @@ routes.post("/access", requireRole("pending"), async (c) => {
     c,
     <RequestAccess
       counts={await tabCounts(c.env.DB)}
-      user={{ ...user, access_requested_at: new Date().toISOString() }}
+      user={{ ...user, access_requested_at: user.access_requested_at ?? now }}
       sent
     />,
     { cache: "no-store" },

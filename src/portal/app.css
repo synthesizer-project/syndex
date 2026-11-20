@@ -319,8 +319,13 @@ body > .landing-links {
 #busy {
   visibility: hidden;
 }
-#busy.htmx-request {
+#busy.htmx-request,
+#busy.failed {
   visibility: visible;
+}
+/* Set by filters.js when a request fails: no longer an aside. */
+#busy.failed {
+  color: var(--color-text);
 }
 
 /* Preview plots use their own card beside the description and open at full size. */

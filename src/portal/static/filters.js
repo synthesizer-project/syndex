@@ -291,4 +291,31 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("htmx:afterSwap", updateBulkSelection);
+
+// A filter request that fails changes nothing on the page, and htmx says
+// nothing about it: the click simply appears not to have worked. The line
+// that says "searching…" says so instead, and being a status region it is
+// read out as well as shown. Nothing was swapped, so the results on screen
+// are still the last ones that loaded, and the links still work as links.
+const SEARCHING = "searching…";
+
+function reportFailure() {
+  const busy = document.getElementById("busy");
+  if (busy !== null) {
+    busy.textContent = "That did not load. Try again, or reload the page.";
+    busy.classList.add("failed");
+  }
+}
+
+for (const failure of ["htmx:responseError", "htmx:sendError", "htmx:timeout"]) {
+  document.addEventListener(failure, reportFailure);
+}
+
+document.addEventListener("htmx:beforeRequest", () => {
+  const busy = document.getElementById("busy");
+  if (busy !== null) {
+    busy.textContent = SEARCHING;
+    busy.classList.remove("failed");
+  }
+});
 updateBulkSelection();

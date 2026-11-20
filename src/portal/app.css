@@ -578,3 +578,44 @@ body > header,
 body > .landing-links {
   z-index: 3;
 }
+
+/*
+ * On paper. A dataset page is the one somebody prints, for the citations and
+ * the checksum, and a dark page printed is a sheet of ink with pale text on
+ * it. The colours are tokens, so turning the tokens over turns the page over;
+ * what is left to do by hand is remove what paper cannot use.
+ */
+@media print {
+  :root {
+    --color-bg: #fff;
+    --color-surface: #fff;
+    --color-text: #000;
+    --color-muted: #444;
+    --color-accent-light: #000;
+    --color-line: #999;
+  }
+
+  body::before,
+  .bg-layer,
+  header nav,
+  .header-menu,
+  .landing-links,
+  footer,
+  dialog,
+  button,
+  #busy {
+    display: none !important;
+  }
+
+  .card {
+    background: none;
+    break-inside: avoid;
+  }
+
+  /* A link on paper is only its address. */
+  main a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    word-break: break-all;
+  }
+}

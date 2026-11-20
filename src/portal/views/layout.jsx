@@ -332,6 +332,9 @@ export const Layout = ({
       {/* The tab icon, and what a bookmark or a chat client shows beside a
           link. Absent entirely until now, which is half of why an unfurl had
           nothing to draw. */}
+      {/* The browser's own chrome, on a phone, in the page's colour rather
+          than white above a dark page. */}
+      <meta name="theme-color" content="#07101f" />
       <link rel="icon" href={`${BASE}/static/syndex_logo_180.png`} />
       <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_180.png`} />
 

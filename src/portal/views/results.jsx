@@ -331,6 +331,11 @@ const Results = ({ tab, filters, rows, axes }) => {
           everything but the name -- still overflow it, and the container
           scrolls. */}
       <table class="w-full border-collapse text-sm">
+        {/* What a screen reader says on entering the table, and what tells
+            one table from another in its list of them. */}
+        <caption class="sr-only">
+          {tab.types === null ? "Datasets" : tab.label}, one per row
+        </caption>
         <thead>
           <tr class="text-left">
             {/* Selecting is for building a download command, which is not

@@ -851,7 +851,9 @@ const tests = {
     assert.match(body, />hdf5<\/td>/);
     assert.match(body, />203 MB<\/td>/);
     assert.match(body, />published<\/a><\/th>/);
-    assert.match(body, />2026-09-04<\/td>/);
+    // The day for a reader, the moment for a program.
+    assert.match(body, /<time datetime="2026-09-04[^"]*">2026-09-04<\/time><\/td>/);
+    assert.match(body, /<caption class="sr-only">Datasets, one per row<\/caption>/);
     assert.doesNotMatch(body, /size \(MB\)/);
     assert.doesNotMatch(body, />version<\/a><\/th>/);
     assert.doesNotMatch(body, />what it is<\/th>/);

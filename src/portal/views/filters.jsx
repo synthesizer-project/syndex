@@ -544,7 +544,10 @@ export const ActiveFilters = ({ tab, filters, total, noun }) => {
 
   return (
     <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <p aria-live="polite" class="text-lg tabular-nums">
+      {/* Read out by filters.js after a swap. Not a live region itself: it
+          is replaced along with the panel, and a region that arrives already
+          holding its text is one most screen readers say nothing about. */}
+      <p id="result-count" class="text-lg tabular-nums">
         {total} {noun}
         {total === 1 ? "" : "s"}
       </p>

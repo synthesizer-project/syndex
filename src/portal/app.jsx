@@ -25,10 +25,11 @@
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { secureHeaders } from "hono/secure-headers";
 import { trimTrailingSlash } from "hono/trailing-slash";
 
 import { describeFailure, failureHeaders } from "../failure.js";
-import { BASE } from "./base.js";
+import { BASE, DATA_API } from "./base.js";
 import { currentUser } from "./data/auth.js";
 import { tabCounts } from "./data/catalogue.js";
 import { NotFound } from "./pages/refusals.jsx";
@@ -46,6 +47,44 @@ const app = new Hono().basePath(BASE);
 // /syndex/ and /syndex are the same page, and only one of them should
 // be the URL anybody shares or cites.
 app.use(trimTrailingSlash());
+
+// What a browser is told it may do with a page from here. Everything the
+// portal loads is its own -- scripts, stylesheet and typeface alike -- so the
+// policy can say so, and an injected script or a page framed by another site
+// is refused by the browser rather than left to each template to prevent.
+//
+// The two exceptions are both narrow. Preview plots come from the API's
+// hostname. Inline styles are allowed because the results table sizes its
+// columns with a style attribute and htmx writes its own indicator rule;
+// inline script is not, and nothing here uses any.
+//
+// The documentation under /syndex/docs is served as static files and never
+// reaches this, which is as well: Sphinx's pages carry inline script.
+app.use(
+  secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", DATA_API],
+      fontSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+    xFrameOptions: "DENY",
+    // Not `no-referrer`, which Hono defaults to: under it a browser sends
+    // `Origin: null` with a form post, and the origin is worth keeping.
+    referrerPolicy: "strict-origin-when-cross-origin",
+    // This hostname only. `includeSubDomains` would be a promise about every
+    // other name under the project's domain, which is not this Worker's to
+    // make.
+    strictTransportSecurity: "max-age=31536000",
+    permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
+  }),
+);
 
 // Who is reading, established once per request. The role is read from the
 // database rather than from the cookie, so a promotion or a demotion takes

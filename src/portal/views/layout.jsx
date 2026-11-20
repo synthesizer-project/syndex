@@ -41,15 +41,6 @@ export const ViewerContext = createContext({
   origin: "https://synthesizer-project.org",
 });
 
-/*
- * One family, one request. The name matters: the org site asks for
- * `Cormorant+Garant`, which is not a Google family, so the response silently
- * omits it. This URL was checked to return the family it names.
- */
-const FONTS =
-  "https://fonts.googleapis.com/css2" +
-  "?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap";
-
 /**
  * The starfield behind every page.
  *
@@ -341,8 +332,11 @@ export const Layout = ({
       {/* The tab icon, and what a bookmark or a chat client shows beside a
           link. Absent entirely until now, which is half of why an unfurl had
           nothing to draw. */}
-      <link rel="icon" href={`${BASE}/static/syndex_logo_2.png`} />
-      <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_2.png`} />
+      {/* The browser's own chrome, on a phone, in the page's colour rather
+          than white above a dark page. */}
+      <meta name="theme-color" content="#07101f" />
+      <link rel="icon" href={`${BASE}/static/syndex_logo_180.png`} />
+      <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_180.png`} />
 
       <meta property="og:type" content="website" />
       <meta property="og:site_name" content="Syndex" />
@@ -358,9 +352,6 @@ export const Layout = ({
         name="twitter:card"
         content={card.wide ? "summary_large_image" : "summary"}
       />
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
-      <link rel="stylesheet" href={FONTS} />
       <link rel="stylesheet" href={`${BASE}/static/app.css`} />
       {/* Vendored and pinned rather than loaded from a CDN, so the portal
           has one origin and one thing that can go down. */}
@@ -368,6 +359,7 @@ export const Layout = ({
       <script src={`${BASE}/static/filters.js`} defer></script>
       <script src={`${BASE}/static/preview.js`} defer></script>
       <script src={`${BASE}/static/header.js`} defer></script>
+      <script src={`${BASE}/static/confirm.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
       <Background />
@@ -392,10 +384,12 @@ export const Layout = ({
               class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
             >
               <img
-                src={`${BASE}/static/syndex_logo_2.png`}
+                // A copy at the size it is drawn, on every page: the full
+                // image is 144 kB to fill thirty-six pixels.
+                src={`${BASE}/static/syndex_logo_180.png`}
                 alt=""
-                width="824"
-                height="862"
+                width="172"
+                height="180"
                 class="h-9 w-auto"
               />
               Syndex
@@ -487,14 +481,17 @@ export const Layout = ({
           </a>
         </div>
       </footer>
+      {/* Each dialog is named by its own heading. Without that a screen
+          reader announces "dialog" and nothing about which one has opened. */}
       <dialog
         id="bulk-command"
+        aria-labelledby="bulk-command-title"
         class="card m-auto w-[min(46rem,calc(100%-2rem))] overflow-visible border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
       >
         <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
           <div class="min-w-0 flex-1">
             <p data-command-eyebrow class="label-caps mb-2 text-accent-light">Ready to run</p>
-            <h2 data-command-title class="text-2xl leading-tight">Download command</h2>
+            <h2 id="bulk-command-title" data-command-title class="text-2xl leading-tight">Download command</h2>
             <p data-command-intro class="mt-2 text-sm text-muted">Copied to your clipboard.</p>
           </div>
           <div>
@@ -535,12 +532,13 @@ export const Layout = ({
       </dialog>
       <dialog
         id="download-notice"
+        aria-labelledby="download-notice-title"
         class="card m-auto w-[min(34rem,calc(100%-2rem))] overflow-hidden border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
       >
         <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
           <div class="min-w-0 flex-1">
             <p class="label-caps mb-2 text-accent-light">Direct download</p>
-            <h2 class="text-2xl leading-tight">Ready to download?</h2>
+            <h2 id="download-notice-title" class="text-2xl leading-tight">Ready to download?</h2>
           </div>
           <button
             type="button"

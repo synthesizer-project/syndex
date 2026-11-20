@@ -515,6 +515,37 @@ const tests = {
     assert.deepEqual(rows.params, ["grid", "spins"]);
   },
 
+  async "every page says what a browser may load, and loads nothing from elsewhere"() {
+    const { body, headers } = await call("/syndex/search", { DB: stubDb() });
+
+    const policy = headers.get("content-security-policy");
+    assert.match(policy, /default-src 'self'/);
+    assert.match(policy, /script-src 'self'(;|$)/, "no inline or foreign script");
+    assert.match(policy, /frame-ancestors 'none'/);
+    assert.equal(headers.get("x-content-type-options"), "nosniff");
+    assert.equal(headers.get("x-frame-options"), "DENY");
+    assert.equal(headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+    assert.match(headers.get("strict-transport-security"), /^max-age=\d+$/);
+
+    // The policy is only true if the page keeps to it.
+    assert.doesNotMatch(body, /fonts\.(googleapis|gstatic)\.com/);
+    assert.doesNotMatch(body, /<script(?![^>]*\ssrc=)/, "an inline script");
+    assert.doesNotMatch(body, /\son[a-z]+="/, "an inline event handler");
+  },
+
+  async "ending every session is asked about before it is done"() {
+    const { status, body } = await call(
+      "/syndex/account",
+      contributorEnv(),
+      SIGNED_IN,
+    );
+
+    assert.equal(status, 200);
+    // The question rides on the form, and the script that asks it is loaded.
+    assert.match(body, /action="\/syndex\/logout\/everywhere"[^>]*data-confirm="Sign out everywhere\?/);
+    assert.match(body, /static\/confirm\.js/);
+  },
+
   async "no URL can ask D1 for more than it will take"() {
     // 50 bytes of LIKE pattern and 100 bound parameters, both of which D1
     // answers with an error rather than with nothing.
@@ -820,7 +851,9 @@ const tests = {
     assert.match(body, />hdf5<\/td>/);
     assert.match(body, />203 MB<\/td>/);
     assert.match(body, />published<\/a><\/th>/);
-    assert.match(body, />2026-09-04<\/td>/);
+    // The day for a reader, the moment for a program.
+    assert.match(body, /<time datetime="2026-09-04[^"]*">2026-09-04<\/time><\/td>/);
+    assert.match(body, /<caption class="sr-only">Datasets, one per row<\/caption>/);
     assert.doesNotMatch(body, /size \(MB\)/);
     assert.doesNotMatch(body, />version<\/a><\/th>/);
     assert.doesNotMatch(body, />what it is<\/th>/);
@@ -1215,7 +1248,7 @@ const tests = {
     assert.equal(status, 200);
     assert.match(
       body,
-      /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_2\.png"/,
+      /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_180\.png"/,
     );
     assert.match(body, /A grid\. With another line\./);
     assert.match(
@@ -2101,6 +2134,12 @@ const tests = {
     const badName = await postSubmission(env, { name: "Not A Name" });
     assert.equal(badName.status, 400);
     assert.match(badName.body, /lowercase letters, digits and hyphens/);
+    // The error leads to the field, and the field says it is the one at
+    // fault and where the reason is; the fields that were fine say nothing.
+    assert.match(badName.body, /<a href="#name">The catalogue name must be/);
+    assert.match(badName.body, /<input[^>]*id="name"[^>]*aria-invalid="true"/);
+    assert.match(badName.body, /<input[^>]*id="name"[^>]*aria-describedby="form-errors"/);
+    assert.doesNotMatch(badName.body, /id="display_name"[^>]*aria-invalid/);
 
     const badType = await postSubmission(env, { data_type: "nonsense" });
     assert.equal(badType.status, 400);
@@ -3447,7 +3486,7 @@ const tests = {
     );
     assert.match(body, /<meta name="twitter:card" content="summary"/);
     // And a favicon, which the site had none of at all.
-    assert.match(body, /<link rel="icon" href="[^"]*syndex_logo_2\.png"/);
+    assert.match(body, /<link rel="icon" href="[^"]*syndex_logo_180\.png"/);
   },
 
   async "a dataset page shows its preview as a clickable thumbnail"() {

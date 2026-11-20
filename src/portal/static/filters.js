@@ -291,4 +291,56 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("htmx:afterSwap", updateBulkSelection);
+
+// Says how many results a filter change left, to somebody who cannot see the
+// table redraw. The region lives outside the panel htmx replaces and is made
+// once, empty: a screen reader announces a change to a region it already
+// knows about, and stays silent about one that turns up with the new content.
+const announcer = document.createElement("p");
+announcer.className = "sr-only";
+announcer.setAttribute("role", "status");
+document.body.append(announcer);
+
+// Going back restores the page from htmx's history, which replaces everything
+// in the body, this region included. It is put back, empty, so that it is
+// already there and known about when the next filter change has something to
+// say.
+document.addEventListener("htmx:historyRestore", () => {
+  announcer.textContent = "";
+  document.body.append(announcer);
+});
+
+document.addEventListener("htmx:afterSwap", () => {
+  const count = document.getElementById("result-count");
+  if (count !== null) {
+    announcer.textContent = count.textContent.trim().replace(/\s+/g, " ");
+  }
+});
+
+// A filter request that fails changes nothing on the page, and htmx says
+// nothing about it: the click simply appears not to have worked. The line
+// that says "searching…" says so instead, and being a status region it is
+// read out as well as shown. Nothing was swapped, so the results on screen
+// are still the last ones that loaded, and the links still work as links.
+const SEARCHING = "searching…";
+
+function reportFailure() {
+  const busy = document.getElementById("busy");
+  if (busy !== null) {
+    busy.textContent = "That did not load. Try again, or reload the page.";
+    busy.classList.add("failed");
+  }
+}
+
+for (const failure of ["htmx:responseError", "htmx:sendError", "htmx:timeout"]) {
+  document.addEventListener(failure, reportFailure);
+}
+
+document.addEventListener("htmx:beforeRequest", () => {
+  const busy = document.getElementById("busy");
+  if (busy !== null) {
+    busy.textContent = SEARCHING;
+    busy.classList.remove("failed");
+  }
+});
 updateBulkSelection();

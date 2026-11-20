@@ -170,6 +170,13 @@ catalogue is identifiers, digits and numeric ranges, all of which a monospace
 sets better. One family; hierarchy comes from size and weight. A display serif
 over monospace tables read as two unrelated documents and was dropped.
 
+The typeface is served from the portal itself (`@fontsource-variable/jetbrains-mono`,
+copied into `static/files/` by the build), not from Google Fonts: a font
+request to a third party gives it every reader's address. With that gone,
+every page carries a Content-Security-Policy that allows the portal's own
+origin and the API's preview images and nothing else, set once in
+`src/portal/app.jsx` along with the other security headers.
+
 Accessibility is a requirement, not an aspiration: visible focus rings, the
 rail operable by keyboard, filters collapsing into a labelled sheet when
 narrow, tables scrolling in their own container, and identity never carried by

@@ -191,7 +191,11 @@ export const Account = ({ counts, user, submitted = [], reviewed = [] }) => {
               Sign out
             </button>
           </form>
-          <form method="post" action={`${BASE}/logout/everywhere`}>
+          <form
+            method="post"
+            action={`${BASE}/logout/everywhere`}
+            data-confirm="Sign out everywhere? Any syndex-submit transfer still running on another machine will have to sign in again."
+          >
             <button
               type="submit"
               class="btn-quiet cursor-pointer"

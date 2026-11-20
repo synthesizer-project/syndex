@@ -103,13 +103,18 @@ export function size(bytes) {
 /**
  * Format a stored timestamp as a plain date.
  *
+ * In a `<time>` carrying the whole timestamp, so that what a person reads as
+ * a day a program can still read as a moment.
+ *
  * @param {string | null} timestamp ISO 8601 timestamp.
- * @returns {string} The date part, or an em dash.
+ * @returns {unknown} The date part, or an em dash.
  */
 export function date(timestamp) {
-  return timestamp === null || timestamp === undefined
-    ? "—"
-    : String(timestamp).slice(0, 10);
+  return timestamp === null || timestamp === undefined ? (
+    "—"
+  ) : (
+    <time datetime={String(timestamp)}>{String(timestamp).slice(0, 10)}</time>
+  );
 }
 
 /**

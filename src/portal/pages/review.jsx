@@ -71,7 +71,12 @@ export const Deprecation = ({ dataset }) => {
         Deprecate the whole dataset when people should use something else, or
         one release when they should use a newer one.
       </p>
-      <form method="post" action={action} class="flex flex-wrap items-end gap-3">
+      <form
+        method="post"
+        action={action}
+        data-confirm={`Mark this as deprecated? The catalogue and the API will say so at once.`}
+        class="flex flex-wrap items-end gap-3"
+      >
         <label for="deprecate-what">
           <span class="label-caps mb-1 block">What</span>
           <select id="deprecate-what" name="release" class={field}>
@@ -340,13 +345,20 @@ const Submission = ({ submission, bucket }) => {
               class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
             />
           </label>
-          <button type="submit" name="decision" value="approved" class="btn">
+          <button
+            type="submit"
+            name="decision"
+            value="approved"
+            data-confirm={`Approve ${submission.name}? The contributor is told, and the decision is not undone from here.`}
+            class="btn"
+          >
             Approve
           </button>
           <button
             type="submit"
             name="decision"
             value="rejected"
+            data-confirm={`Reject ${submission.name}? The contributor is told, with the note above, and the decision is not undone from here.`}
             class="btn-quiet"
           >
             Reject

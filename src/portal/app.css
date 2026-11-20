@@ -128,13 +128,19 @@
   input[type="checkbox"] {
     accent-color: var(--color-accent-light);
   }
+}
 
-  /* A field the server refused. The summary above the form says what is
-     wrong in words; this is only where. */
-  [aria-invalid="true"] {
-    border-color: var(--color-accent-light);
-    border-width: 2px;
-  }
+/*
+ * A field the server refused. The summary above the form says what is wrong
+ * in words; this is only where.
+ *
+ * Outside the base layer on purpose. Every field sets its own border with
+ * utilities, and a utility beats anything in the base layer whatever the
+ * selector, so in there this rule was written and never applied.
+ */
+[aria-invalid="true"] {
+  border-color: var(--color-accent-light);
+  border-width: 2px;
 }
 
 .bg-layer {

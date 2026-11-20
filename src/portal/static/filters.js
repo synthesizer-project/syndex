@@ -301,6 +301,15 @@ announcer.className = "sr-only";
 announcer.setAttribute("role", "status");
 document.body.append(announcer);
 
+// Going back restores the page from htmx's history, which replaces everything
+// in the body, this region included. It is put back, empty, so that it is
+// already there and known about when the next filter change has something to
+// say.
+document.addEventListener("htmx:historyRestore", () => {
+  announcer.textContent = "";
+  document.body.append(announcer);
+});
+
 document.addEventListener("htmx:afterSwap", () => {
   const count = document.getElementById("result-count");
   if (count !== null) {

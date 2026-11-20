@@ -42,7 +42,11 @@
   // `wrangler dev` otherwise presents every request under the first route's
   // hostname, which is the API's -- and the API's hostname redirects /syndex
   // to production, so the portal could not be opened locally at all.
-  "dev": { "host": "localhost" },
+  //
+  // With the port, and the port pinned to match: the Worker builds the GitHub
+  // sign-in callback from the address it is asked for, and the one registered
+  // for local use is http://localhost:8787/syndex/auth/callback.
+  "dev": { "host": "localhost:8787", "port": 8787 },
   "assets": {
     "directory": "public"
   },

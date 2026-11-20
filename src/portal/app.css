@@ -8,6 +8,16 @@
 
 @import "tailwindcss";
 
+/*
+ * The typeface, served from here rather than from Google. A font request to
+ * a third party hands it every reader's address, which is not ours to give,
+ * and it was the one thing on the page that came from another origin. The
+ * files are copied beside this stylesheet by `npm run build`, which is where
+ * the relative URLs in these two sheets expect them.
+ */
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
+
 @source "./";
 
 /*
@@ -47,8 +57,8 @@
    * numeric ranges, which a monospace sets better anyway, and hierarchy
    * comes from size and weight rather than from a second family.
    */
-  --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @layer base {

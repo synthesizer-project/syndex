@@ -515,6 +515,24 @@ const tests = {
     assert.deepEqual(rows.params, ["grid", "spins"]);
   },
 
+  async "every page says what a browser may load, and loads nothing from elsewhere"() {
+    const { body, headers } = await call("/syndex/search", { DB: stubDb() });
+
+    const policy = headers.get("content-security-policy");
+    assert.match(policy, /default-src 'self'/);
+    assert.match(policy, /script-src 'self'(;|$)/, "no inline or foreign script");
+    assert.match(policy, /frame-ancestors 'none'/);
+    assert.equal(headers.get("x-content-type-options"), "nosniff");
+    assert.equal(headers.get("x-frame-options"), "DENY");
+    assert.equal(headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+    assert.match(headers.get("strict-transport-security"), /^max-age=\d+$/);
+
+    // The policy is only true if the page keeps to it.
+    assert.doesNotMatch(body, /fonts\.(googleapis|gstatic)\.com/);
+    assert.doesNotMatch(body, /<script(?![^>]*\ssrc=)/, "an inline script");
+    assert.doesNotMatch(body, /\son[a-z]+="/, "an inline event handler");
+  },
+
   async "no URL can ask D1 for more than it will take"() {
     // 50 bytes of LIKE pattern and 100 bound parameters, both of which D1
     // answers with an error rather than with nothing.

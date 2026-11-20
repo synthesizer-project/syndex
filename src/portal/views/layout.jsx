@@ -41,15 +41,6 @@ export const ViewerContext = createContext({
   origin: "https://synthesizer-project.org",
 });
 
-/*
- * One family, one request. The name matters: the org site asks for
- * `Cormorant+Garant`, which is not a Google family, so the response silently
- * omits it. This URL was checked to return the family it names.
- */
-const FONTS =
-  "https://fonts.googleapis.com/css2" +
-  "?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap";
-
 /**
  * The starfield behind every page.
  *
@@ -358,9 +349,6 @@ export const Layout = ({
         name="twitter:card"
         content={card.wide ? "summary_large_image" : "summary"}
       />
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
-      <link rel="stylesheet" href={FONTS} />
       <link rel="stylesheet" href={`${BASE}/static/app.css`} />
       {/* Vendored and pinned rather than loaded from a CDN, so the portal
           has one origin and one thing that can go down. */}

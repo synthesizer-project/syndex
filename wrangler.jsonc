@@ -39,6 +39,10 @@
   // in here sits at a /v1 path, so the API cannot be shadowed by one; with
   // no matching asset the request falls through to the Worker, which is
   // every page the portal serves.
+  // `wrangler dev` otherwise presents every request under the first route's
+  // hostname, which is the API's -- and the API's hostname redirects /syndex
+  // to production, so the portal could not be opened locally at all.
+  "dev": { "host": "localhost" },
   "assets": {
     "directory": "public"
   },

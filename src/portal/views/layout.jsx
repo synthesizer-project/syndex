@@ -332,8 +332,8 @@ export const Layout = ({
       {/* The tab icon, and what a bookmark or a chat client shows beside a
           link. Absent entirely until now, which is half of why an unfurl had
           nothing to draw. */}
-      <link rel="icon" href={`${BASE}/static/syndex_logo_2.png`} />
-      <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_2.png`} />
+      <link rel="icon" href={`${BASE}/static/syndex_logo_180.png`} />
+      <link rel="apple-touch-icon" href={`${BASE}/static/syndex_logo_180.png`} />
 
       <meta property="og:type" content="website" />
       <meta property="og:site_name" content="Syndex" />
@@ -381,10 +381,12 @@ export const Layout = ({
               class="flex items-center gap-2 text-xl font-medium tracking-tight text-text no-underline"
             >
               <img
-                src={`${BASE}/static/syndex_logo_2.png`}
+                // A copy at the size it is drawn, on every page: the full
+                // image is 144 kB to fill thirty-six pixels.
+                src={`${BASE}/static/syndex_logo_180.png`}
                 alt=""
-                width="824"
-                height="862"
+                width="172"
+                height="180"
                 class="h-9 w-auto"
               />
               Syndex

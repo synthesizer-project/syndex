@@ -1,0 +1,16 @@
+# Cache lifetimes for the files Cloudflare serves without running the Worker.
+# Copied to public/_headers by `npm run build`.
+#
+# Scripts, stylesheet and images: five minutes, the same as the pages that
+# name them, so a deploy can leave a reader with a page and a stylesheet from
+# different versions for no longer than it already could with the page alone.
+# Their names carry no version, so nothing here may be kept for longer.
+/syndex/static/*
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
+
+# The typeface. These names change only with the font's own version, and a
+# font fetched again on every visit is the largest thing on the page.
+/syndex/static/files/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable

@@ -1246,7 +1246,7 @@ const tests = {
     assert.equal(status, 200);
     assert.match(
       body,
-      /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_2\.png"/,
+      /href="\/syndex"[^>]*><img src="\/syndex\/static\/syndex_logo_180\.png"/,
     );
     assert.match(body, /A grid\. With another line\./);
     assert.match(
@@ -3484,7 +3484,7 @@ const tests = {
     );
     assert.match(body, /<meta name="twitter:card" content="summary"/);
     // And a favicon, which the site had none of at all.
-    assert.match(body, /<link rel="icon" href="[^"]*syndex_logo_2\.png"/);
+    assert.match(body, /<link rel="icon" href="[^"]*syndex_logo_180\.png"/);
   },
 
   async "a dataset page shows its preview as a clickable thumbnail"() {

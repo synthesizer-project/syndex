@@ -98,22 +98,24 @@ The configuration the portal expects, and what each piece is for, is in
 
 ## Migrations
 
-Ordered SQL in `migrations/`, applied by hand rather than by the deploy
-workflow: a schema change should land when someone is watching it, not as a
-side effect of a merge.
+Ordered SQL in `migrations/`. The deploy workflow applies whatever the
+production database has not recorded, immediately before it deploys, so a
+merge to `main` carries its schema with it and the Worker never runs ahead of
+the database. That needs the `CLOUDFLARE_API_TOKEN` secret to carry D1 edit
+permission as well as Workers deploy.
 
 ```bash
 npx wrangler d1 migrations list synthesizer-database --remote
 npx wrangler d1 migrations apply synthesizer-database --remote
 ```
 
-A deploy must not outrun the database: a Worker that reads a column which is
-not there yet fails on every request. So apply a migration before merging the
-code that needs it. The deploy workflow enforces the order — it stops, naming
-the file, if `migrations/` holds anything the production database has not
-recorded — which needs the `CLOUDFLARE_API_TOKEN` secret to carry D1 read
-permission as well as Workers deploy. Apply the migration and re-run the
-workflow.
+By hand only to look, or to apply one ahead of a merge. A migration that fails
+stops the deploy with the previous Worker still serving.
+
+Between the migration and the deploy, the previous Worker runs against the new
+schema, and it goes on doing so if the deploy then fails. D1 keeps no down
+migrations: undoing one is another migration, or a restore with
+`wrangler d1 time-travel`.
 
 That makes a migration something the running code has to survive: add
 columns and tables, and remove one only after the code that used it has gone.

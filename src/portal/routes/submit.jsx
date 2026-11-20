@@ -54,6 +54,20 @@ import { fragment, page, requireRole } from "./respond.jsx";
 export const routes = new Hono();
 
 /**
+ * An error that is about one field of the form.
+ *
+ * The page links it to that field and marks the field as the one at fault,
+ * which is what lets somebody who cannot see the summary sitting above the
+ * form find out which box it is talking about. An error about the submission
+ * as a whole -- a full queue -- stays a plain string.
+ *
+ * @param {string} field The id of the control it concerns.
+ * @param {string} message What is wrong.
+ * @returns {{field: string, message: string}} The error.
+ */
+const about = (field, message) => ({ field, message });
+
+/**
  * What the form asks for, checked before anything is stored.
  *
  * Written as one pass over the fields rather than as validation scattered
@@ -61,8 +75,8 @@ export const routes = new Hono();
  * is wrong with it at once instead of one problem per attempt.
  *
  * @param {object} form The parsed form body.
- * @returns {{values: object, errors: string[]}} What was submitted, and what
- *     is wrong with it.
+ * @returns {{values: object, errors: Array<string | object>}} What was
+ *     submitted, and what is wrong with it; see `about`.
  */
 function readSubmission(form) {
   const values = Object.fromEntries(
@@ -103,18 +117,21 @@ function readSubmission(form) {
   // typed into a shell and a URL without quoting.
   if (!/^[a-z0-9][a-z0-9-]*$/.test(values.name)) {
     errors.push(
-      "The catalogue name must be lowercase letters, digits and hyphens, " +
-        "starting with a letter or digit.",
+      about(
+        "name",
+        "The catalogue name must be lowercase letters, digits and hyphens, " +
+          "starting with a letter or digit.",
+      ),
     );
   }
   if (values.name.length > 128) {
-    errors.push("The catalogue name is too long.");
+    errors.push(about("name", "The catalogue name is too long."));
   }
   if (values.display_name === "") {
-    errors.push("A display name is needed.");
+    errors.push(about("display_name", "A display name is needed."));
   }
   if (!SUBMISSION_TYPES.includes(values.data_type)) {
-    errors.push("Choose one of the listed data types.");
+    errors.push(about("data_type", "Choose one of the listed data types."));
   }
 
   // Citations are ADS bibcodes, which are a fixed nineteen characters: four
@@ -126,14 +143,22 @@ function readSubmission(form) {
   );
   if (malformed.length > 0) {
     errors.push(
-      `Not an ADS bibcode: ${malformed.join(", ")}. A bibcode looks like ` +
-        "2017PASA...34...58E.",
+      about(
+        "citation",
+        `Not an ADS bibcode: ${malformed.join(", ")}. A bibcode looks like ` +
+          "2017PASA...34...58E.",
+      ),
     );
   }
   // Answering "yes, this should be cited" and then giving nothing is a
   // question left half answered rather than a decision.
   if (values.has_citations && rows.length === 0) {
-    errors.push("Add at least one bibcode, or say this data needs no citation.");
+    errors.push(
+      about(
+        "citation",
+        "Add at least one bibcode, or say this data needs no citation.",
+      ),
+    );
   }
 
   return { values, errors };
@@ -331,11 +356,14 @@ routes.post("/submit/new", requireRole("contributor"), async (c) => {
       );
     } else if (published !== null && values.release_of === null) {
       errors.push(
-        `${values.name} is already in the catalogue. To replace or add to it,` +
-          " submit a new release of it instead.",
+        about(
+          "name",
+          `${values.name} is already in the catalogue. To replace or add to it,` +
+            " submit a new release of it instead.",
+        ),
       );
     } else if (waiting !== null && waiting.user_id !== user.user_id) {
-      errors.push(`Somebody else is already submitting ${values.name}.`);
+      errors.push(about("name", `Somebody else is already submitting ${values.name}.`));
     } else {
       mine = waiting;
     }

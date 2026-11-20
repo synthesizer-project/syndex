@@ -128,6 +128,13 @@
   input[type="checkbox"] {
     accent-color: var(--color-accent-light);
   }
+
+  /* A field the server refused. The summary above the form says what is
+     wrong in words; this is only where. */
+  [aria-invalid="true"] {
+    border-color: var(--color-accent-light);
+    border-width: 2px;
+  }
 }
 
 .bg-layer {

@@ -248,6 +248,13 @@ export const Submit = ({
   errors = [],
 }) => {
   const rows = values.citation_rows ?? [];
+  // What a control carries when the server refused it: that it is the one at
+  // fault, and where the reason is written.
+  const refused = new Set(errors.map((error) => error.field));
+  const wrong = (field) =>
+    refused.has(field)
+      ? { "aria-invalid": "true", "aria-describedby": "form-errors" }
+      : {};
 
   return (
     <Layout title="Submit a dataset" counts={counts} active={null} showSubmit={false}>
@@ -290,12 +297,26 @@ export const Submit = ({
         </div>
       )}
 
+      {/* Each error about a field is a link to that field, and the field
+          points back here: the summary is above the form, and without the
+          pair somebody using a screen reader hears that something is wrong
+          and then has to go looking for what. */}
       {errors.length > 0 && (
-        <div role="alert" class="mt-4 rounded border border-accent-light p-3 text-sm">
+        <div
+          id="form-errors"
+          role="alert"
+          class="mt-4 rounded border border-accent-light p-3 text-sm"
+        >
           <p class="mb-1">This submission was not accepted:</p>
           <ul class="list-disc pl-5">
-            {errors.map((message) => (
-              <li>{message}</li>
+            {errors.map((error) => (
+              <li>
+                {typeof error === "string" ? (
+                  error
+                ) : (
+                  <a href={`#${error.field}`}>{error.message}</a>
+                )}
+              </li>
             ))}
           </ul>
         </div>
@@ -330,6 +351,7 @@ export const Submit = ({
                 id="data_type"
                 name="data_type"
                 required
+                {...wrong("data_type")}
                 class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
               >
                 <option value="" disabled selected={!values.data_type}>
@@ -352,6 +374,7 @@ export const Submit = ({
                 name="name"
                 value={values.name}
                 required
+                {...wrong("name")}
                 readonly={releaseOf !== null}
                 maxlength="128"
                 pattern="[a-z0-9][a-z0-9-]*"
@@ -367,6 +390,7 @@ export const Submit = ({
                 name="display_name"
                 value={values.display_name}
                 required
+                {...wrong("display_name")}
                 maxlength="256"
                 placeholder={DEFAULT_EXAMPLE.display_name}
               />
@@ -400,7 +424,10 @@ export const Submit = ({
                     length: Math.max(CITATION_ROWS, rows.length),
                   }).map((_, index) => (
                     <input
+                      // The first box is where a citation error points.
+                      id={index === 0 ? "citation" : undefined}
                       name="citation"
+                      {...wrong("citation")}
                       // The boxes share one visible instruction and have no
                       // label each, so this is all a screen reader is told.
                       aria-label={`ADS bibcode ${index + 1}`}

@@ -2132,6 +2132,12 @@ const tests = {
     const badName = await postSubmission(env, { name: "Not A Name" });
     assert.equal(badName.status, 400);
     assert.match(badName.body, /lowercase letters, digits and hyphens/);
+    // The error leads to the field, and the field says it is the one at
+    // fault and where the reason is; the fields that were fine say nothing.
+    assert.match(badName.body, /<a href="#name">The catalogue name must be/);
+    assert.match(badName.body, /<input[^>]*id="name"[^>]*aria-invalid="true"/);
+    assert.match(badName.body, /<input[^>]*id="name"[^>]*aria-describedby="form-errors"/);
+    assert.doesNotMatch(badName.body, /id="display_name"[^>]*aria-invalid/);
 
     const badType = await postSubmission(env, { data_type: "nonsense" });
     assert.equal(badType.status, 400);

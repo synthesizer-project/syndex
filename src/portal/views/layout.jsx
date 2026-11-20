@@ -476,14 +476,17 @@ export const Layout = ({
           </a>
         </div>
       </footer>
+      {/* Each dialog is named by its own heading. Without that a screen
+          reader announces "dialog" and nothing about which one has opened. */}
       <dialog
         id="bulk-command"
+        aria-labelledby="bulk-command-title"
         class="card m-auto w-[min(46rem,calc(100%-2rem))] overflow-visible border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
       >
         <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
           <div class="min-w-0 flex-1">
             <p data-command-eyebrow class="label-caps mb-2 text-accent-light">Ready to run</p>
-            <h2 data-command-title class="text-2xl leading-tight">Download command</h2>
+            <h2 id="bulk-command-title" data-command-title class="text-2xl leading-tight">Download command</h2>
             <p data-command-intro class="mt-2 text-sm text-muted">Copied to your clipboard.</p>
           </div>
           <div>
@@ -524,12 +527,13 @@ export const Layout = ({
       </dialog>
       <dialog
         id="download-notice"
+        aria-labelledby="download-notice-title"
         class="card m-auto w-[min(34rem,calc(100%-2rem))] overflow-hidden border-line-hover bg-surface p-0 text-text shadow-2xl backdrop:bg-bg/85"
       >
         <div class="flex items-start gap-5 px-6 pt-6 pb-5 sm:px-8 sm:pt-8">
           <div class="min-w-0 flex-1">
             <p class="label-caps mb-2 text-accent-light">Direct download</p>
-            <h2 class="text-2xl leading-tight">Ready to download?</h2>
+            <h2 id="download-notice-title" class="text-2xl leading-tight">Ready to download?</h2>
           </div>
           <button
             type="button"

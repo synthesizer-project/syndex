@@ -292,6 +292,22 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("htmx:afterSwap", updateBulkSelection);
 
+// Says how many results a filter change left, to somebody who cannot see the
+// table redraw. The region lives outside the panel htmx replaces and is made
+// once, empty: a screen reader announces a change to a region it already
+// knows about, and stays silent about one that turns up with the new content.
+const announcer = document.createElement("p");
+announcer.className = "sr-only";
+announcer.setAttribute("role", "status");
+document.body.append(announcer);
+
+document.addEventListener("htmx:afterSwap", () => {
+  const count = document.getElementById("result-count");
+  if (count !== null) {
+    announcer.textContent = count.textContent.trim().replace(/\s+/g, " ");
+  }
+});
+
 // A filter request that fails changes nothing on the page, and htmx says
 // nothing about it: the click simply appears not to have worked. The line
 // that says "searching…" says so instead, and being a status region it is

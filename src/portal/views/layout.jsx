@@ -356,6 +356,7 @@ export const Layout = ({
       <script src={`${BASE}/static/filters.js`} defer></script>
       <script src={`${BASE}/static/preview.js`} defer></script>
       <script src={`${BASE}/static/header.js`} defer></script>
+      <script src={`${BASE}/static/confirm.js`} defer></script>
     </head>
     <body class="flex min-h-screen flex-col bg-bg text-text">
       <Background />

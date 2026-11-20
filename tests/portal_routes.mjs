@@ -533,6 +533,19 @@ const tests = {
     assert.doesNotMatch(body, /\son[a-z]+="/, "an inline event handler");
   },
 
+  async "ending every session is asked about before it is done"() {
+    const { status, body } = await call(
+      "/syndex/account",
+      contributorEnv(),
+      SIGNED_IN,
+    );
+
+    assert.equal(status, 200);
+    // The question rides on the form, and the script that asks it is loaded.
+    assert.match(body, /action="\/syndex\/logout\/everywhere"[^>]*data-confirm="Sign out everywhere\?/);
+    assert.match(body, /static\/confirm\.js/);
+  },
+
   async "no URL can ask D1 for more than it will take"() {
     // 50 bytes of LIKE pattern and 100 bound parameters, both of which D1
     // answers with an error rather than with nothing.

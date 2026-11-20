@@ -157,6 +157,7 @@ const RevokeForm = ({ person, grantable, viewer, from }) => {
     <form
       method="post"
       action={`${BASE}/review/users/${person.user_id}/revoke`}
+      data-confirm={`Sign ${person.login} out everywhere and remove their role?`}
       class="mt-5 border-t border-line pt-5"
     >
       <input type="hidden" name="from" value={from} />

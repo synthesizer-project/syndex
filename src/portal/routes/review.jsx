@@ -449,11 +449,21 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
 
   // Approving is approving a file. A submission whose file has not arrived
   // can still be turned away, but there is nothing in it yet to approve.
+  //
+  // Nor is it approved until syndex-upload has published it: a release of
+  // that name dated after the submission. Approval used to be allowed first,
+  // and two submissions sat "approved" for a week with nothing in the
+  // catalogue, because the decision looked like the end of the job.
   const submission = await c.env.DB.prepare(
     `UPDATE submissions
      SET state = ?, reviewed_at = ?, reviewer_note = ?, reviewed_by = ?
      WHERE submission_id = ? AND state = 'pending'
-       AND (? = 'rejected' OR uploaded_at IS NOT NULL)
+       AND (? = 'rejected' OR (
+         uploaded_at IS NOT NULL AND EXISTS (
+           SELECT 1 FROM releases
+           JOIN datasets ON datasets.dataset_id = releases.dataset_id
+           WHERE datasets.name = submissions.name
+             AND releases.published_at >= submissions.submitted_at)))
      RETURNING name`,
   )
     .bind(
@@ -473,9 +483,10 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
       viewer={c.get("viewer").user}
       note={
         submission === null
-          ? "That submission has already been reviewed, or its file has not arrived yet."
-          : `${submission.name} marked ${decision}. Publishing it is still a` +
-            " deliberate run of syndex-upload."
+          ? "Nothing was decided. Either that submission has already been" +
+            " reviewed, its file has not arrived, or it has not been" +
+            " published yet: run syndex-upload before approving."
+          : `${submission.name} marked ${decision}.`
       }
     />,
     { cache: "no-store" },

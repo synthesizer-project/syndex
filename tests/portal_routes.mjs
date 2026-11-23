@@ -2669,7 +2669,12 @@ const tests = {
     issued.length = 0;
     await call("/syndex/review/7", env(), signedInPost({ decision: "rejected" }));
     const update = statement(issued, "UPDATE submissions");
-    assert.match(update.sql, /\? = 'rejected' OR uploaded_at IS NOT NULL/);
+    assert.match(update.sql, /\? = 'rejected' OR \(\s*uploaded_at IS NOT NULL/);
+    // Approval waits for syndex-upload: a release of that name published
+    // since the submission, or nothing is recorded.
+    assert.match(update.sql, /EXISTS \(\s*SELECT 1 FROM releases/);
+    assert.match(update.sql, /datasets\.name = submissions\.name/);
+    assert.match(update.sql, /releases\.published_at >= submissions\.submitted_at/);
     assert.equal(update.params[0], "rejected");
     assert.equal(update.params.at(-1), "rejected");
   },

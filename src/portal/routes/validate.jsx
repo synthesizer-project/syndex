@@ -17,6 +17,7 @@
 
 import { Hono } from "hono";
 
+import { readPublicationReport } from "../data/publication.js";
 import { fetchAuthorised, readReport, reportAuthorised } from "../data/validation.js";
 
 /** The routes this module contributes, mounted by `app.jsx`. */
@@ -106,6 +107,47 @@ routes.post("/validate/:id{[0-9]+}", async (c) => {
 
   if (updated === null) {
     return c.json({ error: "No such submission" }, 404);
+  }
+  return c.json({ recorded: state }, 200, { "cache-control": "no-store" });
+});
+
+/**
+ * Take a publication run's outcome.
+ *
+ * Same authentication as a validation report. Only an approved submission
+ * that is waiting on a run is updated, so a late or replayed report cannot
+ * mark something published that nobody approved.
+ */
+routes.post("/publish/:id{[0-9]+}", async (c) => {
+  if (!reportAuthorised(c.env, c.req.header("authorization")?.slice(7))) {
+    return c.json({ error: "Not authorised" }, 403);
+  }
+
+  const report = await c.req.json().catch(() => null);
+  if (report === null) {
+    return c.json({ error: "That is not a report" }, 400);
+  }
+
+  const state = readPublicationReport(report);
+  const updated = await c.env.DB.prepare(
+    `UPDATE submissions
+     SET publication_state = ?, publication_report_json = ?,
+         published_at = CASE WHEN ? = 'published' THEN ? ELSE published_at END
+     WHERE submission_id = ? AND state = 'approved'
+       AND publication_state = 'running'
+     RETURNING submission_id`,
+  )
+    .bind(
+      state,
+      JSON.stringify(report).slice(0, 100_000),
+      state,
+      new Date().toISOString(),
+      Number(c.req.param("id")),
+    )
+    .first();
+
+  if (updated === null) {
+    return c.json({ error: "Nothing is being published for that submission" }, 404);
   }
   return c.json({ recorded: state }, 200, { "cache-control": "no-store" });
 });

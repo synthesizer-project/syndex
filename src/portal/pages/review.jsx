@@ -14,6 +14,7 @@
  */
 
 import { BASE } from "../base.js";
+import { publishMetadata, publishable } from "../data/publication.js";
 import { date, size } from "../views/format.jsx";
 import { Command, Layout } from "../views/layout.jsx";
 import {
@@ -160,16 +161,7 @@ const ReviewStep = ({ id, number, title, hint, children }) => (
  * @returns {string} The shell commands, a dry run before the real one.
  */
 export function publishCommands(submission) {
-  const entry = {
-    name: submission.name,
-    display_name: submission.display_name,
-    set_current: true,
-  };
-  if (submission.description) entry.description = submission.description;
-  if (submission.licence) entry.licence = submission.licence;
-  const citations = (submission.citations ?? "").split(/\s+/).filter(Boolean);
-  if (citations.length > 0) entry.citations = citations;
-
+  const entry = publishMetadata(submission);
   const type =
     submission.data_type === "other" ? "CHOOSE-A-TYPE" : submission.data_type;
   const metadata = `${submission.name}.json`;
@@ -224,23 +216,23 @@ export const STAGES = [
     ],
   },
   {
-    id: "published",
-    title: "Published",
-    who: "Reviewer",
-    summary: "syndex-upload, then previews",
-    body: [
-      "This is the step that puts it in the catalogue, and nothing else does. The submission page gives the commands: a metadata file carrying what the contributor wrote, a dry run, the upload, and the preview plot.",
-      "Read the dry run before the real one. Publishing writes immutable objects to R2 and registers the release in D1, and it cannot be taken back from the portal; a mistake afterwards is a deprecation and a new release.",
-    ],
-  },
-  {
     id: "decided",
     title: "Approved",
     who: "Reviewer",
-    summary: "Record the decision",
+    summary: "Approve, or reject with a note",
     body: [
-      "Approve on the submission's page. The portal refuses an approval until a release of that name has been published since the submission arrived, so approved always means it is in the catalogue.",
-      "Rejecting needs no publication and can be done at any stage, with a note the contributor reads on their submission page. Neither decision is undone from here.",
+      "Approve on the submission's page once you are satisfied. Approving publishes it: the next stage starts at once, with nothing more for you to run.",
+      "Rejecting can be done at any stage, with a note the contributor reads on their submission page. Neither decision is undone from here; a published mistake is a deprecation and a new release.",
+    ],
+  },
+  {
+    id: "published",
+    title: "Published",
+    who: "Automatic",
+    summary: "syndex-upload runs on GitHub Actions",
+    body: [
+      "Approval starts a GitHub Actions run that fetches the file, publishes it with syndex-upload using what the contributor wrote (display name, description, citations), makes it the dataset's current release, and renders its preview plot. The submission's page says whether it is running, done, or failed.",
+      "A failed run, or one that could not be started, leaves a Try again button and the commands to publish it by hand. Runners have 14 GB of disk, so the largest grids are published by hand from a machine that already has them.",
     ],
   },
 ];
@@ -303,6 +295,91 @@ export const ReviewProcess = ({ counts }) => (
     ))}
   </Layout>
 );
+
+/**
+ * Where an approved submission's publication has got to.
+ *
+ * Approving asks a GitHub Actions run to publish the file; this is what that
+ * run reported. When there is no run to wait for -- it failed, or one could
+ * not be asked for -- the commands to do it by hand are here, and so is the
+ * button to ask again.
+ *
+ * @param {object} props Component props.
+ * @param {object} props.submission The approved submission row.
+ * @param {string} props.bucket The submissions bucket's name.
+ * @returns {unknown} The rendered panel.
+ */
+const Publication = ({ submission, bucket }) => {
+  const state = submission.publication_state ?? null;
+  let report = null;
+  try {
+    report = JSON.parse(submission.publication_report_json ?? "null");
+  } catch {
+    report = null;
+  }
+  const errors = Array.isArray(report?.errors) ? report.errors : [];
+
+  return (
+    <div class="mt-5 border-t border-line pt-4 text-sm">
+      <span class="label-caps mb-2 block">Publication</span>
+      {state === "published" && (
+        <p>
+          Published {date(submission.published_at)}:{" "}
+          <a href={`${BASE}/datasets/${encodeURIComponent(submission.name)}`}>
+            {submission.name}
+          </a>
+        </p>
+      )}
+      {state === "running" && (
+        <p>Being published by a GitHub Actions run. This page updates when it reports back.</p>
+      )}
+      {state === "failed" && (
+        <>
+          <p class="text-accent-light">The publication run failed.</p>
+          {errors.length > 0 && (
+            <ul class="mt-2 list-disc pl-5">
+              {errors.map((error) => (
+                <li>{String(error)}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {state === null && (
+        <p>
+          {publishable(submission)
+            ? "Not sent to be published: a run could not be asked for."
+            : "Not sent to be published: submitted as other, so the type is yours to choose."}
+        </p>
+      )}
+      {(state === null || state === "failed") && (
+        <>
+          {publishable(submission) && (
+            <form
+              method="post"
+              action={`${BASE}/review/${submission.submission_id}/publish`}
+              class="mt-3"
+            >
+              <button type="submit" class="btn">
+                {state === "failed" ? "Try again" : "Publish"}
+              </button>
+            </form>
+          )}
+          <details class="mt-3">
+            <summary class="cursor-pointer text-muted">Publish it by hand</summary>
+            <p class="my-2 text-xs text-muted">
+              Read the dry run before the real one.
+            </p>
+            <Command>
+              {`npx wrangler r2 object get ${bucket}/${submission.r2_key} --file ${submission.name} --remote\n`}
+              {publishCommands(submission)}
+            </Command>
+          </details>
+        </>
+      )}
+    </div>
+  );
+};
 
 /**
  * One waiting submission, summarised to what decides whether to open it.
@@ -450,36 +527,13 @@ const Submission = ({ submission, bucket }) => {
             title="Check it yourself"
             hint={
               "Review the file format, structure, and metadata, and " +
-              "optionally rerun the validation for yourself."
+              "optionally rerun the validation for yourself. Approving " +
+              "below publishes it."
             }
           >
             <Command>syndex-check {submission.name}</Command>
           </ReviewStep>
 
-          <ReviewStep
-            id={`publish-${submission.submission_id}`}
-            number={3}
-            title={
-              submission.release_of_name
-                ? "Publish it as a new release"
-                : "Publish it"
-            }
-            hint={
-              submission.release_of_name
-                ? "Publish it as a new release of that dataset and approve below if all looks well."
-                : "Publish it to the database and approve below if all looks well."
-            }
-          >
-            <Command>
-              {publishCommands(submission)}
-            </Command>
-            {submission.data_type === "other" && (
-              <p class="mt-2 text-xs text-muted">
-                Submitted as <strong>other</strong>, so the type is yours to
-                choose. It may be one the catalogue does not have yet.
-              </p>
-            )}
-          </ReviewStep>
         </ol>
       )}
 
@@ -503,7 +557,7 @@ const Submission = ({ submission, bucket }) => {
             type="submit"
             name="decision"
             value="approved"
-            data-confirm={`Approve ${submission.name}? The contributor is told, and the decision is not undone from here.`}
+            data-confirm={`Approve ${submission.name}? It is published to the catalogue at once, the contributor is told, and neither is undone from here.`}
             class="btn"
           >
             Approve
@@ -518,6 +572,10 @@ const Submission = ({ submission, bucket }) => {
             Reject
           </button>
         </form>
+      )}
+
+      {submission.state === "approved" && (
+        <Publication submission={submission} bucket={bucket} />
       )}
     </section>
   );

@@ -206,6 +206,37 @@ function resultsFor(sql, rows) {
   return rows.datasets ?? [GRID_ROW];
 }
 
+/** What a Worker needs to ask GitHub for runs. */
+const PUBLISHING = {
+  GITHUB_ISSUE_REPO: "o/r",
+  GITHUB_DISPATCH_TOKEN: "t",
+  SYNDEX_REPORT_SECRET: "a-shared-secret",
+};
+
+/**
+ * Run a request with fetch captured, returning the dispatches it sent.
+ *
+ * @param {() => Promise<object>} run The call to make.
+ * @returns {Promise<object[]>} The bodies sent, with the response's status
+ *     and body attached to the array.
+ */
+async function capturingFetch(run) {
+  const sent = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(null, { status: 204 });
+  };
+  try {
+    const response = await run();
+    sent.status = response.status;
+    sent.body = response.body;
+  } finally {
+    globalThis.fetch = real;
+  }
+  return sent;
+}
+
 /** A signed-in account, as the session join returns it. */
 const USER = {
   user_id: 3,
@@ -1705,6 +1736,9 @@ const tests = {
           submissions: [
             {
               ...SUBMISSION,
+              // Approved, and never sent to a runner: it has no type to
+              // publish under until somebody picks one.
+              state: "approved",
               data_type: "other",
               uploaded_at: "2026-09-14T10:00:00Z",
               uploaded_size_bytes: 10,
@@ -2331,6 +2365,162 @@ const tests = {
     assert.match(commands, /syndex-previews --only example-grid --apply$/);
   },
 
+  async "approving asks a runner to publish it, with what the contributor wrote"() {
+    const issued = [];
+    const env = submissionEnv({
+      rows: {
+        viewer: { ...USER, role: "reviewer" },
+        reviewed: [
+          {
+            ...SUBMISSION,
+            state: "approved",
+            r2_key: "submissions/abc/example-grid",
+            description: "A grid.",
+            citations: "2011ApJ...740...13Z 2026arXiv260727467V",
+          },
+        ],
+      },
+      issued,
+    });
+    Object.assign(env, PUBLISHING);
+    const sent = await capturingFetch(() =>
+      call("/syndex/review/7", env, signedInPost({ decision: "approved" })),
+    );
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].event_type, "publish-submission");
+    const payload = sent[0].client_payload;
+    assert.equal(payload.name, "example-grid");
+    assert.equal(payload.data_type, "grid");
+    assert.equal(payload.report_url, `${ORIGIN}/syndex/publish/7`);
+    assert.match(payload.fetch_url, /\/syndex\/validate\/7\/file\?expires=/);
+    const entry = payload.metadata.files["example-grid"];
+    assert.equal(entry.display_name, "Example grid");
+    assert.equal(entry.description, "A grid.");
+    assert.deepEqual(entry.citations, ["2011ApJ...740...13Z", "2026arXiv260727467V"]);
+    assert.equal(entry.set_current, true);
+    assert.ok(statement(issued, "SET publication_state = 'running'"));
+    assert.match(sent.body, /approved, and is being published/);
+  },
+
+  async "an approval no runner can take says so, and rejecting asks for nothing"() {
+    const reviewer = { ...USER, role: "reviewer" };
+    // Runs not configured: approved, and told to publish by hand.
+    const issued = [];
+    const unconfigured = await capturingFetch(() =>
+      call(
+        "/syndex/review/7",
+        submissionEnv({
+          rows: { viewer: reviewer, reviewed: [{ ...SUBMISSION, r2_key: "k" }] },
+          issued,
+        }),
+        signedInPost({ decision: "approved" }),
+      ),
+    );
+    assert.equal(unconfigured.length, 0);
+    assert.match(unconfigured.body, /commands to publish it by hand/);
+    assert.equal(issued.filter((one) => one.sql.includes("publication_state = 'running'")).length, 0);
+
+    // "other" needs a person to choose a type, so it is never sent.
+    const other = submissionEnv({
+      rows: { viewer: reviewer, reviewed: [{ ...SUBMISSION, r2_key: "k", data_type: "other" }] },
+    });
+    Object.assign(other, PUBLISHING);
+    assert.equal(
+      (await capturingFetch(() => call("/syndex/review/7", other, signedInPost({ decision: "approved" })))).length,
+      0,
+    );
+
+    const rejecting = submissionEnv({ rows: { viewer: reviewer, reviewed: [{ ...SUBMISSION, r2_key: "k" }] } });
+    Object.assign(rejecting, PUBLISHING);
+    assert.equal(
+      (await capturingFetch(() => call("/syndex/review/7", rejecting, signedInPost({ decision: "rejected" })))).length,
+      0,
+    );
+  },
+
+  async "a publication report is only taken from the runner, for a run in progress"() {
+    const issued = [];
+    const env = submissionEnv({ rows: { reviewed: [{ submission_id: 7 }] }, issued });
+    env.SYNDEX_REPORT_SECRET = "a-shared-secret";
+    const post = (secret, report) =>
+      call("/syndex/publish/7", env, {
+        method: "POST",
+        body: JSON.stringify(report),
+        headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+      });
+
+    assert.equal((await post("not-the-secret", { state: "published" })).status, 403);
+    assert.equal(issued.filter((one) => one.sql.includes("UPDATE submissions")).length, 0);
+
+    // Anything but "published" is a failure: never claim it is in the
+    // catalogue when it may not be.
+    await post("a-shared-secret", { state: "probably" });
+    const update = statement(issued, "SET publication_state = ?");
+    assert.equal(update.params[0], "failed");
+    assert.match(update.sql, /state = 'approved'\s+AND publication_state = 'running'/);
+  },
+
+  async "a failed publication can be tried again, or done by hand"() {
+    const failed = {
+      ...SUBMISSION,
+      state: "approved",
+      uploaded_at: "2026-09-14T10:00:00Z",
+      uploaded_size_bytes: 10,
+      r2_key: "submissions/abc/example-grid",
+      publication_state: "failed",
+      publication_report_json: JSON.stringify({ state: "failed", errors: ["Out of disk."] }),
+    };
+    const reviewer = { ...USER, role: "reviewer" };
+    const { body } = await call(
+      "/syndex/review/7",
+      submissionEnv({ rows: { viewer: reviewer, submissions: [failed] } }),
+      SIGNED_IN,
+    );
+    assert.match(body, /The publication run failed/);
+    assert.match(body, /Out of disk\./);
+    assert.match(body, /action="\/syndex\/review\/7\/publish"/);
+    assert.match(body, /Try again/);
+    assert.match(body, /--metadata example-grid\.json --data-type grid --dry-run/);
+
+    const issued = [];
+    const env = submissionEnv({ rows: { viewer: reviewer, submissions: [failed] }, issued });
+    Object.assign(env, PUBLISHING);
+    const sent = await capturingFetch(() =>
+      call("/syndex/review/7/publish", env, signedInPost({})),
+    );
+    assert.equal(sent.status, 303);
+    assert.equal(sent.length, 1);
+    // Never a second run over one in progress or one that finished.
+    assert.match(
+      statement(issued, "AND state = 'approved'").sql,
+      /publication_state IS NULL OR publication_state = 'failed'/,
+    );
+  },
+
+  async "a published submission links to its dataset"() {
+    const { body } = await call(
+      "/syndex/review/7",
+      submissionEnv({
+        rows: {
+          viewer: { ...USER, role: "reviewer" },
+          submissions: [
+            {
+              ...SUBMISSION,
+              state: "approved",
+              uploaded_at: "2026-09-14T10:00:00Z",
+              publication_state: "published",
+              published_at: "2026-09-15T10:00:00Z",
+            },
+          ],
+        },
+      }),
+      SIGNED_IN,
+    );
+    assert.match(body, /href="\/syndex\/datasets\/example-grid"/);
+    assert.doesNotMatch(body, /Try again/);
+  },
+
   async "the review queue needs a reviewer, not a shared password"() {
     // Nobody signed in: offered the sign-in rather than a 404, since that is
     // the step they are missing.
@@ -2459,12 +2649,14 @@ const tests = {
     // without having opened the file is approving something nobody has read.
     assert.match(body, /Fetch the file/);
     assert.match(body, /Check it yourself/);
-    assert.match(body, /Publish it/);
+    // Publishing is not a reviewer step any more: approving starts it.
+    assert.doesNotMatch(body, /syndex-upload/);
+    assert.match(body, /Approving below publishes it/);
     assert.match(body, /id="fetch-7"[^>]*class="peer/);
     // Steps in one list, so the CSS that gates each on the one before it has
     // siblings to walk.
     assert.match(body, /class="review-steps/);
-    assert.equal(body.match(/class="review-step"/g).length, 3);
+    assert.equal(body.match(/class="review-step"/g).length, 2);
   },
 
   async "the checker's verdict reaches the reviewer"() {
@@ -2685,7 +2877,8 @@ const tests = {
     }, signedInPost({ decision: "approved", reviewer_note: "Fine" }));
 
     assert.equal(status, 200);
-    assert.match(body, /marked approved/);
+    // Nothing configured to publish with, so it says to do it by hand.
+    assert.match(body, /example-new-grid approved\. It could not be sent/);
   },
 
   async "a decision is one of two things, and approval needs a file"() {
@@ -2707,12 +2900,7 @@ const tests = {
     issued.length = 0;
     await call("/syndex/review/7", env(), signedInPost({ decision: "rejected" }));
     const update = statement(issued, "UPDATE submissions");
-    assert.match(update.sql, /\? = 'rejected' OR \(\s*uploaded_at IS NOT NULL/);
-    // Approval waits for syndex-upload: a release of that name published
-    // since the submission, or nothing is recorded.
-    assert.match(update.sql, /EXISTS \(\s*SELECT 1 FROM releases/);
-    assert.match(update.sql, /datasets\.name = submissions\.name/);
-    assert.match(update.sql, /releases\.published_at >= submissions\.submitted_at/);
+    assert.match(update.sql, /\? = 'rejected' OR uploaded_at IS NOT NULL/);
     assert.equal(update.params[0], "rejected");
     assert.equal(update.params.at(-1), "rejected");
   },

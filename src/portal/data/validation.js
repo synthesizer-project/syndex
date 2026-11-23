@@ -82,6 +82,34 @@ export function reportAuthorised(env, presented) {
  * @returns {Promise<boolean>} Whether a run was asked for.
  */
 export async function requestValidation(env, origin, submission) {
+  // Before minting the link, which cannot be signed without the secret.
+  if (!validationConfigured(env)) {
+    return false;
+  }
+  return dispatch(env, "validate-submission", {
+    submission_id: submission.submission_id,
+    // Both derived from the request rather than configured, so a run asked
+    // for by a development deployment fetches from and reports back to that
+    // deployment.
+    fetch_url: await fetchUrl(env, origin, submission),
+    report_url: `${origin}/syndex/validate/${submission.submission_id}`,
+    filename: submission.filename,
+    expected_size: submission.uploaded_size_bytes,
+  });
+}
+
+/**
+ * Ask GitHub to run one workflow, saying so in the log if it cannot.
+ *
+ * Advisory: a failure is logged and reported as false, never thrown, so the
+ * request that asked is never failed by GitHub being busy.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {string} eventType The repository_dispatch type a workflow listens for.
+ * @param {object} payload The client payload, which must name submission_id.
+ * @returns {Promise<boolean>} Whether a run was asked for.
+ */
+export async function dispatch(env, eventType, payload) {
   if (!validationConfigured(env)) {
     return false;
   }
@@ -97,28 +125,16 @@ export async function requestValidation(env, origin, submission) {
           "content-type": "application/json",
           "user-agent": USER_AGENT,
         },
-        body: JSON.stringify({
-          event_type: "validate-submission",
-          client_payload: {
-            submission_id: submission.submission_id,
-            // Both derived from the request rather than configured, so a run
-            // asked for by a development deployment fetches from and reports
-            // back to that deployment.
-            fetch_url: await fetchUrl(env, origin, submission),
-            report_url: `${origin}/syndex/validate/${submission.submission_id}`,
-            filename: submission.filename,
-            expected_size: submission.uploaded_size_bytes,
-          },
-        }),
+        body: JSON.stringify({ event_type: eventType, client_payload: payload }),
       },
     );
 
     if (!response.ok) {
       console.error(
         JSON.stringify({
-          message: "Could not ask for a validation run",
+          message: `Could not ask for a ${eventType} run`,
           status: response.status,
-          submission: submission.submission_id,
+          submission: payload.submission_id,
         }),
       );
       return false;
@@ -127,9 +143,9 @@ export async function requestValidation(env, origin, submission) {
   } catch (error) {
     console.error(
       JSON.stringify({
-        message: "Could not reach GitHub to ask for a validation run",
+        message: `Could not reach GitHub to ask for a ${eventType} run`,
         error: error instanceof Error ? error.message : String(error),
-        submission: submission.submission_id,
+        submission: payload.submission_id,
       }),
     );
     return false;
@@ -236,7 +252,7 @@ export async function duplicateOf(env, submission) {
  * @param {object} submission The submission whose file to fetch.
  * @returns {Promise<string>} A URL good for one object for a few hours.
  */
-async function fetchUrl(env, origin, submission) {
+export async function fetchUrl(env, origin, submission) {
   const expires = Date.now() + FETCH_TTL_SECONDS * 1000;
   const signature = await sign(env, `${submission.submission_id}:${expires}`);
   return (

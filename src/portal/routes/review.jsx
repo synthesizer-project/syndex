@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { BASE } from "../base.js";
 import { endSessions } from "../data/auth.js";
 import { tabCounts } from "../data/catalogue.js";
+import { requestPublication } from "../data/publication.js";
 import { duplicateOf } from "../data/validation.js";
 import { ACCOUNTS_SHOWN, Accounts } from "../pages/people.jsx";
 import {
@@ -460,22 +461,12 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
 
   // Approving is approving a file. A submission whose file has not arrived
   // can still be turned away, but there is nothing in it yet to approve.
-  //
-  // Nor is it approved until syndex-upload has published it: a release of
-  // that name dated after the submission. Approval used to be allowed first,
-  // and two submissions sat "approved" for a week with nothing in the
-  // catalogue, because the decision looked like the end of the job.
   const submission = await c.env.DB.prepare(
     `UPDATE submissions
      SET state = ?, reviewed_at = ?, reviewer_note = ?, reviewed_by = ?
      WHERE submission_id = ? AND state = 'pending'
-       AND (? = 'rejected' OR (
-         uploaded_at IS NOT NULL AND EXISTS (
-           SELECT 1 FROM releases
-           JOIN datasets ON datasets.dataset_id = releases.dataset_id
-           WHERE datasets.name = submissions.name
-             AND releases.published_at >= submissions.submitted_at)))
-     RETURNING name`,
+       AND (? = 'rejected' OR uploaded_at IS NOT NULL)
+     RETURNING *`,
   )
     .bind(
       decision,
@@ -487,19 +478,71 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
     )
     .first();
 
+  let note;
+  if (submission === null) {
+    note =
+      "Nothing was decided: that submission has already been reviewed, or" +
+      " its file has not arrived yet.";
+  } else if (decision === "rejected") {
+    note = `${submission.name} rejected.`;
+  } else {
+    note = (await startPublication(c, submission))
+      ? `${submission.name} approved, and is being published.`
+      : `${submission.name} approved. It could not be sent to be published` +
+        " automatically, so its page has the commands to publish it by hand.";
+  }
+
   return page(
     c,
-    <Review
-      {...(await reviewState(c))}
-      viewer={c.get("viewer").user}
-      note={
-        submission === null
-          ? "Nothing was decided. Either that submission has already been" +
-            " reviewed, its file has not arrived, or it has not been" +
-            " published yet: run syndex-upload before approving."
-          : `${submission.name} marked ${decision}.`
-      }
-    />,
+    <Review {...(await reviewState(c))} viewer={c.get("viewer").user} note={note} />,
     { cache: "no-store" },
   );
+});
+
+/**
+ * Ask a runner to publish an approved submission, and record that it is on
+ * its way.
+ *
+ * Awaited rather than left to run after the response: the page rendered next
+ * says whether it is being published, and should be right.
+ *
+ * @param {import("hono").Context} c Request context.
+ * @param {object} submission The approved submission row.
+ * @returns {Promise<boolean>} Whether a run was asked for.
+ */
+async function startPublication(c, submission) {
+  const asked = await requestPublication(
+    c.env,
+    new URL(c.req.url).origin,
+    submission,
+  );
+  if (asked) {
+    await c.env.DB.prepare(
+      `UPDATE submissions
+       SET publication_state = 'running', publication_report_json = NULL
+       WHERE submission_id = ?`,
+    )
+      .bind(submission.submission_id)
+      .run();
+  }
+  return asked;
+}
+
+// Again, after a run that failed or one that was never asked for. Only for
+// an approved submission that is not published or on its way: two runs at
+// once would race to register the same release.
+routes.post("/review/:id{[0-9]+}/publish", async (c) => {
+  const id = Number(c.req.param("id"));
+  const submission = await c.env.DB.prepare(
+    `SELECT * FROM submissions
+     WHERE submission_id = ? AND state = 'approved'
+       AND (publication_state IS NULL OR publication_state = 'failed')`,
+  )
+    .bind(id)
+    .first();
+
+  if (submission !== null) {
+    await startPublication(c, submission);
+  }
+  return c.redirect(`${BASE}/review/${id}`, 303);
 });

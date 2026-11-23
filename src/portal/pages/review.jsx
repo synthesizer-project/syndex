@@ -14,6 +14,11 @@
  */
 
 import { BASE } from "../base.js";
+import {
+  STALE_AFTER_MS,
+  publishMetadata,
+  publishable,
+} from "../data/publication.js";
 import { date, size } from "../views/format.jsx";
 import { Command, Layout } from "../views/layout.jsx";
 import {
@@ -146,6 +151,251 @@ const ReviewStep = ({ id, number, title, hint, children }) => (
     <div class="mt-3 hidden peer-checked:block">{children}</div>
   </li>
 );
+
+/**
+ * The commands that publish a submission, carrying what its contributor wrote.
+ *
+ * A bare `syndex-upload NAME` publishes the file with its filename as the
+ * display name, no description, no citations, and no current release -- which
+ * is how two approved grids once reached nobody. Everything the contributor
+ * filled in goes in a metadata file instead, written by a quoted heredoc so
+ * that nothing in their prose is read by the shell.
+ *
+ * @param {object} submission The submission row.
+ * @returns {string} The shell commands, a dry run before the real one.
+ */
+export function publishCommands(submission) {
+  const entry = publishMetadata(submission);
+  const type =
+    submission.data_type === "other" ? "CHOOSE-A-TYPE" : submission.data_type;
+  const metadata = `${submission.name}.json`;
+  const upload = `syndex-upload ${submission.name} --metadata ${metadata} --data-type ${type}`;
+  const json = JSON.stringify({ files: { [submission.name]: entry } }, null, 2);
+
+  return [
+    `cat > ${metadata} <<'SYNDEX_EOF'`,
+    json,
+    "SYNDEX_EOF",
+    `${upload} --dry-run`,
+    upload,
+    `syndex-previews --only ${submission.name} --apply`,
+  ].join("\n");
+}
+
+/**
+ * The stages a submission passes through, in order.
+ *
+ * One list read twice: as the flow chart across the top of the queue, and as
+ * the sections of the page each box links to, so the two cannot disagree.
+ */
+export const STAGES = [
+  {
+    id: "submitted",
+    title: "Submitted",
+    who: "Contributor",
+    summary: "Metadata and file sent",
+    body: [
+      "Somebody with the contributor role fills in the form at /syndex/submit, or runs syndex-submit from a machine that already has the file. The file arrives in 90 MiB pieces in the submissions bucket.",
+      "A submission only reaches this queue once its file has arrived. One registered and abandoned stays on the contributor's own page, marked as having sent nothing.",
+    ],
+  },
+  {
+    id: "validated",
+    title: "Validated",
+    who: "Automatic",
+    summary: "syndex-check runs on GitHub Actions",
+    body: [
+      "Completing an upload starts a GitHub Actions run that fetches the file, runs syndex-check, hashes it, and posts the verdict back. The badge on each card is that verdict: passed, failed, or ambiguous (nothing identified, so the type is the reviewer's call).",
+      "It also says whether the catalogue or the queue already holds exactly these bytes. A failed or missing verdict blocks nothing: read the report, or run the checker yourself in the next stage.",
+    ],
+  },
+  {
+    id: "checked",
+    title: "Checked",
+    who: "Reviewer",
+    summary: "Fetch the file and read it",
+    body: [
+      "Download the file from the submissions bucket with the command on the submission's page, and run syndex-check on it. Look at the type, the axes, and whether the name, description and citations describe what is actually there.",
+      "Questions go to the contributor by email; their address is on the submission. If it is wrong in a way they cannot fix, reject it now with a note saying why.",
+    ],
+  },
+  {
+    id: "decided",
+    title: "Approved",
+    who: "Reviewer",
+    summary: "Approve, or reject with a note",
+    body: [
+      "Approve on the submission's page once you are satisfied. Approving publishes it: the next stage starts at once, with nothing more for you to run.",
+      "Rejecting can be done at any stage, with a note the contributor reads on their submission page. Neither decision is undone from here; a published mistake is a deprecation and a new release.",
+    ],
+  },
+  {
+    id: "published",
+    title: "Published",
+    who: "Automatic",
+    summary: "syndex-upload runs on GitHub Actions",
+    body: [
+      "Approval starts a GitHub Actions run that fetches the file, publishes it with syndex-upload using what the contributor wrote (display name, description, citations), makes it the dataset's current release, and renders its preview plot. The submission's page says whether it is running, done, or failed.",
+      "A failed run, or one that could not be started, leaves a Try again button and the commands to publish it by hand. Runners have 14 GB of disk, so the largest grids are published by hand from a machine that already has them.",
+    ],
+  },
+];
+
+/**
+ * The stages as a row of linked boxes, wrapping to a column on a phone.
+ *
+ * @returns {unknown} The rendered flow chart.
+ */
+const ReviewFlow = () => (
+  <nav aria-label="How a submission is reviewed" class="mb-10">
+    <ol class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+      {STAGES.map((stage, index) => (
+        <li class="flex flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <a
+            href={`${BASE}/review/process#${stage.id}`}
+            class="card card-link block flex-1 p-3 text-text no-underline"
+          >
+            <span class="label-caps block">
+              {index + 1} · {stage.who}
+            </span>
+            <span class="block">{stage.title}</span>
+            <span class="block text-xs text-muted">{stage.summary}</span>
+          </a>
+          {index < STAGES.length - 1 && (
+            <span aria-hidden="true" class="text-center text-muted">
+              <span class="sm:hidden">↓</span>
+              <span class="hidden sm:inline">→</span>
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  </nav>
+);
+
+/**
+ * What each stage of a review involves, one section per box of the chart.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered page.
+ */
+export const ReviewProcess = ({ counts }) => (
+  <Layout title="How review works" counts={counts} active={null}>
+    <p class="mb-4 text-sm">
+      <a href={`${BASE}/review`}>Back to the queue</a>
+    </p>
+    <h1 class="mb-8 text-3xl sm:text-4xl">How review works</h1>
+    <ReviewFlow />
+    {STAGES.map((stage, index) => (
+      <section id={stage.id} class="card mb-5 scroll-mt-6 p-6">
+        <h2 class="mb-1 text-xl">
+          {index + 1}. {stage.title}
+        </h2>
+        <p class="label-caps mb-4">{stage.who}</p>
+        {stage.body.map((paragraph) => (
+          <p class="mb-3 max-w-prose last:mb-0">{paragraph}</p>
+        ))}
+      </section>
+    ))}
+  </Layout>
+);
+
+/**
+ * Where an approved submission's publication has got to.
+ *
+ * Approving asks a GitHub Actions run to publish the file; this is what that
+ * run reported. When there is no run to wait for -- it failed, or one could
+ * not be asked for -- the commands to do it by hand are here, and so is the
+ * button to ask again.
+ *
+ * @param {object} props Component props.
+ * @param {object} props.submission The approved submission row.
+ * @param {string} props.bucket The submissions bucket's name.
+ * @returns {unknown} The rendered panel.
+ */
+const Publication = ({ submission, bucket }) => {
+  const state = submission.publication_state ?? null;
+  let report = null;
+  try {
+    report = JSON.parse(submission.publication_report_json ?? "null");
+  } catch {
+    report = null;
+  }
+  const errors = Array.isArray(report?.errors) ? report.errors : [];
+  // A run that has had longer than the workflow may take and never reported:
+  // killed, or its report lost. Publishing upserts, so asking again is safe.
+  const stale =
+    state === "running" &&
+    Date.now() - Date.parse(submission.publication_started_at ?? "") > STALE_AFTER_MS;
+  const retryable = state === null || state === "failed" || stale;
+
+  return (
+    <div class="mt-5 border-t border-line pt-4 text-sm">
+      <span class="label-caps mb-2 block">Publication</span>
+      {state === "published" && (
+        <p>
+          Published {date(submission.published_at)}:{" "}
+          <a href={`${BASE}/datasets/${encodeURIComponent(submission.name)}`}>
+            {submission.name}
+          </a>
+        </p>
+      )}
+      {state === "running" && !stale && (
+        <p>Being published by a GitHub Actions run. This page updates when it reports back.</p>
+      )}
+      {stale && (
+        <p class="text-accent-light">
+          The publication run never reported back. It may have published and
+          lost its report; asking again is safe either way.
+        </p>
+      )}
+      {state === "failed" && (
+        <>
+          <p class="text-accent-light">The publication run failed.</p>
+          {errors.length > 0 && (
+            <ul class="mt-2 list-disc pl-5">
+              {errors.map((error) => (
+                <li>{String(error)}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {state === null && (
+        <p>
+          {publishable(submission)
+            ? "Not sent to be published: a run could not be asked for."
+            : "Not sent to be published: submitted as other, so the type is yours to choose."}
+        </p>
+      )}
+      {retryable && (
+        <>
+          {publishable(submission) && (
+            <form
+              method="post"
+              action={`${BASE}/review/${submission.submission_id}/publish`}
+              class="mt-3"
+            >
+              <button type="submit" class="btn">
+                {state === null ? "Publish" : "Try again"}
+              </button>
+            </form>
+          )}
+          <details class="mt-3">
+            <summary class="cursor-pointer text-muted">Publish it by hand</summary>
+            <p class="my-2 text-xs text-muted">
+              Read the dry run before the real one.
+            </p>
+            <Command>
+              {`npx wrangler r2 object get ${bucket}/${submission.r2_key} --file ${submission.name} --remote\n`}
+              {publishCommands(submission)}
+            </Command>
+          </details>
+        </>
+      )}
+    </div>
+  );
+};
 
 /**
  * One waiting submission, summarised to what decides whether to open it.
@@ -293,39 +543,13 @@ const Submission = ({ submission, bucket }) => {
             title="Check it yourself"
             hint={
               "Review the file format, structure, and metadata, and " +
-              "optionally rerun the validation for yourself."
+              "optionally rerun the validation for yourself. Approving " +
+              "below publishes it."
             }
           >
             <Command>syndex-check {submission.name}</Command>
           </ReviewStep>
 
-          <ReviewStep
-            id={`publish-${submission.submission_id}`}
-            number={3}
-            title={
-              submission.release_of_name
-                ? "Publish it as a new release"
-                : "Publish it"
-            }
-            hint={
-              submission.release_of_name
-                ? "Publish it as a new release of that dataset and approve below if all looks well."
-                : "Publish it to the database and approve below if all looks well."
-            }
-          >
-            <Command>
-              syndex-upload {submission.name} --data-type{" "}
-              {submission.data_type === "other"
-                ? "CHOOSE-A-TYPE"
-                : submission.data_type}
-            </Command>
-            {submission.data_type === "other" && (
-              <p class="mt-2 text-xs text-muted">
-                Submitted as <strong>other</strong>, so the type is yours to
-                choose. It may be one the catalogue does not have yet.
-              </p>
-            )}
-          </ReviewStep>
         </ol>
       )}
 
@@ -349,7 +573,7 @@ const Submission = ({ submission, bucket }) => {
             type="submit"
             name="decision"
             value="approved"
-            data-confirm={`Approve ${submission.name}? The contributor is told, and the decision is not undone from here.`}
+            data-confirm={`Approve ${submission.name}? It is published to the catalogue at once, the contributor is told, and neither is undone from here.`}
             class="btn"
           >
             Approve
@@ -364,6 +588,10 @@ const Submission = ({ submission, bucket }) => {
             Reject
           </button>
         </form>
+      )}
+
+      {submission.state === "approved" && (
+        <Publication submission={submission} bucket={bucket} />
       )}
     </section>
   );
@@ -400,6 +628,7 @@ export const Review = ({
   return (
     <Layout title="Review queue" counts={counts} active={null}>
       <h1 class="mb-8 text-3xl sm:text-4xl">Review queue</h1>
+      <ReviewFlow />
 
       {note !== null && (
         <p role="status" class="mb-8 rounded border border-accent-light p-3 text-sm">

@@ -263,9 +263,31 @@ request body into R2 without it passing through any JavaScript — waiting on
 I/O is not CPU time. Worth measuring rather than assuming: push a file through
 and read the CPU time off `wrangler tail`.
 
-Approving records a decision; it publishes nothing. Publication stays with
-`syndex-upload`, which opens the HDF5, verifies the digest, and registers R2
-and D1 together.
+Approving publishes. The approval fires a `publish-submission`
+`repository_dispatch`, and `.github/workflows/publish-submission.yml` fetches
+the file through a signed link, runs `syndex-upload` with a metadata file built
+from what the contributor wrote (display name, description, citations, licence,
+`set_current`), reports back to `/syndex/publish/:id`, and renders the preview.
+The submission records `publication_state` (`running`, `published`, `failed`)
+separately from `state`: approval is a person's decision and is never undone,
+publishing is a machine's attempt and can fail and be retried from the
+submission's page, which also gives the commands to do it by hand. Each run is
+claimed with one conditional write and given an attempt id that its report
+must echo, so two clicks cannot start two runs and a report from a replaced run
+changes nothing. A run that never reports back can be asked for again after
+two and a half hours, longer than the workflow's limit; republishing upserts,
+so repeating one that did publish is harmless.
+
+It used to be the other way round. Approval recorded a decision and publishing
+was left to a separate manual run, and two approved grids sat outside the
+catalogue for a week because nothing noticed it had not happened.
+
+The workflow needs `SYNTHESIZER_R2_ACCESS_KEY_ID`,
+`SYNTHESIZER_R2_SECRET_ACCESS_KEY` and `SYNTHESIZER_D1_API_TOKEN` as Actions
+secrets, beside `SYNDEX_REPORT_SECRET`. Runner disk is 14 GB, so a grid larger
+than that fails to fetch and is published by hand. A submission typed `other`
+is never sent: somebody has to choose its type. `/syndex/review/process`
+explains each stage, and the queue opens with a flow chart linking to it.
 
 ## Validation
 

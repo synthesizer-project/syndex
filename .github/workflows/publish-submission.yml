@@ -1,0 +1,143 @@
+# Publish an approved submission, and tell the portal how it went.
+#
+# Approving used to record a decision and leave publishing to whoever
+# approved, as a separate run of `syndex-upload`; nothing noticed when it
+# never happened. The portal now fires a repository_dispatch on approval, the
+# same way an upload asks for validation, and this does the publishing: fetch
+# the file through the signed link it was handed, publish it with the metadata
+# the contributor wrote, render its preview, and report back.
+#
+# Unlike validation, this writes to the catalogue, so it needs the R2 and D1
+# credentials as secrets: SYNTHESIZER_R2_ACCESS_KEY_ID,
+# SYNTHESIZER_R2_SECRET_ACCESS_KEY and SYNTHESIZER_D1_API_TOKEN, plus
+# SYNDEX_REPORT_SECRET to report with. The portal hands it nothing but a link
+# to one object and the metadata to publish it with.
+name: Publish a submission
+
+on:
+  repository_dispatch:
+    types: [publish-submission]
+
+# One at a time per submission, and never cancelled: two runs at once would
+# race to register the same release, and a run killed half way leaves R2
+# written and D1 not, which rerunning repairs but cancelling does not.
+concurrency:
+  group: publish-${{ github.event.client_payload.submission_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # From the checkout, so a submission is published by the code on main.
+      - name: Install the publisher
+        run: pip install .
+
+      # Everything from the payload is read from the event file rather than
+      # interpolated into the script, and checked before it is used: the name
+      # and type end up as command arguments, and the metadata is a
+      # contributor's prose.
+      - name: Read the request
+        run: |
+          name=$(jq -r .client_payload.name "$GITHUB_EVENT_PATH")
+          data_type=$(jq -r .client_payload.data_type "$GITHUB_EVENT_PATH")
+          if ! [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "Refusing a dataset name the portal would not have accepted" >&2
+            exit 1
+          fi
+          if ! [[ "$data_type" =~ ^[a-z_]+$ ]]; then
+            echo "Refusing a data type the catalogue would not have" >&2
+            exit 1
+          fi
+          jq .client_payload.metadata "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/metadata.json"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+          echo "DATA_TYPE=$data_type" >> "$GITHUB_ENV"
+          # Outside the checkout, so no dataset name can land on a file of
+          # the repository's.
+          echo "SOURCE=$RUNNER_TEMP/$name" >> "$GITHUB_ENV"
+
+      # The link is a credential and the logs are public: masked before curl
+      # can name it in an error. Saved under the dataset name, which is what
+      # syndex-upload calls the file in R2 and keys the metadata on, in the
+      # runner's temporary directory rather than the checkout.
+      - name: Fetch the submitted file
+        run: |
+          fetch_url=$(jq -r .client_payload.fetch_url "$GITHUB_EVENT_PATH")
+          echo "::add-mask::$fetch_url"
+          curl --fail --silent --show-error --location \
+            --max-time 4800 --output "$SOURCE" "$fetch_url"
+          ls -l "$SOURCE"
+
+      # The dry run first, so the log shows exactly what was about to be
+      # registered before anything was.
+      - name: Publish it
+        id: publish
+        env:
+          SYNTHESIZER_R2_ACCESS_KEY_ID: ${{ secrets.SYNTHESIZER_R2_ACCESS_KEY_ID }}
+          SYNTHESIZER_R2_SECRET_ACCESS_KEY: ${{ secrets.SYNTHESIZER_R2_SECRET_ACCESS_KEY }}
+          SYNTHESIZER_D1_API_TOKEN: ${{ secrets.SYNTHESIZER_D1_API_TOKEN }}
+        run: |
+          syndex-upload "$SOURCE" --metadata "$RUNNER_TEMP/metadata.json" --data-type "$DATA_TYPE" --dry-run
+          syndex-upload "$SOURCE" --metadata "$RUNNER_TEMP/metadata.json" --data-type "$DATA_TYPE"
+
+      # Retried hard, because losing this report is the one failure that
+      # leaves the catalogue and the portal disagreeing. If it is lost anyway,
+      # the portal offers to publish again once the run has had longer than
+      # its time limit, and republishing upserts onto what is already there.
+      # The attempt is echoed back so the portal only listens to the run it
+      # is waiting for.
+      - name: Report back
+        env:
+          REPORT_URL: ${{ github.event.client_payload.report_url }}
+          SECRET: ${{ secrets.SYNDEX_REPORT_SECRET }}
+        run: |
+          jq -n --arg attempt "$(jq -r .client_payload.attempt "$GITHUB_EVENT_PATH")" \
+            '{state: "published", attempt: $attempt}' > published.json
+          curl --fail --silent --show-error --retry 8 --retry-all-errors \
+            --request POST "$REPORT_URL" \
+            --header "authorization: Bearer $SECRET" \
+            --header "content-type: application/json" \
+            --data @published.json
+
+      # Whenever publishing worked, even if reporting did not, and allowed to
+      # fail: the dataset is in the catalogue either way, and a missing plot
+      # is put right by rerunning syndex-previews, not by calling the
+      # publication a failure.
+      - name: Render its preview
+        if: always() && steps.publish.outcome == 'success'
+        continue-on-error: true
+        env:
+          SYNTHESIZER_R2_ACCESS_KEY_ID: ${{ secrets.SYNTHESIZER_R2_ACCESS_KEY_ID }}
+          SYNTHESIZER_R2_SECRET_ACCESS_KEY: ${{ secrets.SYNTHESIZER_R2_SECRET_ACCESS_KEY }}
+          SYNTHESIZER_D1_API_TOKEN: ${{ secrets.SYNTHESIZER_D1_API_TOKEN }}
+        run: |
+          rm -f "$SOURCE"
+          syndex-previews --only "$NAME" --apply
+
+      # Only when publishing itself failed. Anything before "Report back" --
+      # a fetch that ran out of disk, a refusal from syndex-upload -- lands
+      # here, and the submission's page offers to try again.
+      - name: Say so if it could not be published
+        if: (failure() || cancelled()) && steps.publish.outcome != 'success'
+        env:
+          REPORT_URL: ${{ github.event.client_payload.report_url }}
+          SECRET: ${{ secrets.SYNDEX_REPORT_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          jq -n --arg run "$RUN_URL" \
+            --arg attempt "$(jq -r .client_payload.attempt "$GITHUB_EVENT_PATH")" \
+            '{state: "failed", attempt: $attempt, errors: ["The publication run failed; its log is at \($run)."]}' \
+            > failed.json
+          curl --fail --silent --show-error --retry 3 \
+            --request POST "$REPORT_URL" \
+            --header "authorization: Bearer $SECRET" \
+            --header "content-type: application/json" \
+            --data @failed.json

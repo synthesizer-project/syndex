@@ -148,6 +148,163 @@ const ReviewStep = ({ id, number, title, hint, children }) => (
 );
 
 /**
+ * The commands that publish a submission, carrying what its contributor wrote.
+ *
+ * A bare `syndex-upload NAME` publishes the file with its filename as the
+ * display name, no description, no citations, and no current release -- which
+ * is how two approved grids once reached nobody. Everything the contributor
+ * filled in goes in a metadata file instead, written by a quoted heredoc so
+ * that nothing in their prose is read by the shell.
+ *
+ * @param {object} submission The submission row.
+ * @returns {string} The shell commands, a dry run before the real one.
+ */
+export function publishCommands(submission) {
+  const entry = {
+    name: submission.name,
+    display_name: submission.display_name,
+    set_current: true,
+  };
+  if (submission.description) entry.description = submission.description;
+  if (submission.licence) entry.licence = submission.licence;
+  const citations = (submission.citations ?? "").split(/\s+/).filter(Boolean);
+  if (citations.length > 0) entry.citations = citations;
+
+  const type =
+    submission.data_type === "other" ? "CHOOSE-A-TYPE" : submission.data_type;
+  const metadata = `${submission.name}.json`;
+  const upload = `syndex-upload ${submission.name} --metadata ${metadata} --data-type ${type}`;
+  const json = JSON.stringify({ files: { [submission.name]: entry } }, null, 2);
+
+  return [
+    `cat > ${metadata} <<'SYNDEX_EOF'`,
+    json,
+    "SYNDEX_EOF",
+    `${upload} --dry-run`,
+    upload,
+    `syndex-previews --only ${submission.name} --apply`,
+  ].join("\n");
+}
+
+/**
+ * The stages a submission passes through, in order.
+ *
+ * One list read twice: as the flow chart across the top of the queue, and as
+ * the sections of the page each box links to, so the two cannot disagree.
+ */
+export const STAGES = [
+  {
+    id: "submitted",
+    title: "Submitted",
+    who: "Contributor",
+    summary: "Metadata and file sent",
+    body: [
+      "Somebody with the contributor role fills in the form at /syndex/submit, or runs syndex-submit from a machine that already has the file. The file arrives in 90 MiB pieces in the submissions bucket.",
+      "A submission only reaches this queue once its file has arrived. One registered and abandoned stays on the contributor's own page, marked as having sent nothing.",
+    ],
+  },
+  {
+    id: "validated",
+    title: "Validated",
+    who: "Automatic",
+    summary: "syndex-check runs on GitHub Actions",
+    body: [
+      "Completing an upload starts a GitHub Actions run that fetches the file, runs syndex-check, hashes it, and posts the verdict back. The badge on each card is that verdict: passed, failed, or ambiguous (nothing identified, so the type is the reviewer's call).",
+      "It also says whether the catalogue or the queue already holds exactly these bytes. A failed or missing verdict blocks nothing: read the report, or run the checker yourself in the next stage.",
+    ],
+  },
+  {
+    id: "checked",
+    title: "Checked",
+    who: "Reviewer",
+    summary: "Fetch the file and read it",
+    body: [
+      "Download the file from the submissions bucket with the command on the submission's page, and run syndex-check on it. Look at the type, the axes, and whether the name, description and citations describe what is actually there.",
+      "Questions go to the contributor by email; their address is on the submission. If it is wrong in a way they cannot fix, reject it now with a note saying why.",
+    ],
+  },
+  {
+    id: "published",
+    title: "Published",
+    who: "Reviewer",
+    summary: "syndex-upload, then previews",
+    body: [
+      "This is the step that puts it in the catalogue, and nothing else does. The submission page gives the commands: a metadata file carrying what the contributor wrote, a dry run, the upload, and the preview plot.",
+      "Read the dry run before the real one. Publishing writes immutable objects to R2 and registers the release in D1, and it cannot be taken back from the portal; a mistake afterwards is a deprecation and a new release.",
+    ],
+  },
+  {
+    id: "decided",
+    title: "Approved",
+    who: "Reviewer",
+    summary: "Record the decision",
+    body: [
+      "Approve on the submission's page. The portal refuses an approval until a release of that name has been published since the submission arrived, so approved always means it is in the catalogue.",
+      "Rejecting needs no publication and can be done at any stage, with a note the contributor reads on their submission page. Neither decision is undone from here.",
+    ],
+  },
+];
+
+/**
+ * The stages as a row of linked boxes, wrapping to a column on a phone.
+ *
+ * @returns {unknown} The rendered flow chart.
+ */
+const ReviewFlow = () => (
+  <nav aria-label="How a submission is reviewed" class="mb-10">
+    <ol class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+      {STAGES.map((stage, index) => (
+        <li class="flex flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <a
+            href={`${BASE}/review/process#${stage.id}`}
+            class="card card-link block flex-1 p-3 text-text no-underline"
+          >
+            <span class="label-caps block">
+              {index + 1} · {stage.who}
+            </span>
+            <span class="block">{stage.title}</span>
+            <span class="block text-xs text-muted">{stage.summary}</span>
+          </a>
+          {index < STAGES.length - 1 && (
+            <span aria-hidden="true" class="text-center text-muted">
+              <span class="sm:hidden">↓</span>
+              <span class="hidden sm:inline">→</span>
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  </nav>
+);
+
+/**
+ * What each stage of a review involves, one section per box of the chart.
+ *
+ * @param {object} props Component props.
+ * @returns {unknown} The rendered page.
+ */
+export const ReviewProcess = ({ counts }) => (
+  <Layout title="How review works" counts={counts} active={null}>
+    <p class="mb-4 text-sm">
+      <a href={`${BASE}/review`}>Back to the queue</a>
+    </p>
+    <h1 class="mb-8 text-3xl sm:text-4xl">How review works</h1>
+    <ReviewFlow />
+    {STAGES.map((stage, index) => (
+      <section id={stage.id} class="card mb-5 scroll-mt-6 p-6">
+        <h2 class="mb-1 text-xl">
+          {index + 1}. {stage.title}
+        </h2>
+        <p class="label-caps mb-4">{stage.who}</p>
+        {stage.body.map((paragraph) => (
+          <p class="mb-3 max-w-prose last:mb-0">{paragraph}</p>
+        ))}
+      </section>
+    ))}
+  </Layout>
+);
+
+/**
  * One waiting submission, summarised to what decides whether to open it.
  *
  * Four facts and a way in. The description, the citations, the digest and the
@@ -314,10 +471,7 @@ const Submission = ({ submission, bucket }) => {
             }
           >
             <Command>
-              syndex-upload {submission.name} --data-type{" "}
-              {submission.data_type === "other"
-                ? "CHOOSE-A-TYPE"
-                : submission.data_type}
+              {publishCommands(submission)}
             </Command>
             {submission.data_type === "other" && (
               <p class="mt-2 text-xs text-muted">
@@ -400,6 +554,7 @@ export const Review = ({
   return (
     <Layout title="Review queue" counts={counts} active={null}>
       <h1 class="mb-8 text-3xl sm:text-4xl">Review queue</h1>
+      <ReviewFlow />
 
       {note !== null && (
         <p role="status" class="mb-8 rounded border border-accent-light p-3 text-sm">

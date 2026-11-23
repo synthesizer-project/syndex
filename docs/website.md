@@ -265,7 +265,11 @@ and read the CPU time off `wrangler tail`.
 
 Approving records a decision; it publishes nothing. Publication stays with
 `syndex-upload`, which opens the HDF5, verifies the digest, and registers R2
-and D1 together.
+and D1 together. The order is enforced: an approval is refused until a release
+of the submission's name has been published since it arrived, so "approved"
+always means "in the catalogue". The submission page gives the publish
+commands with a metadata file built from what the contributor wrote, and
+`/syndex/review/process` explains each stage; the queue links to it.
 
 ## Validation
 

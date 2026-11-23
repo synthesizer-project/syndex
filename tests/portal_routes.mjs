@@ -2294,6 +2294,43 @@ const tests = {
     assert.equal(insert.params.at(-1), null);
   },
 
+  async "the queue opens with the process, each stage linking to its explanation"() {
+    const reviewer = { rows: { viewer: { ...USER, role: "reviewer" } } };
+    const queue = await call("/syndex/review", { DB: stubDb(reviewer) }, SIGNED_IN);
+    for (const id of ["submitted", "validated", "checked", "published", "decided"]) {
+      assert.match(queue.body, new RegExp(`href="/syndex/review/process#${id}"`));
+    }
+
+    const process = await call("/syndex/review/process", { DB: stubDb(reviewer) }, SIGNED_IN);
+    assert.equal(process.status, 200);
+    for (const id of ["submitted", "validated", "checked", "published", "decided"]) {
+      assert.match(process.body, new RegExp(`<section id="${id}"`));
+    }
+    // Behind the same guard as the rest of the queue.
+    const anonymous = await call("/syndex/review/process", { DB: stubDb() });
+    assert.equal(anonymous.status, 401);
+  },
+
+  async "the publish command carries what the contributor wrote"() {
+    const { publishCommands } = await import("../src/portal/pages/review.jsx");
+    const commands = publishCommands({
+      ...SUBMISSION,
+      description: "It's a grid; $(rm -rf /) stays prose.",
+      citations: "2011ApJ...740...13Z\n2026arXiv260727467V",
+    });
+    const json = commands.split("\n").slice(1, commands.split("\n").indexOf("SYNDEX_EOF")).join("\n");
+    const entry = JSON.parse(json).files["example-grid"];
+
+    assert.equal(entry.display_name, "Example grid");
+    assert.equal(entry.description, "It's a grid; $(rm -rf /) stays prose.");
+    assert.deepEqual(entry.citations, ["2011ApJ...740...13Z", "2026arXiv260727467V"]);
+    assert.equal(entry.set_current, true);
+    // Quoted, so the shell expands nothing in the contributor's prose.
+    assert.match(commands, /<<'SYNDEX_EOF'/);
+    assert.match(commands, /--metadata example-grid\.json --data-type grid --dry-run\n/);
+    assert.match(commands, /syndex-previews --only example-grid --apply$/);
+  },
+
   async "the review queue needs a reviewer, not a shared password"() {
     // Nobody signed in: offered the sign-in rather than a 404, since that is
     // the step they are missing.
@@ -2384,7 +2421,8 @@ const tests = {
     assert.match(body, /A Contributor/);
 
     // And nothing that belongs on the submission's own page.
-    assert.doesNotMatch(body, /Approve/);
+    // The flow chart names the stage; the button is what must not be here.
+    assert.doesNotMatch(body, /value="approved"/);
     assert.doesNotMatch(body, /wrangler r2 object get/);
 
     // One card for everything settled. What happens to a submission is the

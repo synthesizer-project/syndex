@@ -20,7 +20,12 @@ import { endSessions } from "../data/auth.js";
 import { tabCounts } from "../data/catalogue.js";
 import { duplicateOf } from "../data/validation.js";
 import { ACCOUNTS_SHOWN, Accounts } from "../pages/people.jsx";
-import { PreviousSubmissions, Review, SubmissionReview } from "../pages/review.jsx";
+import {
+  PreviousSubmissions,
+  Review,
+  ReviewProcess,
+  SubmissionReview,
+} from "../pages/review.jsx";
 import { NotFound } from "../pages/refusals.jsx";
 import { page, requireRole } from "./respond.jsx";
 
@@ -141,6 +146,12 @@ routes.get("/review", async (c) =>
     <Review {...(await reviewState(c))} viewer={c.get("viewer").user} />,
     { cache: "no-store" },
   ),
+);
+
+routes.get("/review/process", async (c) =>
+  page(c, <ReviewProcess counts={await tabCounts(c.env.DB)} />, {
+    cache: "no-store",
+  }),
 );
 
 routes.get("/review/previous", async (c) => {

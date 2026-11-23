@@ -52,20 +52,42 @@ export function publishable(submission) {
 }
 
 /**
+ * How long a run may go without reporting before it can be asked for again.
+ *
+ * Longer than the workflow's two-hour limit, so a run that is still going is
+ * never raced: by now it has reported, or it was killed without being able to.
+ */
+export const STALE_AFTER_MS = 150 * 60 * 1000;
+
+/**
+ * Whether a run can be asked for at all: a type to publish under, and runs
+ * configured.
+ *
+ * @param {object} env Worker bindings and secrets.
+ * @param {object} submission The submission row.
+ * @returns {boolean} Whether to try.
+ */
+export function publicationPossible(env, submission) {
+  return publishable(submission) && validationConfigured(env);
+}
+
+/**
  * Ask a runner to publish an approved submission.
  *
  * @param {object} env Worker bindings and secrets.
  * @param {string} origin Where the portal is served from.
- * @param {object} submission The approved submission row.
+ * @param {object} submission The approved submission row, claimed for an
+ *     attempt.
  * @returns {Promise<boolean>} Whether a run was asked for.
  */
 export async function requestPublication(env, origin, submission) {
   // Configured first: the link cannot be signed without the secret.
-  if (!publishable(submission) || !validationConfigured(env)) {
+  if (!publicationPossible(env, submission)) {
     return false;
   }
   return dispatch(env, "publish-submission", {
     submission_id: submission.submission_id,
+    attempt: submission.publication_attempt,
     name: submission.name,
     data_type: submission.data_type,
     metadata: { files: { [submission.name]: publishMetadata(submission) } },

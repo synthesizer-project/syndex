@@ -2455,10 +2455,13 @@ const tests = {
 
     // Anything but "published" is a failure: never claim it is in the
     // catalogue when it may not be.
-    await post("a-shared-secret", { state: "probably" });
+    await post("a-shared-secret", { state: "probably", attempt: "attempt-1" });
     const update = statement(issued, "SET publication_state = ?");
     assert.equal(update.params[0], "failed");
-    assert.match(update.sql, /state = 'approved'\s+AND publication_state = 'running'/);
+    // Only from the run the submission is waiting on: a report from a run
+    // that was replaced names an attempt that no longer matches.
+    assert.match(update.sql, /publication_state = 'running' AND publication_attempt = \?/);
+    assert.equal(update.params.at(-1), "attempt-1");
   },
 
   async "a failed publication can be tried again, or done by hand"() {
@@ -2484,18 +2487,68 @@ const tests = {
     assert.match(body, /--metadata example-grid\.json --data-type grid --dry-run/);
 
     const issued = [];
-    const env = submissionEnv({ rows: { viewer: reviewer, submissions: [failed] }, issued });
+    const claimed = { ...failed, publication_state: "running", publication_attempt: "attempt-2" };
+    const env = submissionEnv({ rows: { viewer: reviewer, reviewed: [claimed] }, issued });
     Object.assign(env, PUBLISHING);
     const sent = await capturingFetch(() =>
       call("/syndex/review/7/publish", env, signedInPost({})),
     );
     assert.equal(sent.status, 303);
     assert.equal(sent.length, 1);
-    // Never a second run over one in progress or one that finished.
+    assert.equal(sent[0].client_payload.attempt, "attempt-2");
+    // Claimed in one conditional write before anything is dispatched, so two
+    // clicks cannot start two runs; a run only counts as abandoned once it
+    // has had longer than the workflow's limit.
+    const claim = issued.find((one) => one.sql.includes("SET publication_state = 'running'"));
+    assert.match(claim.sql, /RETURNING \*/);
     assert.match(
-      statement(issued, "AND state = 'approved'").sql,
-      /publication_state IS NULL OR publication_state = 'failed'/,
+      claim.sql,
+      /publication_state IS NULL OR publication_state = 'failed'\s+OR \(publication_state = 'running' AND publication_started_at < \?\)/,
     );
+    assert.equal(issued.filter((one) => one.sql.startsWith("SELECT * FROM submissions")).length, 0);
+
+    // A claim whose dispatch fails is released, and only if it is still ours.
+    const releasing = [];
+    const unsent = submissionEnv({ rows: { viewer: reviewer, reviewed: [claimed] }, issued: releasing });
+    Object.assign(unsent, PUBLISHING);
+    const real = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status: 500 });
+    try {
+      await call("/syndex/review/7/publish", unsent, signedInPost({}));
+    } finally {
+      globalThis.fetch = real;
+    }
+    const release = statement(releasing, "SET publication_state = NULL");
+    assert.match(release.sql, /publication_attempt = \?/);
+  },
+
+  async "a run that never reported back can be asked for again"() {
+    const quiet = {
+      ...SUBMISSION,
+      state: "approved",
+      uploaded_at: "2026-09-14T10:00:00Z",
+      r2_key: "k",
+      publication_state: "running",
+      publication_started_at: "2026-09-14T10:00:00Z",
+    };
+    const reviewer = { ...USER, role: "reviewer" };
+    const { body } = await call(
+      "/syndex/review/7",
+      submissionEnv({ rows: { viewer: reviewer, submissions: [quiet] } }),
+      SIGNED_IN,
+    );
+    assert.match(body, /never reported back/);
+    assert.match(body, /Try again/);
+
+    // One still within its time limit is left alone.
+    const recent = { ...quiet, publication_started_at: new Date().toISOString() };
+    const running = await call(
+      "/syndex/review/7",
+      submissionEnv({ rows: { viewer: reviewer, submissions: [recent] } }),
+      SIGNED_IN,
+    );
+    assert.match(running.body, /Being published by a GitHub Actions run/);
+    assert.doesNotMatch(running.body, /Try again/);
   },
 
   async "a published submission links to its dataset"() {

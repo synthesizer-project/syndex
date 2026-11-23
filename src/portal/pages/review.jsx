@@ -14,7 +14,11 @@
  */
 
 import { BASE } from "../base.js";
-import { publishMetadata, publishable } from "../data/publication.js";
+import {
+  STALE_AFTER_MS,
+  publishMetadata,
+  publishable,
+} from "../data/publication.js";
 import { date, size } from "../views/format.jsx";
 import { Command, Layout } from "../views/layout.jsx";
 import {
@@ -318,6 +322,12 @@ const Publication = ({ submission, bucket }) => {
     report = null;
   }
   const errors = Array.isArray(report?.errors) ? report.errors : [];
+  // A run that has had longer than the workflow may take and never reported:
+  // killed, or its report lost. Publishing upserts, so asking again is safe.
+  const stale =
+    state === "running" &&
+    Date.now() - Date.parse(submission.publication_started_at ?? "") > STALE_AFTER_MS;
+  const retryable = state === null || state === "failed" || stale;
 
   return (
     <div class="mt-5 border-t border-line pt-4 text-sm">
@@ -330,8 +340,14 @@ const Publication = ({ submission, bucket }) => {
           </a>
         </p>
       )}
-      {state === "running" && (
+      {state === "running" && !stale && (
         <p>Being published by a GitHub Actions run. This page updates when it reports back.</p>
+      )}
+      {stale && (
+        <p class="text-accent-light">
+          The publication run never reported back. It may have published and
+          lost its report; asking again is safe either way.
+        </p>
       )}
       {state === "failed" && (
         <>
@@ -352,7 +368,7 @@ const Publication = ({ submission, bucket }) => {
             : "Not sent to be published: submitted as other, so the type is yours to choose."}
         </p>
       )}
-      {(state === null || state === "failed") && (
+      {retryable && (
         <>
           {publishable(submission) && (
             <form
@@ -361,7 +377,7 @@ const Publication = ({ submission, bucket }) => {
               class="mt-3"
             >
               <button type="submit" class="btn">
-                {state === "failed" ? "Try again" : "Publish"}
+                {state === null ? "Publish" : "Try again"}
               </button>
             </form>
           )}

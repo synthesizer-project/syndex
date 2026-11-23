@@ -114,9 +114,9 @@ routes.post("/validate/:id{[0-9]+}", async (c) => {
 /**
  * Take a publication run's outcome.
  *
- * Same authentication as a validation report. Only an approved submission
- * that is waiting on a run is updated, so a late or replayed report cannot
- * mark something published that nobody approved.
+ * Same authentication as a validation report. Only the run the submission is
+ * waiting on is listened to: a report must name the attempt it was dispatched
+ * as, so one from a run that has since been replaced changes nothing.
  */
 routes.post("/publish/:id{[0-9]+}", async (c) => {
   if (!reportAuthorised(c.env, c.req.header("authorization")?.slice(7))) {
@@ -134,7 +134,7 @@ routes.post("/publish/:id{[0-9]+}", async (c) => {
      SET publication_state = ?, publication_report_json = ?,
          published_at = CASE WHEN ? = 'published' THEN ? ELSE published_at END
      WHERE submission_id = ? AND state = 'approved'
-       AND publication_state = 'running'
+       AND publication_state = 'running' AND publication_attempt = ?
      RETURNING submission_id`,
   )
     .bind(
@@ -143,6 +143,7 @@ routes.post("/publish/:id{[0-9]+}", async (c) => {
       state,
       new Date().toISOString(),
       Number(c.req.param("id")),
+      String(report.attempt ?? ""),
     )
     .first();
 

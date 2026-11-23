@@ -19,3 +19,11 @@ ALTER TABLE submissions ADD COLUMN publication_state TEXT
            OR publication_state IN ('running', 'published', 'failed'));
 ALTER TABLE submissions ADD COLUMN publication_report_json TEXT;
 ALTER TABLE submissions ADD COLUMN published_at TEXT;
+
+-- Which run the current state belongs to, and when it was asked for. A report
+-- is only taken from the run named here, so one from a run that was replaced
+-- cannot overwrite the state of the run that replaced it; and a run that never
+-- reports back can be asked for again once it has had longer than the
+-- workflow's own time limit.
+ALTER TABLE submissions ADD COLUMN publication_attempt TEXT;
+ALTER TABLE submissions ADD COLUMN publication_started_at TEXT;

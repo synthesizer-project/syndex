@@ -271,7 +271,12 @@ from what the contributor wrote (display name, description, citations, licence,
 The submission records `publication_state` (`running`, `published`, `failed`)
 separately from `state`: approval is a person's decision and is never undone,
 publishing is a machine's attempt and can fail and be retried from the
-submission's page, which also gives the commands to do it by hand.
+submission's page, which also gives the commands to do it by hand. Each run is
+claimed with one conditional write and given an attempt id that its report
+must echo, so two clicks cannot start two runs and a report from a replaced run
+changes nothing. A run that never reports back can be asked for again after
+two and a half hours, longer than the workflow's limit; republishing upserts,
+so repeating one that did publish is harmless.
 
 It used to be the other way round. Approval recorded a decision and publishing
 was left to a separate manual run, and two approved grids sat outside the

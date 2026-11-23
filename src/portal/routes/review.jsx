@@ -8,9 +8,8 @@
  * -- a person waiting for access is as much a thing to attend to as a file
  * waiting to be read, and the review page shows them side by side.
  *
- * Deciding is recorded, not acted on. Approving a submission publishes
- * nothing: that stays a deliberate run of `syndex-upload` by somebody who
- * has the file in front of them.
+ * Approving a submission asks a GitHub Actions run to publish it; see
+ * `data/publication.js`.
  */
 
 import { Hono } from "hono";
@@ -18,7 +17,11 @@ import { Hono } from "hono";
 import { BASE } from "../base.js";
 import { endSessions } from "../data/auth.js";
 import { tabCounts } from "../data/catalogue.js";
-import { requestPublication } from "../data/publication.js";
+import {
+  STALE_AFTER_MS,
+  publicationPossible,
+  requestPublication,
+} from "../data/publication.js";
 import { duplicateOf } from "../data/validation.js";
 import { ACCOUNTS_SHOWN, Accounts } from "../pages/people.jsx";
 import {
@@ -486,7 +489,10 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
   } else if (decision === "rejected") {
     note = `${submission.name} rejected.`;
   } else {
-    note = (await startPublication(c, submission))
+    // Checked before claiming, so an approval nothing can publish leaves the
+    // row alone rather than claiming and releasing it.
+    note = publicationPossible(c.env, submission) &&
+      (await startPublication(c, submission.submission_id))
       ? `${submission.name} approved, and is being published.`
       : `${submission.name} approved. It could not be sent to be published` +
         " automatically, so its page has the commands to publish it by hand.";
@@ -500,49 +506,62 @@ routes.post("/review/:id{[0-9]+}", async (c) => {
 });
 
 /**
- * Ask a runner to publish an approved submission, and record that it is on
- * its way.
+ * Claim an approved submission for one publication run, then ask for it.
+ *
+ * The claim is one conditional UPDATE, so two clicks at once cannot both
+ * dispatch: only the one that moves the row to `running` goes on. A run that
+ * has had longer than the workflow's time limit without reporting can be
+ * claimed again; publishing upserts, so repeating one that did finish is
+ * harmless. If the dispatch then fails, the row is released, but only while
+ * it is still this attempt's.
  *
  * Awaited rather than left to run after the response: the page rendered next
  * says whether it is being published, and should be right.
  *
  * @param {import("hono").Context} c Request context.
- * @param {object} submission The approved submission row.
+ * @param {number} id The submission.
  * @returns {Promise<boolean>} Whether a run was asked for.
  */
-async function startPublication(c, submission) {
-  const asked = await requestPublication(
-    c.env,
-    new URL(c.req.url).origin,
-    submission,
-  );
-  if (asked) {
+async function startPublication(c, id) {
+  const now = Date.now();
+  const attempt = crypto.randomUUID();
+  const claimed = await c.env.DB.prepare(
+    `UPDATE submissions
+     SET publication_state = 'running', publication_report_json = NULL,
+         publication_attempt = ?, publication_started_at = ?
+     WHERE submission_id = ? AND state = 'approved'
+       AND (publication_state IS NULL OR publication_state = 'failed'
+            OR (publication_state = 'running' AND publication_started_at < ?))
+     RETURNING *`,
+  )
+    .bind(
+      attempt,
+      new Date(now).toISOString(),
+      id,
+      new Date(now - STALE_AFTER_MS).toISOString(),
+    )
+    .first();
+  if (claimed === null) {
+    return false;
+  }
+
+  const asked = await requestPublication(c.env, new URL(c.req.url).origin, claimed);
+  if (!asked) {
     await c.env.DB.prepare(
       `UPDATE submissions
-       SET publication_state = 'running', publication_report_json = NULL
-       WHERE submission_id = ?`,
+       SET publication_state = NULL, publication_attempt = NULL
+       WHERE submission_id = ? AND publication_attempt = ?`,
     )
-      .bind(submission.submission_id)
+      .bind(id, attempt)
       .run();
   }
   return asked;
 }
 
-// Again, after a run that failed or one that was never asked for. Only for
-// an approved submission that is not published or on its way: two runs at
-// once would race to register the same release.
+// Again, after a run that failed, one that was never asked for, or one that
+// has gone quiet for longer than it is allowed to run.
 routes.post("/review/:id{[0-9]+}/publish", async (c) => {
   const id = Number(c.req.param("id"));
-  const submission = await c.env.DB.prepare(
-    `SELECT * FROM submissions
-     WHERE submission_id = ? AND state = 'approved'
-       AND (publication_state IS NULL OR publication_state = 'failed')`,
-  )
-    .bind(id)
-    .first();
-
-  if (submission !== null) {
-    await startPublication(c, submission);
-  }
+  await startPublication(c, id);
   return c.redirect(`${BASE}/review/${id}`, 303);
 });

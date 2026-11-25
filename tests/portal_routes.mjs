@@ -2704,7 +2704,7 @@ const tests = {
     assert.match(body, /Check it yourself/);
     // Publishing is not a reviewer step any more: approving starts it.
     assert.doesNotMatch(body, /syndex-upload/);
-    assert.match(body, /Approving below publishes it/);
+    assert.match(body, /Approve and publish/);
     assert.match(body, /id="fetch-7"[^>]*class="peer/);
     // Steps in one list, so the CSS that gates each on the one before it has
     // siblings to walk.

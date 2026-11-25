@@ -15,7 +15,7 @@
  */
 
 import { BASE } from "../base.js";
-import { date } from "../views/format.jsx";
+import { date, range } from "../views/format.jsx";
 import { Fields, Section } from "./shared.jsx";
 
 /**
@@ -202,20 +202,23 @@ export const CheckReport = ({
         says it is -- axes, model, emission type -- and it is most of what a
         reviewer is checking the submission's description against. */}
     {Object.keys(report?.detected ?? {}).length > 0 && (
-      <Section title="What was read out of the file">
+      <Section title="What the file contains">
         <Fields
           entries={Object.entries(report.detected).map(([key, value]) => [
-            key,
+            // The checker's keys are identifiers; a reader wants words.
+            key.replaceAll("_", " "),
             Array.isArray(value)
               ? value
                   .map((item) =>
                     typeof item === "object" && item !== null
-                      ? `${item.name}[${item.count}]`
+                      ? `${item.name.replaceAll("_", " ")} (${item.count})`
                       : String(item),
                   )
                   .join(", ")
               : typeof value === "object" && value !== null
-                ? JSON.stringify(value)
+                ? "minimum" in value && "maximum" in value
+                  ? range({ ...value, name: null, units: value.units ?? null })
+                  : JSON.stringify(value)
                 : value,
           ])}
         />

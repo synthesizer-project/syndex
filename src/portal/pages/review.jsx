@@ -330,8 +330,7 @@ const Publication = ({ submission, bucket }) => {
   const retryable = state === null || state === "failed" || stale;
 
   return (
-    <div class="mt-5 border-t border-line pt-4 text-sm">
-      <span class="label-caps mb-2 block">Publication</span>
+    <div class="text-sm">
       {state === "published" && (
         <p>
           Published {date(submission.published_at)}:{" "}
@@ -398,11 +397,64 @@ const Publication = ({ submission, bucket }) => {
 };
 
 /**
- * One waiting submission, summarised to what decides whether to open it.
+ * Where an approved submission's publication is, in a word and a colour.
  *
- * Four facts and a way in. The description, the citations, the digest and the
- * commands all live on the submission's own page: a queue is for choosing
- * what to look at, and a card carrying everything is not a summary.
+ * @param {object} props Component props.
+ * @param {string | null} props.state The recorded publication state.
+ * @returns {unknown} The rendered badge.
+ */
+const PublicationBadge = ({ state }) => {
+  const looks = {
+    published: ["published", "border border-accent-light text-accent-light"],
+    running: ["publishing…", "border border-line text-muted"],
+    failed: ["failed", "bg-accent-light text-bg"],
+  };
+  const [word, style] = looks[state] ?? ["not started", "border border-line text-muted"];
+  return <span class={`rounded-full px-2.5 py-0.5 text-xs ${style}`}>{word}</span>;
+};
+
+/**
+ * The three things a submission's status is made of, each named.
+ *
+ * Side by side, two unlabelled pills read as one status said twice; "pending"
+ * next to "passed" says nothing about which is the review and which the file.
+ *
+ * @param {object} props Component props.
+ * @param {object} props.submission The submission row.
+ * @param {object | null} props.duplicate Whatever already holds its bytes.
+ * @returns {unknown} The rendered strip.
+ */
+const StatusStrip = ({ submission, duplicate = null }) => (
+  <dl class="flex flex-wrap gap-x-8 gap-y-3">
+    <div>
+      <dt class="label-caps mb-1">Review</dt>
+      <dd><StateBadge state={submission.state} /></dd>
+    </div>
+    <div>
+      <dt class="label-caps mb-1">Validation</dt>
+      <dd>
+        <CheckBadge state={verdictOf(submission, duplicate)} />
+        {submission.validation_state == null && (
+          <span class="text-xs text-muted">not run</span>
+        )}
+      </dd>
+    </div>
+    {submission.state === "approved" && (
+      <div>
+        <dt class="label-caps mb-1">Publication</dt>
+        <dd><PublicationBadge state={submission.publication_state ?? null} /></dd>
+      </div>
+    )}
+  </dl>
+);
+
+/**
+ * One submission, summarised to what decides whether to open it.
+ *
+ * Name, status, and four labelled facts. The description, the citations, the
+ * digest and the commands all live on the submission's own page: a queue is
+ * for choosing what to look at, and a card carrying everything is not a
+ * summary.
  *
  * @param {object} props Component props.
  * @param {object} props.submission The submission row.
@@ -415,24 +467,29 @@ const SubmissionCard = ({ submission }) => {
     <li>
       <a
         href={`${BASE}/review/${submission.submission_id}`}
-        class="card card-link block p-6 text-text no-underline"
+        class="card card-link block h-full p-6 text-text no-underline"
       >
-        <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span class="font-mono text-lg break-all">{submission.name}</span>
-          <StateBadge state={submission.state} />
-          <CheckBadge
-            state={verdictOf(submission, submission.duplicate ? {} : null)}
-          />
-        </div>
+        <span class="block font-mono text-lg break-all">{submission.name}</span>
         <p class="mt-1 text-sm text-muted">{submission.display_name}</p>
 
-        <div class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-          <span>{submission.data_type}</span>
-          <span class={arrived ? "" : "text-accent-light"}>
-            {arrived ? size(submission.uploaded_size_bytes) : "no file yet"}
-          </span>
-          <span class="text-muted">{date(submission.submitted_at)}</span>
-          <span class="text-muted">{submission.submitter_name}</span>
+        <div class="mt-4">
+          <StatusStrip
+            submission={submission}
+            duplicate={submission.duplicate ? {} : null}
+          />
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line pt-4 sm:grid-cols-4">
+          <Fact label="type">{submission.data_type}</Fact>
+          <Fact label="size">
+            {arrived ? (
+              size(submission.uploaded_size_bytes)
+            ) : (
+              <span class="text-accent-light">no file yet</span>
+            )}
+          </Fact>
+          <Fact label="submitted">{date(submission.submitted_at)}</Fact>
+          <Fact label="by">{submission.submitter_name}</Fact>
         </div>
       </a>
     </li>
@@ -440,96 +497,49 @@ const SubmissionCard = ({ submission }) => {
 };
 
 /**
- * One submission, as much of it as is worth reading.
+ * What a reviewer has to do next, and the controls to do it.
  *
- * Ordered by what a reviewer actually decides on: what it claims to be, who
- * sent it, and whether a file of a plausible size arrived. The prose the
- * contributor wrote follows, and only when they wrote any. What is left out
- * matters as much: the R2 key is in the download command already, and
- * repeating it above only makes the things that need reading harder to find.
+ * One card, first on the page and set apart by its border, because it is the
+ * reason the page was opened. What it holds follows the state: the checks and
+ * the decision while pending, the publication once approved, the note once
+ * rejected.
  *
  * @param {object} props Component props.
  * @param {object} props.submission The submission row.
  * @param {string} props.bucket The submissions bucket's name.
- * @returns {unknown} The rendered submission.
+ * @returns {unknown} The rendered card.
  */
-const Submission = ({ submission, bucket }) => {
+const NextStep = ({ submission, bucket }) => {
   const pending = submission.state === "pending";
   const arrived = submission.uploaded_at !== null;
+  const title = pending
+    ? "Decide"
+    : submission.state === "approved"
+      ? "Publication"
+      : "Rejected";
 
   return (
-    <section class="card mb-6 p-6">
-      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 class="font-mono text-lg break-all">{submission.name}</h3>
-        <StateBadge state={submission.state} />
-        <CheckBadge
-          state={verdictOf(submission, submission.duplicate ? {} : null)}
-        />
-        <span class="text-sm text-muted">{submission.display_name}</span>
-      </div>
+    <section class="card mb-6 border-accent-light p-6">
+      <h2 class="mb-4 text-xl">{title}</h2>
 
-      <div class="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Fact label="type">{submission.data_type}</Fact>
-        {submission.release_of_name && (
-          <Fact label="new release of">
-            <span class="font-mono break-all">{submission.release_of_name}</span>
-          </Fact>
-        )}
-        <Fact label="size">
-          {arrived ? (
-            size(submission.uploaded_size_bytes)
-          ) : (
-            <em class="text-muted">no file yet</em>
-          )}
-        </Fact>
-        <Fact label="submitted">{date(submission.submitted_at)}</Fact>
-        <Fact label="by">
-          {submission.submitter_name}
-          {submission.submitter_email ? (
-            <>
-              {" "}
-              <a
-                href={`mailto:${submission.submitter_email}`}
-                class="text-xs break-all"
-              >
-                {submission.submitter_email}
-              </a>
-            </>
-          ) : null}
-        </Fact>
-      </div>
-
-      <div class="mt-5 border-t border-line pt-5">
-        <Fields
-          spaced
-          entries={[
-            ["description", submission.description],
-            ["citations", submission.citations],
-            ["licence", submission.licence],
-            ["notes", submission.notes],
-            ["reviewer note", submission.reviewer_note],
-            [
-              "reviewed",
-              submission.reviewed_at ? date(submission.reviewed_at) : null,
-            ],
-          ]}
-        />
-      </div>
+      {pending && !arrived && (
+        <p class="text-sm text-muted">
+          The file has not arrived yet, so there is nothing to approve. It can
+          still be rejected.
+        </p>
+      )}
 
       {pending && arrived && (
-        // Three steps rather than one list of commands, each acknowledged
-        // before the next opens. syndex-upload publishes a local file -- it
-        // opens the HDF5, verifies the digest and registers R2 and D1 in one
-        // transaction, none of which a Worker can do -- so approving without
-        // having fetched and opened the file is approving something nobody
-        // has looked at. The ticks do not enforce that; they make skipping it
-        // a thing somebody did rather than a thing that happened.
-        <ol class="review-steps mt-5 space-y-3 border-t border-line pt-4">
+        // Each step acknowledged before the next opens. Nothing is enforced
+        // -- a reviewer can approve without fetching the file -- but skipping
+        // a step becomes a thing somebody did rather than a thing that
+        // happened.
+        <ol class="review-steps mb-5 space-y-3">
           <ReviewStep
             id={`fetch-${submission.submission_id}`}
             number={1}
             title="Fetch the file"
-            hint="Download from the submissions bucket."
+            hint="Download it from the submissions bucket."
           >
             <Command>
               npx wrangler r2 object get {bucket}/{submission.r2_key} --file{" "}
@@ -542,14 +552,12 @@ const Submission = ({ submission, bucket }) => {
             number={2}
             title="Check it yourself"
             hint={
-              "Review the file format, structure, and metadata, and " +
-              "optionally rerun the validation for yourself. Approving " +
-              "below publishes it."
+              "Compare what the file contains with what the contributor " +
+              "says, and optionally rerun the validation."
             }
           >
             <Command>syndex-check {submission.name}</Command>
           </ReviewStep>
-
         </ol>
       )}
 
@@ -557,15 +565,15 @@ const Submission = ({ submission, bucket }) => {
         <form
           method="post"
           action={`${BASE}/review/${submission.submission_id}`}
-          class="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4"
+          class="flex flex-wrap items-end gap-3 border-t border-line pt-4"
         >
           <label for={`note-${submission.submission_id}`} class="min-w-48 flex-1">
-            <span class="label-caps mb-1 block">Note</span>
+            <span class="label-caps mb-1 block">Note to the contributor</span>
             <input
               id={`note-${submission.submission_id}`}
               name="reviewer_note"
               maxlength="1000"
-              placeholder="Why, especially if you are rejecting it — this is what the contributor is told."
+              placeholder="Why, especially if you are rejecting it."
               class="w-full rounded-lg border border-muted bg-bg px-3 py-1.5"
             />
           </label>
@@ -576,7 +584,7 @@ const Submission = ({ submission, bucket }) => {
             data-confirm={`Approve ${submission.name}? It is published to the catalogue at once, the contributor is told, and neither is undone from here.`}
             class="btn"
           >
-            Approve
+            Approve and publish
           </button>
           <button
             type="submit"
@@ -593,9 +601,82 @@ const Submission = ({ submission, bucket }) => {
       {submission.state === "approved" && (
         <Publication submission={submission} bucket={bucket} />
       )}
+
+      {!pending && (
+        <div class={submission.state === "approved" ? "mt-4 border-t border-line pt-4" : ""}>
+          <Fields
+            entries={[
+              ["decided", submission.reviewed_at ? date(submission.reviewed_at) : null],
+              ["note", submission.reviewer_note],
+            ]}
+          />
+        </div>
+      )}
     </section>
   );
 };
+
+/**
+ * What the contributor says the submission is.
+ *
+ * Kept apart from what the file contains, because comparing the two is most
+ * of a review.
+ *
+ * @param {object} props Component props.
+ * @param {object} props.submission The submission row.
+ * @returns {unknown} The rendered card.
+ */
+const Claim = ({ submission }) => (
+  <Section title="What the contributor says">
+    <Fields
+      spaced
+      entries={[
+        ["type", submission.data_type],
+        [
+          "new release of",
+          submission.release_of_name ? (
+            <span class="font-mono break-all">{submission.release_of_name}</span>
+          ) : null,
+        ],
+        ["description", submission.description],
+        [
+          "citations",
+          submission.citations ? (
+            <ul>
+              {submission.citations
+                .split(/\s+/)
+                .filter(Boolean)
+                .map((bibcode) => (
+                  <li class="font-mono">{bibcode}</li>
+                ))}
+            </ul>
+          ) : null,
+        ],
+        ["licence", submission.licence],
+        ["notes", submission.notes],
+        [
+          "size",
+          submission.uploaded_at !== null ? size(submission.uploaded_size_bytes) : "no file yet",
+        ],
+        ["submitted", date(submission.submitted_at)],
+        [
+          "by",
+          <>
+            {submission.submitter_name}
+            {submission.submitter_email && (
+              <a
+                href={`mailto:${submission.submitter_email}`}
+                class="block text-xs break-all"
+              >
+                {submission.submitter_email}
+              </a>
+            )}
+          </>,
+        ],
+      ]}
+    />
+  </Section>
+);
 
 /**
  * The review queue.
@@ -741,6 +822,9 @@ export const Review = ({
 /**
  * One submission, on a page of its own, with the decision on it.
  *
+ * Status first, then what to do about it, then the two things a reviewer
+ * compares: what the contributor says, and what the file contains.
+ *
  * @param {object} props Component props.
  * @returns {unknown} The rendered page.
  */
@@ -754,29 +838,44 @@ export const SubmissionReview = ({
     <p class="mb-4 text-sm">
       <a href={`${BASE}/review`}>Back to the queue</a>
     </p>
-    <h1 class="mb-8 text-3xl break-all sm:text-4xl">{submission.name}</h1>
-    <Submission submission={submission} bucket={bucket} />
-    <CheckReport submission={submission} duplicate={duplicate} />
+    <h1 class="text-2xl break-all sm:text-3xl">{submission.name}</h1>
+    <p class="mt-1 mb-6 text-muted">{submission.display_name}</p>
+    <div class="mb-8">
+      <StatusStrip submission={submission} duplicate={duplicate} />
+    </div>
+
+    <NextStep submission={submission} bucket={bucket} />
+
+    <div class="grid items-start gap-x-6 lg:grid-cols-2">
+      <Claim submission={submission} />
+      <CheckReport submission={submission} duplicate={duplicate} />
+    </div>
   </Layout>
 );
 
 /**
  * Everything already settled, on a page of its own.
  *
+ * The same cards as the queue, newest decision first: each opens the
+ * submission's own page, where the detail is.
+ *
  * @param {object} props Component props.
  * @returns {unknown} The rendered page.
  */
-export const PreviousSubmissions = ({ counts, submissions, bucket }) => (
+export const PreviousSubmissions = ({ counts, submissions }) => (
   <Layout title="Past submissions" counts={counts} active={null}>
     <p class="mb-4 text-sm">
       <a href={`${BASE}/review`}>Back to the queue</a>
     </p>
     <h1 class="mb-8 text-3xl sm:text-4xl">Past submissions</h1>
-    {submissions.length === 0 && (
+    {submissions.length === 0 ? (
       <p class="text-muted">Nothing has been decided yet.</p>
+    ) : (
+      <ul class="grid gap-6 sm:grid-cols-2">
+        {submissions.map((submission) => (
+          <SubmissionCard submission={submission} />
+        ))}
+      </ul>
     )}
-    {submissions.map((submission) => (
-      <Submission submission={submission} bucket={bucket} />
-    ))}
   </Layout>
 );
